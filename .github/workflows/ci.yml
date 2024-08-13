@@ -1,0 +1,196 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  build_default:
+    name: build with default features
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4.1.1
+      - uses: actions-rs/toolchain@v1.0.7
+        with:
+          toolchain: beta
+          override: true
+      - uses: actions-rs/cargo@v1.0.3
+        with:
+          command: build
+
+  test_beta:
+    name: test on beta
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4.1.1
+      - uses: actions-rs/toolchain@v1.0.7
+        with:
+          toolchain: beta
+          override: true
+      - uses: actions-rs/cargo@v1.0.3
+        with:
+          command: test
+          args: --release --all-features
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4.1.1
+        with:
+          persist-credentials: false
+
+      - uses: actions-rs/toolchain@v1.0.7
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Check workflow permissions
+        id: check_permissions
+        uses: scherermichael-oss/action-has-permission@1.0.6
+        with:
+          required-permission: write
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run clippy action to produce annotations
+        uses: actions-rs/clippy-check@v1.0.7
+        if: ${{ steps.check_permissions.outputs.has-permission }}
+        with:
+          # GitHub displays the clippy job and its results as separate entries
+          name: Clippy (stable) Results
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-features --all-targets -- -D warnings
+
+      - name: Run clippy manually without annotations
+        if: ${{ !steps.check_permissions.outputs.has-permission }}
+        run: cargo clippy --all-features --all-targets -- -D warnings
+
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4.1.1
+        with:
+          persist-credentials: false
+
+      - uses: actions-rs/toolchain@v1.0.7
+        with:
+          toolchain: stable
+          components: rustfmt
+          override: true
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions-rs/cargo@v1.0.3
+        with:
+          command: fmt
+          args: --all -- --check
+
+  docs:
+    name: Check Rust doc
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4.1.1
+        with:
+          persist-credentials: false
+
+      - uses: actions-rs/toolchain@v1.0.7
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - uses: actions-rs/cargo@v1.0.3
+        with:
+          command: doc
+          args: --no-deps --document-private-items --all-features
+
+
+  hax:
+    name: Check Hax high assurance translation compatibility
+    runs-on: "ubuntu-latest"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 🔨 OCaml Setup
+        uses: ocaml/setup-ocaml@v2
+        with:
+          ocaml-compiler: 4.14.1
+
+      - name: ⤵ Get Fstar binaries
+        run: |
+          curl -L https://github.com/FStarLang/FStar/releases/download/v2023.09.03/fstar_2023.09.03_Linux_x86_64.tar.gz \
+            --output Fstar.tar.gz
+          tar --extract --file Fstar.tar.gz
+
+      # - name: ⤵ Clone HACL-star repository
+      #   uses: actions/checkout@v4
+      #   with:
+      #     repository: hacl-star/hacl-star
+      #     path: hacl-star
+
+      - name: ⤵ Clone hax repository
+        uses: actions/checkout@v4
+        with:
+          repository: hacspec/hacspec-v2
+          path: hax
+
+      - name: 🔨 Setup hax
+        working-directory: hax
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes nodejs
+          ./setup.sh
+
+      - name: 🏃 Extract and verify the reference code
+        run: |
+          eval $(opam env)
+          ./hax-driver.py --kyber-reference
+          env FSTAR_HOME=${{ github.workspace }}/fstar \
+              # HACL_HOME=${{ github.workspace }}/hacl-star \
+              HAX_HOME=${{ github.workspace }}/hax \
+              PATH="${PATH}:${{ github.workspace }}/fstar/bin" \
+              ./hax-driver.py --verify-extraction
+
+      # - name: 🏃 Extract the specification
+      #   run: |
+      #     eval $(opam env)
+      #     # Extract the functions in the compress module individually to test
+      #     # the function-extraction code.
+      #     # Extract functions from the remaining modules to test the
+      #     # module-extraction code.
+      #     ./hax-driver.py --crate-path specs/kyber \
+      #       --functions hacspec_kyber::compress::compress \
+      #                   hacspec_kyber::compress::decompress \
+      #                   hacspec_kyber::compress::compress_d \
+      #                   hacspec::kyber::compress::decompress_d \
+      #       --modules ind_cpa \
+      #                 hacspec_kyber \
+      #                 matrix \
+      #                 ntt \
+      #                 parameters \
+      #                 sampling \
+      #                 serialize \
+      #       --exclude-modules libcrux::hacl::sha3 libcrux::digest

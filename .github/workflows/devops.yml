@@ -1,0 +1,21 @@
+name: devops
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+
+  actionlint:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4.1.1
+      - uses: reviewdog/action-actionlint@v1.42.0
+        with:
+          level: warning
+          fail_on_error: false
