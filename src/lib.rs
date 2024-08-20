@@ -21,8 +21,10 @@ mod parameters;
 #[cfg(feature = "test")]
 mod test;
 
-use crate::functions::{G, H, J};
-use crate::parameters::ParameterSet;
+use crate::{
+    functions::{G, H, J},
+    parameters::ParameterSet,
+};
 
 /// Explicit errors generated throughout this specification.
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -59,7 +61,8 @@ where
     }
 }
 
-/// Fujisaki–Okamoto transform implict-rejection randomness value _z_ of 32 random bytes.
+/// Fujisaki–Okamoto transform implict-rejection randomness value _z_ of 32
+/// random bytes.
 struct RejectionRandomness<P: ParameterSet>([u8; 32]);
 
 /// ML-KEM decapsulation key as-per [FIPS 203] section 6.
@@ -72,8 +75,8 @@ pub struct DecapsulationKey<P: ParameterSet> {
     ek: EncapsulationKey<P>,
     /// Hash of the K-PKE encryption key, used in shared secret derivation.
     h_ek: EncapsulationKeyHash<P>,
-    /// Random bytes that are used to derive the rejection value, so that Decaps() doesn't need to
-    /// source randomness.
+    /// Random bytes that are used to derive the rejection value, so that
+    /// Decaps() doesn't need to source randomness.
     z: RejectionRandomness<P>,
 }
 
@@ -90,10 +93,12 @@ where
     }
 }
 
-/// The combined `K-PKE` key generation randomness _d_ and the `ML-KEM.Decaps()` implicit-rejection
-/// randomness _z_ that together deterministicly generate an `ML-KEM` key pair.
+/// The combined `K-PKE` key generation randomness _d_ and the `ML-KEM.Decaps()`
+/// implicit-rejection randomness _z_ that together deterministicly generate an
+/// `ML-KEM` key pair.
 ///
-/// Follows the [encoding conventions] in the known answer tests (KATs) for [ML-KEM].
+/// Follows the [encoding conventions] in the known answer tests (KATs) for
+/// [ML-KEM].
 ///
 /// [ML-KEM]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
 /// [encoding conventions]: https://github.com/cryspen/libcrux/tree/5fc2cbad58f3f3e515490502e82b1c4600d5e6e3/tests/kyber_kats
@@ -103,7 +108,8 @@ impl<P> KeyGenRandomness<P>
 where
     P: ParameterSet,
 {
-    /// Parses out the K-PKE key generation randomness _d_, as defined in Algorithm 12 of [FIPS 203].
+    /// Parses out the K-PKE key generation randomness _d_, as defined in
+    /// Algorithm 12 of [FIPS 203].
     ///
     /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
     pub(crate) fn d(self) -> PKE::KeyGenRandomnessSeed<P>
@@ -115,7 +121,8 @@ where
         PKE::KeyGenRandomnessSeed::<P>::new(d)
     }
 
-    /// Parses out the implicit-rejection randomness _z_, as defined in Algorithm 15 in [FIPS 203].
+    /// Parses out the implicit-rejection randomness _z_, as defined in
+    /// Algorithm 15 in [FIPS 203].
     ///
     /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
     pub(crate) fn z(self) -> RejectionRandomness<P> {
@@ -125,7 +132,8 @@ where
     }
 }
 
-/// An ML-KEM keypair: an encapsulation key and a corresponding decapsulation key.
+/// An ML-KEM keypair: an encapsulation key and a corresponding decapsulation
+/// key.
 ///
 /// See [FIPS 203] section 6.1.
 ///
@@ -141,20 +149,24 @@ impl<P> KeyPair<P>
 where
     P: ParameterSet,
 {
-    /// Generates a new keypair, as specified by Algorithm 15 in section 6.1 of [FIPS 203].
+    /// Generates a new keypair, as specified by Algorithm 15 in section 6.1 of
+    /// [FIPS 203].
     ///
-    /// Sources all randomness for all subroutines upfront, including the implicit-rejection
-    /// randomness _z_ and the `K-PKE` key generation seed randomness. This deviates from the exact
-    /// Algorithm 15 for ML-KEM key generation and the subroutine Algorithm 12 for `K-PKE` key
+    /// Sources all randomness for all subroutines upfront, including the
+    /// implicit-rejection randomness _z_ and the `K-PKE` key generation
+    /// seed randomness. This deviates from the exact Algorithm 15 for
+    /// ML-KEM key generation and the subroutine Algorithm 12 for `K-PKE` key
     /// generation, which source their own randomness internally.
     ///
-    /// "A fresh string of random bytes must be generated for every such invocation. These random
-    /// bytes shall be generated using an approved RBG, as prescribed in NIST SP 800-90A, NIST SP
-    /// 800-90B, and NIST SP 800-90C. Moreover, the RBG used shall have a security strength of at
-    /// least 128 bits for ML-KEM-512, at least 192 bits for ML-KEM-768, and at least 256 bits for
-    /// ML-KEM-1024." - [FIPS 203], section 3.3
+    /// "A fresh string of random bytes must be generated for every such
+    /// invocation. These random bytes shall be generated using an approved
+    /// RBG, as prescribed in NIST SP 800-90A, NIST SP 800-90B, and NIST SP
+    /// 800-90C. Moreover, the RBG used shall have a security strength of at
+    /// least 128 bits for ML-KEM-512, at least 192 bits for ML-KEM-768, and at
+    /// least 256 bits for ML-KEM-1024." - [FIPS 203], section 3.3
     ///
-    /// We're using an implementation of CTR_DRBG using AES-256 via the `drbg` crate.
+    /// We're using an implementation of CTR_DRBG using AES-256 via the `drbg`
+    /// crate.
     ///
     /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
     pub fn new<R: CryptoRng + RngCore>(csprng: &mut R) -> Result<KeyPair<P>, Error> {
@@ -165,17 +177,19 @@ where
         return Ok(Self::new_derand(KeyGenRandomness(seed)));
     }
 
-    /// Generates a new keypair using provided seed randomness, as specified by Algorithm 15 in
-    /// section 6.1 of [FIPS 203].
+    /// Generates a new keypair using provided seed randomness, as specified by
+    /// Algorithm 15 in section 6.1 of [FIPS 203].
     ///
-    /// The provided seed randomness provides all sources of randomness for all subroutines upfront,
-    /// including the implicit-rejection randomness _z_ and the `K-PKE` key generation seed
-    /// randomness. This deviates from the exact Algorthm 15 for ML-KEM key generation and the
-    /// subroutine Algorithm 12 for `K-PKE` key generation, which source their own randomness
-    /// internally.
+    /// The provided seed randomness provides all sources of randomness for all
+    /// subroutines upfront, including the implicit-rejection randomness _z_
+    /// and the `K-PKE` key generation seed randomness. This deviates from
+    /// the exact Algorthm 15 for ML-KEM key generation and the subroutine
+    /// Algorithm 12 for `K-PKE` key generation, which source their own
+    /// randomness internally.
     ///
     /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
-    // Does this need to be fallible, if randomness is handed in? Are there failure cases when handed bad randomness?
+    // Does this need to be fallible, if randomness is handed in? Are there failure
+    // cases when handed bad randomness?
     pub(crate) fn new_derand(seed: KeyGenRandomness<P>) -> KeyPair<P> {
         // z is 32 random bytes
         let z = seed.z();

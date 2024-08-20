@@ -1,29 +1,28 @@
 //! Polynomial ring arithmetic over finite fields for [FIPS 203].
 //!
-//! Arithmetic in the rings Rq and Tq, whose elements are polynomials defined over ℤq, which are
-//! isomorphic to each other. The number-theoretic transform (NTT) is a computationally efficient
-//! isomorphism between these rings that allows for efficient arithmetic over matrixes and vectors
-//! of ring elements in Rq.
+//! Arithmetic in the rings Rq and Tq, whose elements are polynomials defined
+//! over ℤq, which are isomorphic to each other. The number-theoretic transform
+//! (NTT) is a computationally efficient isomorphism between these rings that
+//! allows for efficient arithmetic over matrixes and vectors of ring elements
+//! in Rq.
 //!
 //! [FIPS-203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
 
 use std::{
-    array::{IntoIter, IntoIterator},
-    ops::{Add, Index, IndexMut, Mul, Sub},
+    iter::IntoIterator,
+    ops::{Add, AddAssign, Index, IndexMut, Mul, Sub},
 };
 
-use crate::{
-    functions::{G, PRF},
-    parameters::{self, ParameterSet},
-};
+use crate::parameters::{self, ParameterSet};
 
 /// ζ, a primitive 256-th root of unity modulo q.
 ///
-/// Used in the representation of polynomials in the number theoretic transform domain Tq and
-/// calculations over those.
+/// Used in the representation of polynomials in the number theoretic transform
+/// domain Tq and calculations over those.
 ///
-/// Since q is the prime 3329 = 28 · 13 +1, and n = 256, there are 128 primitive 256-th roots of
-/// unity and no primitive 512-th roots of unity in Zq: thus ζ^128 ≡ −1.
+/// Since q is the prime 3329 = 28 · 13 +1, and n = 256, there are 128 primitive
+/// 256-th roots of unity and no primitive 512-th roots of unity in Zq: thus
+/// ζ^128 ≡ −1.
 ///
 /// Described in [section 4.3] of FIPS 203.
 ///
@@ -37,11 +36,11 @@ const ZETA: FieldElement = FieldElement(17);
 /// [NTT]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf#algorithm.8
 const NTT_SERIES: [usize; 7] = [128, 64, 32, 16, 8, 4, 2];
 
-/// Returns the integer represented by bit-reversing the unsigned 7-bit value that corresponds to
-/// the input integer i ∈ {0,...,127}.
+/// Returns the integer represented by bit-reversing the unsigned 7-bit value
+/// that corresponds to the input integer i ∈ {0,...,127}.
 ///
-/// Bit reversal of a seven-bit integer r. Specifcally, if r = r0 + 2r1 + 4r2 +···+ 64r6 with ri ∈
-/// {0,1}, then BitRev₇(r) = r6 + 2r5 + 4r4 +···+ 64r0.
+/// Bit reversal of a seven-bit integer r. Specifcally, if r = r0 + 2r1 + 4r2
+/// +···+ 64r6 with ri ∈ {0,1}, then BitRev₇(r) = r6 + 2r5 + 4r4 +···+ 64r0.
 ///
 /// Described in [section 4.3] of FIPS 203.
 ///
@@ -56,6 +55,10 @@ fn bit_rev_7(i: u8) -> u8 {
 
     reversed
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// Field elements
+////////////////////////////////////////////////////////////////////////////////
 
 /// Elements of ℤ mod q, where q = 3329 for all ML-KEM parameter sets.
 // TODO: OPTIMIZE.
@@ -81,10 +84,12 @@ impl FieldElement {
     pub fn pow(&self, exponent: Self) -> Self {
         let mut result = Self::new(1);
 
-        for _ in 0..exponent {
+        for _ in 0..exponent.into() {
             // Relies on the `Mul` impl to ensure the modular reduction.
             result = result * (*self);
         }
+
+        return result;
     }
 }
 
@@ -120,7 +125,7 @@ impl Add for FieldElement {
 
     fn add(self, rhs: Self) -> Self::Output {
         // u32s to handle overflow
-        Self::from(u32::from(self.0) + u32::from(rhs))
+        Self::from(u32::from(self.0) + u32::from(rhs.0))
     }
 }
 
@@ -129,7 +134,7 @@ impl Mul for FieldElement {
 
     fn mul(self, rhs: Self) -> Self::Output {
         // u32s to handle overflow
-        Self::from(u32::from(self.0) * u32::from(rhs))
+        Self::from(u32::from(self.0) * u32::from(rhs.0))
     }
 }
 
@@ -146,19 +151,29 @@ impl Sub for FieldElement {
     }
 }
 
-/// Elements of the polynomial rings Rq and Tq. Polynomial of degree N defined over
+////////////////////////////////////////////////////////////////////////////////
+// Polynomial ring elements (Rq and Tq)
+////////////////////////////////////////////////////////////////////////////////
+
+/// Elements of the polynomial rings Rq and Tq. Polynomial of degree N defined
+/// over
 ///
-/// We are blessed that all of these polynomials have exactly n = 256 coefficients, and are all
-/// defined over Zq, including the Tq ring, the NTT representation target. We can therefore fix the
-/// number n as 256 and the polynomial coefficients as [`FieldElement`]s. We can also share a lot of
-/// operations between polynomials in Rq and in Tq, while preserving the fact that a polynomial NTT
-/// representation is definitely a different type than the original polynomial defined in Rq.
-pub trait PolynomialRingElement {
+/// We are blessed that all of these polynomials have exactly n = 256
+/// coefficients, and are all defined over Zq, including the Tq ring, the NTT
+/// representation target. We can therefore fix the number n as 256 and the
+/// polynomial coefficients as [`FieldElement`]s. We can also share a lot of
+/// operations between polynomials in Rq and in Tq, while preserving the fact
+/// that a polynomial NTT representation is definitely a different type than the
+/// original polynomial defined in Rq.
+pub trait PolynomialRingElement: Copy + Index<usize> {
     /// Default value is a polynomial where all coefficients are zero.
     const ZERO: Self;
 
     /// Constructor for a new polynomial element instance.
     fn new(coefficients: [FieldElement; parameters::N]) -> Self;
+
+    /// Get coefficients of this polynomial.
+    fn coefficients(&self) -> [FieldElement; parameters::N];
 }
 
 impl<P> Add for P
@@ -168,34 +183,13 @@ where
     type Output = Self;
 
     fn add(self, rhs: P) -> Self {
-        let mut result = Self::ZERO;
+        let mut result = [FieldElement::ZERO; parameters::N];
 
-        for i in 0..parameters::N {
-            result[i] = self.0[i] + rhs.0[i];
+        for (i, (l, r)) in self.into_iter().zip(rhs.into_iter()).enumerate() {
+            result[i] = l + r;
         }
 
-        return result;
-    }
-}
-
-impl<P> Index<u8> for P
-where
-    P: PolynomialRingElement,
-{
-    type Output = Self;
-
-    fn index(&self, index: u8) -> &Self::Output {
-        &self.0[index]
-    }
-}
-
-// TODO: do we need this? Mut feels bad
-impl<P> IndexMut<u8> for P
-where
-    P: PolynomialRingElement,
-{
-    fn index_mut(self, index: u8) -> &mut Self::Output {
-        &mut self.0[index]
+        return Self::new(result);
     }
 }
 
@@ -208,7 +202,7 @@ where
     type IntoIter = std::array::IntoIter<FieldElement, 256>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
+        self.coefficients().into_iter()
     }
 }
 
@@ -219,24 +213,28 @@ where
     type Output = Self;
 
     fn sub(self, rhs: P) -> Self {
-        let mut result = Self::ZERO;
+        let mut result = [FieldElement::ZERO; parameters::N];
 
-        for i in 0..parameters::N {
-            result[i] = self.0[i] - rhs.0[i];
+        for (i, (l, r)) in self.into_iter().zip(rhs.into_iter()).enumerate() {
+            result[i] = l - r;
         }
 
-        return result;
+        return Self::new(result);
     }
 }
 
 /// Elements in the polynomial ring Rq over ℤq.
 ///
-/// This is the default domain of values in ML-KEM, as opposed the NTT representation of values
-/// which is in the Tq polynomial ring for some computations.
+/// This is the default domain of values in ML-KEM, as opposed the NTT
+/// representation of values which is in the Tq polynomial ring for some
+/// computations.
+// TODO: is it safe to derive `Eq` and `PartialEq` like so?
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RqElement([FieldElement; parameters::N]);
 
 impl RqElement {
-    /// Transform a polynomial element _f_ in Rq into its NTT representation _f̂_ in Tq.
+    /// Transform a polynomial element _f_ in Rq into its NTT representation _f̂_
+    /// in Tq.
     ///
     /// Implements [Algorithm 8, `NTT(f)`], from [FIPS 203].
     ///
@@ -269,6 +267,14 @@ impl RqElement {
     }
 }
 
+impl Index<usize> for RqElement {
+    type Output = FieldElement;
+
+    fn index(&self, index: usize) -> &FieldElement {
+        &self.0[index]
+    }
+}
+
 impl PolynomialRingElement for RqElement {
     /// Default value is a polynomial where all coefficients are zero.
     const ZERO: Self = Self([FieldElement::ZERO; parameters::N]);
@@ -276,6 +282,11 @@ impl PolynomialRingElement for RqElement {
     /// Constructor for a new polynomial element instance from values.
     fn new(coefficients: [FieldElement; parameters::N]) -> Self {
         Self(coefficients)
+    }
+
+    /// Get the polynomial coefficients.
+    fn coefficients(&self) -> [FieldElement; parameters::N] {
+        self.0
     }
 }
 
@@ -288,35 +299,43 @@ impl PolynomialRingElement for RqElement {
 ///
 /// From section 4.3 of [FIPS 203]:
 ///
-/// "The number-theoretic transform (or NTT) can be viewed as a specialized, exact version of the
-/// discrete Fourier transform. In the case of ML-KEM, the NTT is used to improve the effciency of
-/// multiplication in the ring Rq. Recall that Rq is the ring Zq[X]/(Xn +1) consisting of
-/// polynomials of the form f = f0 + f1X + ··· + f255X^255 where fj ∈ Zq for all j, equipped with
+/// "The number-theoretic transform (or NTT) can be viewed as a specialized,
+/// exact version of the discrete Fourier transform. In the case of ML-KEM, the
+/// NTT is used to improve the effciency of multiplication in the ring Rq.
+/// Recall that Rq is the ring Zq[X]/(Xn +1) consisting of polynomials of the
+/// form f = f0 + f1X + ··· + f255X^255 where fj ∈ Zq for all j, equipped with
 /// arithmetic modulo Xn +1.
 ///
-/// The ring Rq is naturally isomorphic to another ring, denoted Tq, which is a direct sum of 128
-/// quadratic extensions of Zq. The NTT is a computationally effcient isomorphism between these two
-/// rings. On input a polynomial f ∈ Rq, the NTT outputs an element f̂ := NTT(f) of the ring Tq,
-/// where f̂ is called the “NTT representation” of f. The isomorphism property implies that f ×Rq
-/// g = NTT−1(f̂×Tq gˆ), (4.8) where ×Rq and ×Tq denote multiplication in Rq and Tq,
-/// respectively. Moreover, since Tq is a product of 128 rings, each consisting of degree-one
-/// polynomials, the operation ×Tq is much more effcient than the operation ×Rq . For these reasons,
-/// the NTT is considered to be an integral part of ML-KEM and not merely an optimization.
+/// The ring Rq is naturally isomorphic to another ring, denoted Tq, which is a
+/// direct sum of 128 quadratic extensions of Zq. The NTT is a computationally
+/// effcient isomorphism between these two rings. On input a polynomial f ∈ Rq,
+/// the NTT outputs an element f̂ := NTT(f) of the ring Tq, where f̂ is called the
+/// “NTT representation” of f. The isomorphism property implies that f ×Rq
+/// g = NTT−1(f̂×Tq gˆ), (4.8) where ×Rq and ×Tq denote multiplication in Rq and
+/// Tq, respectively. Moreover, since Tq is a product of 128 rings, each
+/// consisting of degree-one polynomials, the operation ×Tq is much more
+/// effcient than the operation ×Rq . For these reasons, the NTT is considered
+/// to be an integral part of ML-KEM and not merely an optimization.
 ///
-/// As the rings Rq and Tq have a vector space structure over Zq, the most natural abstract data
-/// type to represent elements from either of these rings is Zn q. For this reason, the choice of
-/// data structure for the inputs and outputs of NTT and NTT−1 are length-n arrays of integers
-/// modulo q; these arrays are understood to represent elements of Tq or Rq, respectively (see
-/// Section 2.4). Both NTT and NTT−1 can be computed in-place. In fact, Algorithms 8 and 9
-/// demonstrate an effcient means of computing NTT and NTT−1 in-place. However, for clarity in
-/// understanding the distinction of the algebraic objects before and after the conversion, the
-/// algorithms are written with explicit inputs and outputs."
+/// As the rings Rq and Tq have a vector space structure over Zq, the most
+/// natural abstract data type to represent elements from either of these rings
+/// is Zn q. For this reason, the choice of data structure for the inputs and
+/// outputs of NTT and NTT−1 are length-n arrays of integers modulo q; these
+/// arrays are understood to represent elements of Tq or Rq, respectively (see
+/// Section 2.4). Both NTT and NTT−1 can be computed in-place. In fact,
+/// Algorithms 8 and 9 demonstrate an effcient means of computing NTT and NTT−1
+/// in-place. However, for clarity in understanding the distinction of the
+/// algebraic objects before and after the conversion, the algorithms are
+/// written with explicit inputs and outputs."
 ///
 /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
+// TODO: is it safe to derive `Eq` and `PartialEq` like so?
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TqElement([FieldElement; parameters::N]);
 
 impl TqElement {
-    /// Transform a polynomial element f̂ in Tq from its NTT representation into f in Rq.
+    /// Transform a polynomial element f̂ in Tq from its NTT representation into
+    /// f in Rq.
     ///
     /// Implements [Algorithm 9, `NTT⁻¹(f̂)`], from [FIPS 203].
     ///
@@ -357,6 +376,20 @@ impl TqElement {
     }
 }
 
+impl AddAssign for TqElement {
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs
+    }
+}
+
+impl Index<usize> for TqElement {
+    type Output = FieldElement;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
 impl PolynomialRingElement for TqElement {
     /// Default value is a polynomial where all coefficients are zero.
     const ZERO: Self = Self([FieldElement::ZERO; parameters::N]);
@@ -364,6 +397,11 @@ impl PolynomialRingElement for TqElement {
     /// Constructor for a new polynomial element instance from values.
     fn new(coefficients: [FieldElement; parameters::N]) -> Self {
         Self(coefficients)
+    }
+
+    /// Get the polynomial coefficients.
+    fn coefficients(&self) -> [FieldElement; parameters::N] {
+        self.0
     }
 }
 
@@ -376,9 +414,11 @@ impl Mul for TqElement {
     ///
     /// [Algorithm 10]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf#algorithm.10
     fn mul(self, rhs: Self) -> Self::Output {
-        /// Compute the product of two degree-one polynomials with respect to a quadratic modulus.
+        /// Compute the product of two degree-one polynomials with respect to a
+        /// quadratic modulus.
         ///
-        /// Implements [Algorithm 11], `BaseCaseMultiply(a₀, a₁, b₀, b₁, γ)`, from FIPS 203.
+        /// Implements [Algorithm 11], `BaseCaseMultiply(a₀, a₁, b₀, b₁, γ)`,
+        /// from FIPS 203.
         ///
         /// [Algorithm 11]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf#algorithm.11
         fn base_case_multiply(
@@ -396,18 +436,19 @@ impl Mul for TqElement {
 
         let (f_hat, g_hat) = (self, rhs);
 
-        let h_hat = TqElement::ZERO.clone();
+        let mut h_hat = TqElement::ZERO;
 
         for i in 0..128 {
             let two_i = 2 * i;
             let two_i_plus_1 = two_i + 1;
 
-            (h_hat[two_i], h_hat[two_i_plus_1]) = base_case_multiply(
-                f_hat[two_i],
-                f_hat[two_i_plus_1],
-                g_hat[two_i],
-                g_hat[two_i_plus_1],
-                ZETA.pow(2 * bit_rev_7(i) + 1),
+            (h_hat.0[two_i], h_hat.0[two_i_plus_1]) = base_case_multiply(
+                f_hat.0[two_i],
+                f_hat.0[two_i_plus_1],
+                g_hat.0[two_i],
+                g_hat.0[two_i_plus_1],
+                // Casting `i` into `u8` is safe as it will never be larger than a 'u7'.
+                ZETA.pow((2 * bit_rev_7(i as u8) + 1).into()),
             );
         }
 
@@ -415,26 +456,38 @@ impl Mul for TqElement {
     }
 }
 
-/// Common functionality of the vectors of polynomial ring elements.
-pub trait Vector<E: PolynomialRingElement> {
-    /// Default value is a vector where all members are zero.
-    const ZERO: Self;
+////////////////////////////////////////////////////////////////////////////////
+// Vectors of polynomial ring elements
+////////////////////////////////////////////////////////////////////////////////
 
-    /// Length of the vector, set by the parameter set value K.
-    const K: usize;
+// TODO: when associated const generic expressions are stable, pluck `K` from
+// the `ParameterSet` instances.
+//
+// The rank / modular dimension(s) K of the vectors and matrices over Rq and Tq
+// are implemented as const generic parameter statements that must be passed in
+// for every instance.  This is not the worst ever, but it would be really great
+// and cleaner to instaniate by plucking the value of K out of `ParameterSet` at
+// compile time instead of having to define it multiple times.
+//
+// Since we don't need `ParameterSet` directly now, `Vector` and `Matrix` are
+// not defined generically over it.
+
+/// Vector of polynomial ring elements in Rq of length K.
+pub struct RqVector<const K: usize>([RqElement; K]);
+
+impl<const K: usize> RqVector<K> {
+    const ZERO: Self = Self([RqElement::ZERO; K]);
 }
 
-impl<V, P> Add for V
-where
-    V: Vector<P>,
-    P: PolynomialRingElement,
-{
+impl<const K: usize> Add for RqVector<K> {
     type Output = Self;
 
-    fn add(self, rhs: V) -> Self {
+    fn add(self, rhs: Self) -> Self {
         let mut result = Self::ZERO;
 
-        for i in 0..Self::K {
+        for i in 0..K {
+            // Casting `i` as `u8` is safe as `i` will never be larger than `K`, which is at
+            // most 8 for settings such as ML-DSA-87.
             result[i] = self.0[i] + rhs.0[i];
         }
 
@@ -442,62 +495,106 @@ where
     }
 }
 
-/// Vector of polynomial ring elements in Rq of length K.
-pub struct RqVector<P: ParameterSet>([RqElement; P::K]);
+impl<const K: usize> Index<usize> for RqVector<K> {
+    type Output = RqElement;
 
-impl Vector<RqElement> for RqVector<P>
-where
-    P: ParameterSet,
-{
-    const ZERO: Self = Self([RqElement::ZERO; P::K]);
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
 
-    const K: usize = P::K;
+impl<const K: usize> IndexMut<usize> for RqVector<K> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.0[index]
+    }
+}
+
+impl<const K: usize> IntoIterator for RqVector<K> {
+    type Item = RqElement;
+
+    type IntoIter = std::array::IntoIter<Self::Item, K>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
 }
 
 /// Vector of polynomial ring elements in Tq of length K.
-pub struct TqVector<P: ParameterSet>([TqElement; P::K]);
+pub struct TqVector<const K: usize>([TqElement; K]);
 
-impl Vector<TqElement> for TqVector<P>
-where
-    P: ParameterSet,
-{
-    const ZERO: Self = Self([TqElement::ZERO; P::K]);
-
-    const K: usize = P::K;
+impl<const K: usize> TqVector<K> {
+    const ZERO: Self = Self([TqElement::ZERO; K]);
 }
 
-impl<P> Mul for TqVector<P>
-where
-    P: ParameterSet,
-{
-    type Output = TqElement;
+impl<const K: usize> Add for TqVector<K> {
+    type Output = Self;
 
-    /// Computes a dot product; the result is in the base ring Tq and is represented by a polynomial
-    /// ring element.
-    fn mul(self, rhs: Self) -> Self::Output {
-        let mut result = TqElement::ZERO;
+    fn add(self, rhs: Self) -> Self {
+        let mut result = Self::ZERO;
 
-        for j in 0..P::K {
-            // Each of these is an invocation of `MultiplyNTTs()`.
-            result += self[j] * rhs[j];
+        for i in 0..K {
+            result.0[i] = self.0[i] + rhs.0[i];
         }
 
         return result;
     }
 }
 
-impl<P> Mul<TqVector<P>> for TqElement
-where
-    P: ParameterSet,
-{
-    type Output = TqVector<P>;
+impl<const K: usize> Index<usize> for TqVector<K> {
+    type Output = TqElement;
 
-    /// Scalar multiplication of a vector by a polynomial ring element in the NTT domain Tq,
-    /// resulting in a vector.
-    fn mul(self, rhs: TqVector<P>) -> Self::Output {
-        let mut result = TqVector::<P>::ZERO;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
 
-        for i in 0..P::K {
+impl<const K: usize> IndexMut<usize> for TqVector<K> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.0[index]
+    }
+}
+
+impl<const K: usize> IntoIterator for TqVector<K> {
+    type Item = TqElement;
+
+    type IntoIter = std::array::IntoIter<Self::Item, K>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+// Implements vᵀ ∘ vᵀ, the dot product of two vectors over Tq, resulting in a
+// `TqElement`.
+impl<const K: usize> Mul for TqVector<K> {
+    type Output = TqElement;
+
+    /// Computes a dot product; the result is in the base ring Tq and is
+    /// represented by a polynomial ring element.
+    fn mul(self, rhs: Self) -> Self::Output {
+        let mut result = TqElement::ZERO;
+
+        for j in 0..K {
+            // Each of these is an invocation of `MultiplyNTTs()`.
+            result += self.0[j] * rhs.0[j];
+        }
+
+        return result;
+    }
+}
+
+// Implements f̂ ∘ vᵀ, the scalar multiplication of a polynomial ring element by
+// a vector of polynomial ring elements over Tq, resulting in a new vector of
+// `TqElement`s.
+impl<const K: usize> Mul<TqVector<K>> for TqElement {
+    type Output = TqVector<K>;
+
+    /// Scalar multiplication of a vector by a polynomial ring element in the
+    /// NTT domain Tq, resulting in a vector.
+    fn mul(self, rhs: TqVector<K>) -> Self::Output {
+        let mut result = TqVector::ZERO;
+
+        for i in 0..K {
             // Each of these is an invocation of `MultiplyNTTs()`.
             result[i] = self * rhs[i];
         }
@@ -506,13 +603,54 @@ where
     }
 }
 
-/// A k x k matrix of polynomial ring elements in Tq.
-pub struct TqMatrix<P: ParameterSet>([TqElement; P::K]);
+////////////////////////////////////////////////////////////////////////////////
+// Matrices of polynomial ring elements
+////////////////////////////////////////////////////////////////////////////////
 
-impl<P> TqMatrix<P>
-where
-    P: ParameterSet,
-{
+/// A k x k matrix of polynomial ring elements in Tq.
+///
+/// Despite the description in [FIPS 203] that one can view 'vectors as the
+/// special case of matrices with only one column', we are representing matrices
+/// as a set of row vectors.
+///
+/// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
+pub struct TqMatrix<const K: usize>([TqVector<K>; K]);
+
+impl<const K: usize> TqMatrix<K> {
+    const ZERO: Self = Self([TqVector::<K>::ZERO; K]);
+
     /// Return the transpose of this matrix.
-    pub fn transpose(self) -> Self {}
+    pub fn transpose(self) -> Self {
+        let mut transpose = Self::ZERO;
+
+        for (i, row) in self.0.iter().enumerate() {
+            for (j, element) in row.0.iter().enumerate() {
+                transpose.0[j].0[i] = *element;
+            }
+        }
+
+        return transpose;
+    }
+}
+
+/// Implements matrix multiplication by a column vector, with all matrix and
+/// vector elements in Tq.
+///
+/// Corresponds to equation 2.12 in section 2.4.7 of [FIPS 203].
+///
+/// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
+impl<const K: usize> Mul<TqVector<K>> for TqMatrix<K> {
+    type Output = TqVector<K>;
+
+    fn mul(self, rhs: TqVector<K>) -> Self::Output {
+        let mut result = TqVector::<K>::ZERO;
+
+        for i in 0..K {
+            for j in 0..K {
+                result[i] += self.0[i][j] * rhs[j];
+            }
+        }
+
+        return result;
+    }
 }
