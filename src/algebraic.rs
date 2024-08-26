@@ -223,6 +223,53 @@ where
     }
 }
 
+/// Macro to generate an array of `FieldElement`s from an array of uints.
+macro_rules! field_elements {
+    ( $( $x:expr ),* ) => {
+        {
+            [
+            $(
+                FieldElement($x),
+            )*
+            ]
+        }
+    };
+}
+
+/// The values of 𝜁^BitRev7(𝑖) mod 𝑞 for 𝑖 ∈ {0,…, 127} from [FIPS 203 Appendix
+/// A].
+///
+/// [FIPS 203 Appendix A]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
+const ZETA_BIT_REV_7_MOD_Q: [FieldElement; 128] = field_elements![
+    1, 1729, 2580, 3289, 2642, 630, 1897, 848, 1062, 1919, 193, 797, 2786, 3260, 569, 1746, 296,
+    2447, 1339, 1476, 3046, 56, 2240, 1333, 1426, 2094, 535, 2882, 2393, 2879, 1974, 821, 289, 331,
+    3253, 1756, 1197, 2304, 2277, 2055, 650, 1977, 2513, 632, 2865, 33, 1320, 1915, 2319, 1435,
+    807, 452, 1438, 2868, 1534, 2402, 2647, 2617, 1481, 648, 2474, 3110, 1227, 910, 17, 2761, 583,
+    2649, 1637, 723, 2288, 1100, 1409, 2662, 3281, 233, 756, 2156, 3015, 3050, 1703, 1651, 2789,
+    1789, 1847, 952, 1461, 2687, 939, 2308, 2437, 2388, 733, 2337, 268, 641, 1584, 2298, 2037,
+    3220, 375, 2549, 2090, 1645, 1063, 319, 2773, 757, 2099, 561, 2466, 2594, 2804, 1092, 403,
+    1026, 1143, 2150, 2775, 886, 1722, 1212, 1874, 1029, 2110, 2935, 885, 2154
+];
+
+/// The values of 𝜁^2BitRev7(𝑖)+1 mod 𝑞 for 𝑖 ∈ {0,…, 127} from [FIPS 203
+/// Appendix A], WITH THE ACTUAL MODULAR REDUCTION.
+///
+/// The second table in Appendix A did not actually compute the mod q for each
+/// entry. Matches [BoringSSL's values].
+///
+/// [FIPS 203 Appendix A]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
+/// [BoringSSL's values]: https://boringssl.googlesource.com/boringssl/+/f1b043c28352a4e79114324ca2e86df33922e843/crypto/mlkem/mlkem.cc#163
+const ZETA_2_BIT_REV_7_MOD_Q_PLUS_1: [FieldElement; 128] = field_elements![
+    17, 3312, 2761, 568, 583, 2746, 2649, 680, 1637, 1692, 723, 2606, 2288, 1041, 1100, 2229, 1409,
+    1920, 2662, 667, 3281, 48, 233, 3096, 756, 2573, 2156, 1173, 3015, 314, 3050, 279, 1703, 1626,
+    1651, 1678, 2789, 540, 1789, 1540, 1847, 1482, 952, 2377, 1461, 1868, 2687, 642, 939, 2390,
+    2308, 1021, 2437, 892, 2388, 941, 733, 2596, 2337, 992, 268, 3061, 641, 2688, 1584, 1745, 2298,
+    1031, 2037, 1292, 3220, 109, 375, 2954, 2549, 780, 2090, 1239, 1645, 1684, 1063, 2266, 319,
+    3010, 2773, 556, 757, 2572, 2099, 1230, 561, 2768, 2466, 863, 2594, 735, 2804, 525, 1092, 2237,
+    403, 2926, 1026, 2303, 1143, 2186, 2150, 1179, 2775, 554, 886, 2443, 1722, 1607, 1212, 2117,
+    1874, 1455, 1029, 2300, 2110, 1219, 2935, 394, 885, 2444, 2154, 1175
+];
+
 /// Elements in the polynomial ring Rq over ℤq.
 ///
 /// This is the default domain of values in ML-KEM, as opposed the NTT
@@ -236,9 +283,9 @@ impl RqElement {
     /// Transform a polynomial element _f_ in Rq into its NTT representation _f̂_
     /// in Tq.
     ///
-    /// Implements [Algorithm 8, `NTT(f)`], from [FIPS 203].
+    /// Implements [Algorithm 9, `NTT(f)`], from [FIPS 203].
     ///
-    /// [Algorithm 8, `NTT(f)`]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf#algorithm.8
+    /// [Algorithm 9, `NTT(f)`]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf#algorithm.8
     pub fn ntt(self) -> TqElement {
         let mut f_hat = self.0.clone();
         let mut k = 1;
@@ -248,7 +295,7 @@ impl RqElement {
             // ln 4: `for start <- 0; start < 256; start <- start + 2·len)`
             for start in (0..256).step_by(2 * len) {
                 // ln 5: `zeta <- ζ ^BitRev₇(k) mod q`
-                let zeta = ZETA.pow(bit_rev_7(k).into());
+                let zeta = ZETA_BIT_REV_7_MOD_Q[k];
                 // ln 6: `k = k + 1`
                 k += 1;
                 // ln 7: `for (j <- start; j < start + len; j++)`
@@ -264,6 +311,13 @@ impl RqElement {
         }
 
         return TqElement::new(f_hat);
+    }
+}
+
+impl From<TqElement> for RqElement {
+    // Invokes the NTT⁻¹ transform.
+    fn from(value: TqElement) -> Self {
+        value.ntt_inverse()
     }
 }
 
@@ -323,7 +377,7 @@ impl PolynomialRingElement for RqElement {
 /// outputs of NTT and NTT−1 are length-n arrays of integers modulo q; these
 /// arrays are understood to represent elements of Tq or Rq, respectively (see
 /// Section 2.4). Both NTT and NTT−1 can be computed in-place. In fact,
-/// Algorithms 8 and 9 demonstrate an effcient means of computing NTT and NTT−1
+/// Algorithms 9 and 10 demonstrate an effcient means of computing NTT and NTT−1
 /// in-place. However, for clarity in understanding the distinction of the
 /// algebraic objects before and after the conversion, the algorithms are
 /// written with explicit inputs and outputs."
@@ -337,19 +391,19 @@ impl TqElement {
     /// Transform a polynomial element f̂ in Tq from its NTT representation into
     /// f in Rq.
     ///
-    /// Implements [Algorithm 9, `NTT⁻¹(f̂)`], from [FIPS 203].
+    /// Implements [Algorithm 10, `NTT⁻¹(f̂)`], from [FIPS 203].
     ///
-    /// [Algorithm 9, `NTT⁻¹(f̂)`]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf#algorithm.9
+    /// [Algorithm 10, `NTT⁻¹(f̂)`]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf#algorithm.9
     pub fn ntt_inverse(self) -> RqElement {
         let mut f = self.0.clone();
-        let mut k: u8 = 127;
+        let mut k = 127;
 
         // ln 3: `for (len <- 2; len <= 128; len <- 2·len)`
         for len in NTT_SERIES.iter().rev() {
             // ln 4: `for start <- 0; start < 256; start <- start + 2·len)`
             for start in (0..256).step_by(2 * len) {
                 // ln 5: `zeta <- ζ ^BitRev₇(k) mod q`
-                let zeta = ZETA.pow(bit_rev_7(k).into());
+                let zeta = ZETA_BIT_REV_7_MOD_Q[k];
                 // ln 6: `k = k - 1`
                 k -= 1;
                 // ln 7: `for (j <- start; j < start + len; j++)`
@@ -382,6 +436,13 @@ impl AddAssign for TqElement {
     }
 }
 
+impl From<RqElement> for TqElement {
+    // Invokes the NTT transform.
+    fn from(value: RqElement) -> Self {
+        value.ntt()
+    }
+}
+
 impl Index<usize> for TqElement {
     type Output = FieldElement;
 
@@ -410,17 +471,17 @@ impl Mul for TqElement {
 
     /// Compute the product of two NTT representations (polynomials in Tq).
     ///
-    /// Implements [Algorithm 10], `MultiplyNTTs(f̂, ĝ)`, from FIPS 203.
+    /// Implements [Algorithm 11], `MultiplyNTTs(f̂, ĝ)`, from FIPS 203.
     ///
-    /// [Algorithm 10]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf#algorithm.10
+    /// [Algorithm 11]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf#algorithm.10
     fn mul(self, rhs: Self) -> Self::Output {
         /// Compute the product of two degree-one polynomials with respect to a
         /// quadratic modulus.
         ///
-        /// Implements [Algorithm 11], `BaseCaseMultiply(a₀, a₁, b₀, b₁, γ)`,
+        /// Implements [Algorithm 12], `BaseCaseMultiply(a₀, a₁, b₀, b₁, γ)`,
         /// from FIPS 203.
         ///
-        /// [Algorithm 11]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf#algorithm.11
+        /// [Algorithm 12]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf#algorithm.11
         fn base_case_multiply(
             a0: FieldElement,
             a1: FieldElement,
@@ -447,8 +508,7 @@ impl Mul for TqElement {
                 f_hat.0[two_i_plus_1],
                 g_hat.0[two_i],
                 g_hat.0[two_i_plus_1],
-                // Casting `i` into `u8` is safe as it will never be larger than a 'u7'.
-                ZETA.pow((2 * bit_rev_7(i as u8) + 1).into()),
+                ZETA_2_BIT_REV_7_MOD_Q_PLUS_1[i],
             );
         }
 
