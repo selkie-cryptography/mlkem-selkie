@@ -1,0 +1,12 @@
+# Raise the x86_64 baseline to x86-64-v3 (AVX2, BMI2, FMA, ...) so `build.rs`
+# detects AVX2 and selects the `avx2` polynomial backend. aarch64 has NEON in
+# its baseline and needs no flags here.
+#
+# Note: an explicit `RUSTFLAGS` env var overrides these target rustflags
+# entirely. CI sets `RUSTFLAGS`, so the AVX2 CI job passes `-C target-cpu` in its
+# own `RUSTFLAGS` rather than relying on this file.
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "target-cpu=x86-64-v3"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "target-cpu=x86-64-v3"]

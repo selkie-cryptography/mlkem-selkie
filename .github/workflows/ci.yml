@@ -31,8 +31,22 @@ jobs:
       - run: cargo +nightly fmt --all --check
 
   clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
+    name: clippy (${{ matrix.backend }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      # One entry per polynomial backend build.rs can select. `RUSTFLAGS` drives
+      # that choice: empty leaves the portable backend on x86 and NEON on the
+      # aarch64 macOS runner; `target-cpu=x86-64-v3` adds AVX2 on x86. The
+      # backend is a cfg, not a cargo feature, so `--all-features` alone would
+      # only ever lint the portable kernels.
+      matrix:
+        include:
+          - { backend: portable, os: ubuntu-latest, rustflags: "-D warnings" }
+          - { backend: neon, os: macos-latest, rustflags: "-D warnings" }
+          - { backend: avx2, os: ubuntu-latest, rustflags: "-D warnings -C target-cpu=x86-64-v3" }
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,10 +61,18 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
   doc:
-    name: Documentation
-    runs-on: ubuntu-latest
+    name: doc (${{ matrix.backend }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { backend: portable, os: ubuntu-latest, rustflags: "-D warnings" }
+          - { backend: neon, os: macos-latest, rustflags: "-D warnings" }
+          - { backend: avx2, os: ubuntu-latest, rustflags: "-D warnings -C target-cpu=x86-64-v3" }
     env:
       RUSTDOCFLAGS: -D warnings
+      RUSTFLAGS: ${{ matrix.rustflags }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -60,12 +82,8 @@ jobs:
       - run: cargo doc --no-deps --document-private-items --all-features
 
   test:
-    name: "test (${{ matrix.os }})"
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    name: test (portable)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -78,6 +96,43 @@ jobs:
         run: cargo test --profile release-checked --features expose-internals
       - name: Doctests
         run: cargo test --doc
+
+  test-neon:
+    name: test (neon)
+    # Apple Silicon runners are aarch64, where NEON is baseline, so build.rs
+    # selects the NEON polynomial backend and its differential tests
+    # (poly/arch/neon) run against the scalar backend here.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test (default features)
+        run: cargo test --profile release-checked
+      - name: Test (NEON backend, expose-internals)
+        run: cargo test --profile release-checked --features expose-internals
+      - name: Doctests
+        run: cargo test --doc
+
+  test-avx2:
+    name: test (avx2)
+    runs-on: ubuntu-latest
+    # Raise the baseline to x86-64-v3 so build.rs selects the AVX2 polynomial
+    # backend; the GitHub x86_64 runners support AVX2, so its differential tests
+    # (poly/arch/avx2) run against the scalar backend here. `RUSTFLAGS` is set in
+    # the job (it overrides .cargo/config.toml's target rustflags).
+    env:
+      RUSTFLAGS: "-D warnings -C target-cpu=x86-64-v3"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test (AVX2 backend, expose-internals)
+        run: cargo test --profile release-checked --features expose-internals
 
   feature-combinations:
     name: Feature combinations build

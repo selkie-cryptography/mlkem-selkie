@@ -116,8 +116,8 @@ impl<P: ParameterSet> Ciphertext<P> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidCiphertextLength`] unless the input is exactly
-    /// `P::CIPHERTEXT_SIZE` bytes.
+    /// Returns [`Error::InvalidCiphertextLength`] unless the input is
+    /// `P::CIPHERTEXT_SIZE` bytes long.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         if bytes.len() != P::CIPHERTEXT_SIZE {
             return Err(Error::InvalidCiphertextLength);

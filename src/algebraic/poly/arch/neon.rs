@@ -5,7 +5,7 @@
 //! butterfly stages (eight butterflies per vector under one broadcast zeta) and
 //! leave the narrow stride-4/2 stages scalar; `ntt`'s final Barrett reduction
 //! is also scalar, while `ntt_inverse`'s per-stage reduction and final scale
-//! are vectorized. The arithmetic matches the scalar backend exactly — the
+//! are vectorized. The arithmetic matches the scalar backend — the
 //! `tests` module cross-checks every kernel — in the signed Montgomery
 //! convention of [`crate::algebraic::field`].
 //!
@@ -100,7 +100,7 @@ fn barrett_reduce(a: int16x8_t) -> int16x8_t {
 /// products modulo the quadratics `X^2 - gamma`, computed eight pairs at a
 /// time.
 ///
-/// Matches [`super::generic::multiply`] exactly. The result is scaled by `R^-1`
+/// Matches [`super::generic::multiply`]. The result is scaled by `R^-1`
 /// (Montgomery convention), which `ntt_inverse` later undoes.
 pub(crate) fn multiply(
     f: &[FieldElement; parameters::N],
@@ -147,7 +147,7 @@ pub(crate) fn multiply(
 /// butterfly stages (eight butterflies per vector under one broadcast zeta);
 /// the stride-4 and stride-2 stages and the final reduction run scalar.
 ///
-/// Matches [`super::generic::ntt`] exactly.
+/// Matches [`super::generic::ntt`].
 // reason: scalar-tail butterfly/zeta indices are provably in 0..256, as in the
 // generic backend.
 #[allow(clippy::indexing_slicing)]
@@ -214,7 +214,7 @@ pub(crate) fn ntt(coefficients: &mut [FieldElement; parameters::N]) {
 /// the final scale is vectorized; the narrower stride-4 and stride-2 stages run
 /// scalar.
 ///
-/// Matches [`super::generic::ntt_inverse`] exactly.
+/// Matches [`super::generic::ntt_inverse`].
 // reason: scalar-head butterfly/zeta indices are provably in 0..256, as in the
 // generic backend.
 #[allow(clippy::indexing_slicing)]

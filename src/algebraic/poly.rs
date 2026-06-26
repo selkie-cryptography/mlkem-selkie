@@ -44,7 +44,7 @@ fn bit_rev_7(i: u8) -> u8 {
 
 /// A polynomial of the ring Rq or Tq: 256 coefficients in Zq.
 ///
-/// Both rings have exactly n = 256 coefficients over Zq, so the standard-domain
+/// Both rings have n = 256 coefficients over Zq, so the standard-domain
 /// [`RqElement`] and the NTT-domain [`TqElement`] share this trait for their
 /// shared structure while remaining distinct types.
 pub trait PolynomialRingElement: Copy + Index<usize, Output = FieldElement> {
