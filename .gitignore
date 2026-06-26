@@ -1,2 +1,22 @@
 /target
 *~
+
+# Profiling artifacts (scripts/profile.rs, examples/profile, cargo-flamegraph)
+flamegraph.svg
+perf.data
+perf.data.old
+dhat-heap.json
+
+# cargo-mutants output
+/mutants.out
+/mutants.out.old
+
+# Coverage
+*.profraw
+lcov.info
+
+# CI dashboard publish scratch (uploaded to Fly, never committed)
+pr.diff
+/bench
+/ct
+*.txt.tmp

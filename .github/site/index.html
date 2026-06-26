@@ -14,8 +14,9 @@
         --accent: #58a6ff;
         --ok: #3fb950;
         --warn: #d29922;
+        --fail: #f85149;
+        --none: #6e7681;
         --radius: 10px;
-        --gap: 1rem;
       }
       * { box-sizing: border-box; }
       body {
@@ -24,96 +25,81 @@
         color: var(--text);
         font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, sans-serif;
       }
-      main { max-width: 60rem; margin: 0 auto; padding: 2.5rem 1.25rem; }
-      header { margin-bottom: 2rem; }
+      main { max-width: 64rem; margin: 0 auto; padding: 2.5rem 1.25rem; }
       h1 { margin: 0; font-size: 2rem; letter-spacing: -0.02em; }
-      .tagline { color: var(--muted); margin-top: 0.25rem; }
-      .badges { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1.25rem 0; }
+      .tagline { color: var(--muted); margin: 0.25rem 0 1.25rem; }
+      .badges { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 2rem; }
       .badges img { height: 20px; }
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
-        gap: var(--gap);
-      }
+      h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 1.75rem 0 0.75rem; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 0.85rem; }
       .card {
         background: var(--panel);
         border: 1px solid var(--border);
         border-radius: var(--radius);
-        padding: 1.1rem 1.25rem;
+        padding: 0.95rem 1.1rem;
+        text-decoration: none;
+        color: inherit;
+        display: block;
       }
-      .card h2 { margin: 0 0 0.5rem; font-size: 1rem; color: var(--accent); }
-      .card ul { margin: 0; padding-left: 1.1rem; color: var(--muted); }
-      .card li { margin: 0.15rem 0; }
+      .card:hover { border-color: var(--accent); }
+      .card .top { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+      .card .label { font-weight: 600; }
       .pill {
-        display: inline-block;
-        font-size: 0.78rem;
-        color: var(--ok);
-        border: 1px solid var(--border);
+        font-size: 0.72rem;
+        font-weight: 600;
+        padding: 0.1rem 0.55rem;
         border-radius: 999px;
-        padding: 0.05rem 0.55rem;
+        color: #0d1117;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
       }
+      .pill.ok { background: var(--ok); }
+      .pill.warn { background: var(--warn); }
+      .pill.fail { background: var(--fail); }
+      .pill.none { background: var(--none); color: var(--text); }
+      .summary { color: var(--muted); font-size: 0.9rem; margin: 0.45rem 0 0; }
+      .meta { color: var(--none); font-size: 0.78rem; margin-top: 0.4rem; font-variant-numeric: tabular-nums; }
+      .static ul { margin: 0; padding-left: 1.1rem; color: var(--muted); }
       footer { margin-top: 2.5rem; color: var(--muted); font-size: 0.85rem; }
       a { color: var(--accent); }
     </style>
   </head>
   <body>
     <main>
-      <header>
-        <h1>mlkem-selkie</h1>
-        <p class="tagline">Rust ML-KEM (FIPS 203) — beautiful, secure code.</p>
-        <div class="badges">
-          <a href="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/ci.yml"
-            ><img alt="CI" src="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/ci.yml/badge.svg?branch=main"
-          /></a>
-          <a href="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/perf.yml"
-            ><img alt="Perf" src="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/perf.yml/badge.svg?branch=main"
-          /></a>
-          <a href="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/mutants.yml"
-            ><img alt="Mutants" src="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/mutants.yml/badge.svg?branch=main"
-          /></a>
-          <a href="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/audit.yml"
-            ><img alt="Audit" src="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/audit.yml/badge.svg?branch=main"
-          /></a>
-        </div>
-      </header>
+      <h1>mlkem-selkie</h1>
+      <p class="tagline">Rust ML-KEM (FIPS 203) — beautiful, secure code.</p>
+      <div class="badges">
+        <a href="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/ci.yml"
+          ><img alt="CI" src="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/ci.yml/badge.svg?branch=main"
+        /></a>
+        <a href="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/perf.yml"
+          ><img alt="Perf" src="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/perf.yml/badge.svg?branch=main"
+        /></a>
+        <a href="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/mutants.yml"
+          ><img alt="Mutants" src="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/mutants.yml/badge.svg?branch=main"
+        /></a>
+      </div>
 
-      <section class="grid">
-        <article class="card">
-          <h2>Conformance</h2>
+      <h2>Quality</h2>
+      <div class="grid" data-section="quality"></div>
+
+      <h2>Performance</h2>
+      <div class="grid" data-section="performance"></div>
+
+      <h2>Constant-time</h2>
+      <div class="grid" data-section="constant-time"></div>
+
+      <h2>Conformance</h2>
+      <div class="grid static">
+        <div class="card">
+          <div class="top"><span class="label">Test vectors</span><span class="pill ok">ci</span></div>
           <ul>
             <li>Wycheproof (C2SP) — all 12 ML-KEM files</li>
-            <li>NIST ACVP FIPS 203 KATs (keyGen + encapDecap)</li>
+            <li>NIST ACVP FIPS 203 KATs</li>
             <li>libcrux interop — 512 / 768 / 1024</li>
-            <li>BoringSSL interop oracle (opt-in)</li>
           </ul>
-        </article>
-        <article class="card">
-          <h2>Quality gates</h2>
-          <ul>
-            <li>fmt · clippy (default + all-features)</li>
-            <li>rustdoc (private items, deny warnings)</li>
-            <li>proptest property suites</li>
-            <li>cargo-mutants on every PR diff</li>
-          </ul>
-        </article>
-        <article class="card">
-          <h2>Performance</h2>
-          <ul>
-            <li>divan wall-clock (public + internal)</li>
-            <li>gungraun callgrind instruction counts</li>
-            <li>rdtsc megacycles (x86_64)</li>
-            <li>dhat heap profiling example</li>
-          </ul>
-        </article>
-        <article class="card">
-          <h2>Constant-time <span class="pill" style="color: var(--warn)">in progress</span></h2>
-          <ul>
-            <li>dudect t-test harness</li>
-            <li>tacet attacker-model analysis</li>
-            <li>Field arithmetic CT rework pending (TODO(ct))</li>
-          </ul>
-        </article>
-      </section>
+        </div>
+      </div>
 
       <footer>
         <p>
@@ -123,5 +109,66 @@
         </p>
       </footer>
     </main>
+
+    <script>
+      const CATEGORIES = {
+        quality: [
+          { key: "coverage", label: "Coverage" },
+          { key: "deny", label: "Audit (cargo-deny)" },
+          { key: "mutants", label: "Mutation testing" },
+        ],
+        performance: [
+          { key: "bench", label: "Wall-clock (divan)" },
+          { key: "instructions", label: "Instructions (gungraun)" },
+          { key: "cycles", label: "Cycles (rdtsc)" },
+        ],
+        "constant-time": [
+          { key: "dudect", label: "dudect" },
+          { key: "tacet", label: "tacet" },
+          { key: "ctgrind", label: "ctgrind" },
+        ],
+      };
+
+      const ago = (iso) => {
+        if (!iso) return "";
+        const secs = (Date.now() - Date.parse(iso)) / 1000;
+        const units = [["d", 86400], ["h", 3600], ["m", 60]];
+        for (const [u, s] of units) if (secs >= s) return `${Math.floor(secs / s)}${u} ago`;
+        return "just now";
+      };
+
+      async function status(key) {
+        try {
+          const r = await fetch(`/${key}/status.json`, { cache: "no-store" });
+          return r.ok ? await r.json() : null;
+        } catch {
+          return null;
+        }
+      }
+
+      function card({ key, label }, data) {
+        const state = data?.status ?? "none";
+        const pill = data ? state : "no data";
+        const sha = data?.sha ? data.sha.slice(0, 7) : "";
+        const meta = [sha, ago(data?.timestamp)].filter(Boolean).join(" · ");
+        const a = document.createElement("a");
+        a.className = "card";
+        a.href = `/${key}/`;
+        a.innerHTML = `
+          <div class="top"><span class="label">${label}</span><span class="pill ${state}">${pill}</span></div>
+          <p class="summary">${data?.summary ?? "no report published yet"}</p>
+          <div class="meta">${meta}</div>`;
+        return a;
+      }
+
+      for (const [section, items] of Object.entries(CATEGORIES)) {
+        const grid = document.querySelector(`[data-section="${section}"]`);
+        for (const item of items) {
+          const placeholder = card(item, null);
+          grid.appendChild(placeholder);
+          status(item.key).then((data) => placeholder.replaceWith(card(item, data)));
+        }
+      }
+    </script>
   </body>
 </html>

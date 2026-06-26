@@ -23,10 +23,19 @@ jobs:
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: Swatinem/rust-cache@v2
       - name: Collect coverage (lib + integration tests, internals exposed)
-        run: cargo llvm-cov --features expose-internals --lcov --output-path lcov.info
-      - name: Coverage summary
-        run: cargo llvm-cov report --features expose-internals
+        run: |
+          cargo llvm-cov --features expose-internals --lcov --output-path lcov.info
+          cargo llvm-cov report --features expose-internals --html
       - uses: actions/upload-artifact@v4
         with:
           name: coverage-lcov
           path: lcov.info
+      - name: Publish HTML report to dashboard
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/ci-publish
+        with:
+          path: target/llvm-cov/html
+          dest: coverage
+          status: ok
+          summary: llvm-cov HTML report
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}

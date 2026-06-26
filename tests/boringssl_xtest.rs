@@ -30,8 +30,8 @@ use std::{
 use mlkem_selkie::{Aes256CtrDrbg, KeyPair, MLKEM768};
 use rand_core::RngCore;
 
-/// Number of random interop iterations.
-const ITERATIONS: usize = 64;
+/// Number of random interop iterations (ML-KEM-768).
+const ITERATIONS: usize = 1000;
 
 #[test]
 #[ignore = "requires a prebuilt BoringSSL oracle; set MLKEM_BSSL_ORACLE (see module docs)"]

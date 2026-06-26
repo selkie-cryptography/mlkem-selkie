@@ -1,0 +1,14 @@
+app = "mlkem-selkie-ci"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+# Persistent volume holding the CI report artifacts (coverage, bench, mutants,
+# ctgrind, ...) that the workflows publish and nginx serves under /data.
+[[mounts]]
+  source = "site_data"
+  destination = "/data"

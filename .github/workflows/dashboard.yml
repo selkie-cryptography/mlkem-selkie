@@ -1,8 +1,11 @@
 name: Deploy dashboard
 
-# Publishes the static CI/status dashboard under `.github/site/` to GitHub
-# Pages. (The sibling sqisign-selkie deploys an equivalent site to Fly; Pages is
-# the portable, infrastructure-free equivalent for this crate.)
+# Deploys the CI/status site under `.github/site/` (an nginx:alpine container)
+# to Fly, matching the sibling sqisign-selkie. The workflows publish their report
+# artifacts to the Fly volume, which nginx serves under /data/<category>/.
+#
+# Requires the `FLY_API_TOKEN` repository secret and a Fly app named
+# `mlkem-selkie-ci` (see .github/site/fly.toml).
 
 on:
   push:
@@ -14,28 +17,19 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
   deploy:
-    name: Deploy CI site
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    name: Deploy CI site to Fly
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: .github/site
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy to Fly
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        working-directory: .github/site
+        run: flyctl deploy --remote-only

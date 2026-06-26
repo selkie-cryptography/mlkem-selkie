@@ -1,0 +1,79 @@
+name: Publish CI report to Fly
+description: >-
+  Ships a file or directory to the Fly CI-site volume under /data/<dest>/, where
+  nginx serves it at https://<app>.fly.dev/<dest>/. Also writes a per-category
+  status.json the dashboard reads to render live state. Tarballs the payload,
+  uploads it over `flyctl ssh sftp`, and extracts it on the machine. Gate the
+  calling step with `if:` (publish from main pushes / schedules only).
+
+inputs:
+  path:
+    description: Local file or directory to publish.
+    required: true
+  dest:
+    description: Destination category under /data (e.g. `coverage`, `bench`).
+    required: true
+  status:
+    description: "Dashboard status: ok | warn | fail."
+    required: false
+    default: ok
+  summary:
+    description: One-line summary shown on the dashboard card.
+    required: false
+    default: ""
+  fly-app:
+    description: Fly app hosting the CI site.
+    required: false
+    default: mlkem-selkie-ci
+  fly-api-token:
+    description: Fly API token with deploy access to the CI-site app.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: superfly/flyctl-actions/setup-flyctl@master
+    - name: Upload to CI site
+      shell: bash
+      env:
+        FLY_API_TOKEN: ${{ inputs.fly-api-token }}
+        APP: ${{ inputs.fly-app }}
+        SRC: ${{ inputs.path }}
+        DEST: ${{ inputs.dest }}
+        STATUS: ${{ inputs.status }}
+        SUMMARY: ${{ inputs.summary }}
+        SHA: ${{ github.sha }}
+      run: |
+        set -euo pipefail
+
+        if [ ! -e "$SRC" ]; then
+          echo "::warning::ci-publish: $SRC does not exist; skipping"
+          exit 0
+        fi
+
+        # Stage the payload plus a status.json the dashboard reads.
+        stage="$(mktemp -d)"
+        if [ -d "$SRC" ]; then
+          cp -a "$SRC/." "$stage/"
+        else
+          cp -a "$SRC" "$stage/"
+        fi
+        jq -n \
+          --arg status "$STATUS" \
+          --arg summary "$SUMMARY" \
+          --arg sha "$SHA" \
+          --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          --arg url "/$DEST/" \
+          '{status: $status, summary: $summary, sha: $sha, timestamp: $ts, url: $url}' \
+          > "$stage/status.json"
+
+        tar czf /tmp/_payload.tgz -C "$stage" .
+
+        # Push the tarball over SFTP, then extract it on the machine. The
+        # /data/<dest>/ directory is created by the site's entrypoint.sh.
+        printf 'put /tmp/_payload.tgz /data/%s/_payload.tgz\n' "$DEST" \
+          | flyctl ssh sftp shell -a "$APP"
+        flyctl ssh console -a "$APP" -C \
+          "/bin/sh -c 'cd /data/$DEST && tar xzf _payload.tgz && rm -f _payload.tgz'"
+
+        echo "published $SRC ($STATUS) -> https://$APP.fly.dev/$DEST/"

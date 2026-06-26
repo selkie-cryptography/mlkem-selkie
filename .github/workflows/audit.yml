@@ -32,3 +32,18 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
+      - name: Capture deny report for dashboard
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: taiki-e/install-action@cargo-deny
+      - name: Run + capture
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: cargo deny check 2>&1 | tee deny.txt || true
+      - name: Publish to dashboard
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/ci-publish
+        with:
+          path: deny.txt
+          dest: deny
+          status: ok
+          summary: advisories · bans · licenses · sources
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}

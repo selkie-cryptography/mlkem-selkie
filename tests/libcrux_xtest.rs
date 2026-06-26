@@ -25,7 +25,11 @@ use mlkem_selkie::{Aes256CtrDrbg, Ciphertext, KeyPair, MLKEM512, MLKEM768, MLKEM
 use rand_core::RngCore;
 
 /// Number of random interop iterations per parameter set.
-const ITERATIONS: usize = 64;
+///
+/// 1000 random seeds per set (3000 iterations, 9000 directional cross-checks)
+/// gives good coverage of input-dependent edge cases — compression boundaries
+/// and near-modulus coefficients — while keeping the default run quick.
+const ITERATIONS: usize = 1000;
 
 /// Draws a fresh `(seed, message)` pair from the deterministic DRBG.
 fn next_inputs(drbg: &mut Aes256CtrDrbg) -> ([u8; 64], [u8; 32]) {

@@ -8,6 +8,9 @@ on:
       - "tests/ctgrind.rs"
       - "src/**"
       - ".github/workflows/ct.yml"
+  schedule:
+    # Weekly, to track the CT signal over time on the dashboard.
+    - cron: "0 7 * * 1"
   workflow_dispatch:
     inputs:
       slow:
@@ -34,9 +37,32 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: dudect t-test
-        run: cargo bench --bench dudect --features expose-internals
+        run: |
+          set -o pipefail
+          mkdir -p ct
+          cargo bench --bench dudect --features expose-internals | tee ct/dudect.txt
       - name: tacet attacker-model analysis
-        run: cargo bench --bench tacet --features expose-internals
+        run: |
+          set -o pipefail
+          cargo bench --bench tacet --features expose-internals | tee ct/tacet.txt
+      - name: Publish to dashboard
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        uses: ./.github/actions/ci-publish
+        with:
+          path: ct/dudect.txt
+          dest: dudect
+          status: warn
+          summary: variable-time field arith (pre-CT rework)
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}
+      - name: Publish tacet to dashboard
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        uses: ./.github/actions/ci-publish
+        with:
+          path: ct/tacet.txt
+          dest: tacet
+          status: warn
+          summary: attacker-model leak analysis (pre-CT rework)
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}
 
   ctgrind:
     name: ctgrind (Valgrind taint tracking)
@@ -60,7 +86,17 @@ jobs:
         run: cargo test --test ctgrind --features expose-internals --no-run
       - name: Run under memcheck
         run: |
+          set -o pipefail
           bin=$(find target/debug/deps -maxdepth 1 -type f -name 'ctgrind-*' ! -name '*.d' -perm -u+x | head -1)
           echo "running $bin under valgrind"
-          valgrind --tool=memcheck --error-exitcode=1 "$bin" --test-threads=1
+          valgrind --tool=memcheck --error-exitcode=1 "$bin" --test-threads=1 2>&1 | tee ctgrind.txt
+      - name: Publish to dashboard
+        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: ./.github/actions/ci-publish
+        with:
+          path: ctgrind.txt
+          dest: ctgrind
+          status: warn
+          summary: decaps implicit-rejection not yet constant-time
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}
 

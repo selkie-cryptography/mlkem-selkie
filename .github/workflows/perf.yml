@@ -28,9 +28,23 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Public API (keygen / encaps / decaps)
-        run: cargo bench --bench mlkem
+        run: |
+          set -o pipefail
+          mkdir -p bench
+          cargo bench --bench mlkem | tee bench/mlkem.txt
       - name: Internal hot paths (NTT / sampling / encoding)
-        run: cargo bench --bench algebraic --features expose-internals
+        run: |
+          set -o pipefail
+          cargo bench --bench algebraic --features expose-internals | tee bench/algebraic.txt
+      - name: Publish to dashboard
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/ci-publish
+        with:
+          path: bench
+          dest: bench
+          status: ok
+          summary: divan wall-clock medians
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}
 
   instructions:
     name: gungraun callgrind instruction counts
@@ -46,7 +60,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes valgrind
           cargo install gungraun-runner --version 0.19.2 --locked
-      - run: cargo bench --bench instructions --features expose-internals
+      - name: Run instruction counts
+        run: |
+          set -o pipefail
+          cargo bench --bench instructions --features expose-internals | tee instructions.txt
+      - name: Publish to dashboard
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/ci-publish
+        with:
+          path: instructions.txt
+          dest: instructions
+          status: ok
+          summary: gungraun instruction counts
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}
 
   cycles:
     name: rdtsc megacycles (x86_64)
@@ -57,4 +83,16 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo bench --bench cycles --features expose-internals
+      - name: Run cycle counts
+        run: |
+          set -o pipefail
+          cargo bench --bench cycles --features expose-internals | tee cycles.txt
+      - name: Publish to dashboard
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/ci-publish
+        with:
+          path: cycles.txt
+          dest: cycles
+          status: ok
+          summary: rdtsc megacycles (x86_64)
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}

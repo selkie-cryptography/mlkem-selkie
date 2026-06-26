@@ -2,6 +2,9 @@ name: Mutants
 
 on:
   pull_request:
+  schedule:
+    # Weekly full-tree run, published to the dashboard.
+    - cron: "0 5 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -10,6 +13,7 @@ permissions:
 jobs:
   incremental:
     name: cargo-mutants (changed code)
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,3 +34,43 @@ jobs:
         with:
           name: mutants-out
           path: mutants.out
+
+  full:
+    name: cargo-mutants (full tree)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants,cargo-nextest
+      - uses: Swatinem/rust-cache@v2
+      - name: Run full mutation testing
+        # Don't fail the job on surviving mutants — summarize and publish them.
+        run: cargo mutants --no-shuffle -j 2 || true
+      - name: Summarize
+        id: summary
+        run: |
+          caught=$(wc -l < mutants.out/caught.txt 2>/dev/null || echo 0)
+          missed=$(wc -l < mutants.out/missed.txt 2>/dev/null || echo 0)
+          viable=$((caught + missed))
+          score=0
+          [ "$viable" -gt 0 ] && score=$((100 * caught / viable))
+          echo "summary=caught $caught/$viable ($score%)" >> "$GITHUB_OUTPUT"
+          if [ "$missed" -gt 0 ]; then
+            echo "status=warn" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=ok" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Publish to dashboard
+        uses: ./.github/actions/ci-publish
+        with:
+          path: mutants.out
+          dest: mutants
+          status: ${{ steps.summary.outputs.status }}
+          summary: ${{ steps.summary.outputs.summary }}
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}
