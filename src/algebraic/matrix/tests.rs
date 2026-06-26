@@ -21,10 +21,7 @@ fn matrix_transpose_involution() {
         TqElement::new(coeffs)
     };
 
-    let rows = (0..MLKEM512::K)
-        .map(|_| TqVector::<MLKEM512>::from_vec((0..MLKEM512::K).map(|_| next()).collect()))
-        .collect();
-    let matrix = TqMatrix::<MLKEM512>::from_rows(rows);
+    let matrix = TqMatrix::<MLKEM512>::from_fn(|_| TqVector::<MLKEM512>::from_fn(|_| next()));
 
     assert_eq!(matrix.transpose().transpose(), matrix);
 }

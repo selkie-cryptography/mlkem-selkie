@@ -144,12 +144,13 @@ impl FieldElement {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "expose-internals"))]
 impl FieldElement {
     /// Reference multiplication in the canonical value domain, `a * b mod q`,
     /// using plain integer arithmetic independent of the Montgomery [`Mul`]
-    /// impl. Serves as the oracle for NTT-domain products in tests.
-    pub(crate) fn mul_reference(self, rhs: Self) -> Self {
+    /// impl. The standard-domain oracle for NTT products, shared by the unit
+    /// tests and the `expose-internals` property tests.
+    pub fn mul_reference(self, rhs: Self) -> Self {
         let product = u32::from(self.value()) * u32::from(rhs.value());
 
         Self::new((product % u32::from(parameters::Q)) as u16)

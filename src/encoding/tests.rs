@@ -65,15 +65,13 @@ fn message_polynomial_roundtrip() {
 #[test]
 fn vector_compress_roundtrip() {
     let d = MLKEM512::D_U;
-    let polys = (0..MLKEM512::K)
-        .map(|p| {
-            let coeffs = core::array::from_fn(|i| {
-                FieldElement::decompress(((i + p) as u16) & ((1 << d) - 1), d)
-            });
-            RqElement::new(coeffs)
-        })
-        .collect();
-    let vector = RqVector::<MLKEM512>::from_vec(polys);
+    let vector = RqVector::<MLKEM512>::from_fn(|p| {
+        let coeffs = core::array::from_fn(|i| {
+            FieldElement::decompress(((i + p) as u16) & ((1 << d) - 1), d)
+        });
+
+        RqElement::new(coeffs)
+    });
 
     let encoded = vector.compress_encode(d);
 

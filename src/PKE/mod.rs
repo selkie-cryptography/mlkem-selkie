@@ -222,17 +222,9 @@ impl<P: ParameterSet> TqMatrix<P> {
     /// 203 test vectors. `K-PKE.KeyGen` uses `A_hat` directly while
     /// `K-PKE.Encrypt` multiplies by its transpose.
     fn expand(rho: &[u8; 32]) -> Self {
-        let rows = (0..P::K)
-            .map(|i| {
-                let row = (0..P::K)
-                    .map(|j| TqElement::sample_ntt(&mut XOF(rho, j as u8, i as u8)))
-                    .collect();
-
-                TqVector::<P>::from_vec(row)
-            })
-            .collect();
-
-        Self::from_rows(rows)
+        Self::from_fn(|i| {
+            TqVector::<P>::from_fn(|j| TqElement::sample_ntt(&mut XOF(rho, j as u8, i as u8)))
+        })
     }
 }
 
@@ -240,15 +232,11 @@ impl<P: ParameterSet> RqVector<P> {
     /// Samples a length-`K` vector from the centered binomial distribution
     /// `D_eta`, advancing the PRF counter `n` once per component.
     fn sample_cbd(eta: usize, seed: &[u8; 32], n: &mut u8) -> Self {
-        let polys = (0..P::K)
-            .map(|_| {
-                let bytes = PRF(eta, seed, *n);
-                *n += 1;
+        Self::from_fn(|_| {
+            let bytes = PRF(eta, seed, *n);
+            *n += 1;
 
-                RqElement::sample_cbd(eta, &bytes)
-            })
-            .collect();
-
-        Self::from_vec(polys)
+            RqElement::sample_cbd(eta, &bytes)
+        })
     }
 }

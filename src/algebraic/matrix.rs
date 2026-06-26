@@ -1,9 +1,6 @@
 //! `K`-by-`K` matrices of polynomial ring elements in Tq.
 
-use core::{
-    marker::PhantomData,
-    ops::{Index, Mul},
-};
+use core::ops::{Index, Mul};
 
 use crate::{algebraic::vector::TqVector, parameters::ParameterSet};
 
@@ -14,27 +11,19 @@ mod tests;
 ///
 /// Despite the description in FIPS 203 that one can view vectors as the special
 /// case of matrices with a single column, we store the matrix as a sequence of
-/// `P::K` row vectors.
+/// `P::K` row vectors, backed by the parameter set's stack-allocated
+/// [`ParameterSet::KArray`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TqMatrix<P: ParameterSet> {
     /// The `P::K` rows, each a `TqVector<P>` of length `P::K`.
-    rows: Vec<TqVector<P>>,
-    /// Binds the matrix dimension to a parameter set without storing it.
-    _marker: PhantomData<P>,
+    rows: P::KArray<TqVector<P>>,
 }
 
 impl<P: ParameterSet> TqMatrix<P> {
-    /// Constructs a matrix from its row vectors.
-    ///
-    /// # Panics
-    ///
-    /// Debug-asserts that there are exactly `P::K` rows.
-    pub fn from_rows(rows: Vec<TqVector<P>>) -> Self {
-        debug_assert_eq!(rows.len(), P::K);
-
+    /// Constructs a matrix by applying `f` to each row index in `0..K`.
+    pub fn from_fn(f: impl FnMut(usize) -> TqVector<P>) -> Self {
         Self {
-            rows,
-            _marker: PhantomData,
+            rows: P::k_array_from_fn(f),
         }
     }
 
@@ -43,16 +32,7 @@ impl<P: ParameterSet> TqMatrix<P> {
     /// `K-PKE.Encrypt` multiplies by `A^T` while reusing the same `A` that
     /// `K-PKE.KeyGen` built.
     pub fn transpose(&self) -> Self {
-        let rows = (0..P::K)
-            .map(|j| {
-                // `row[j]` uses `TqVector`'s `Index`; iterating `self.rows`
-                // avoids indexing the backing `Vec`.
-                let column = self.rows.iter().map(|row| row[j]).collect();
-                TqVector::from_vec(column)
-            })
-            .collect();
-
-        Self::from_rows(rows)
+        Self::from_fn(|j| TqVector::from_fn(|i| self[i][j]))
     }
 }
 
@@ -62,7 +42,7 @@ impl<P: ParameterSet> Index<usize> for TqMatrix<P> {
     // reason: the `Index` contract is to index and panic on out-of-bounds.
     #[allow(clippy::indexing_slicing)]
     fn index(&self, index: usize) -> &TqVector<P> {
-        &self.rows[index]
+        &self.rows.as_ref()[index]
     }
 }
 
@@ -75,8 +55,6 @@ impl<P: ParameterSet> Mul<&TqVector<P>> for &TqMatrix<P> {
     ///
     /// [section 2.4.7]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsubsection.2.4.7
     fn mul(self, rhs: &TqVector<P>) -> TqVector<P> {
-        let polys = self.rows.iter().map(|row| row * rhs).collect();
-
-        TqVector::from_vec(polys)
+        TqVector::from_fn(|i| &self[i] * rhs)
     }
 }

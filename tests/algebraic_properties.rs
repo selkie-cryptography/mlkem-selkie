@@ -21,7 +21,12 @@ fn rq(coeffs: &[u16]) -> RqElement {
     RqElement::new(core::array::from_fn(|i| fe(coeffs[i])))
 }
 
-/// Reference multiplication in `Zq[X] / (X^256 + 1)`.
+/// Reference multiplication in `Zq[X] / (X^256 + 1)`, computed in the value
+/// domain via [`FieldElement::mul_reference`] (the field's own `*` is
+/// Montgomery and would not match the standard-domain product the NTT path
+/// returns). Each accumulation is Barrett-reduced to keep the running column
+/// sums inside `i16`; an unreduced column sums up to `N` products and would
+/// overflow.
 // reason: the convolution writes `result[i + j]`, so the indices i and j drive
 // both the operand reads and a computed output index; an enumerate rewrite
 // can't express the wrap-around accumulation cleanly.
@@ -31,13 +36,13 @@ fn schoolbook(f: &[u16], g: &[u16]) -> RqElement {
 
     for i in 0..N {
         for j in 0..N {
-            let product = fe(f[i]) * fe(g[j]);
+            let product = fe(f[i]).mul_reference(fe(g[j]));
             let k = i + j;
 
             if k < N {
-                result[k] = result[k] + product;
+                result[k] = (result[k] + product).reduce();
             } else {
-                result[k - N] = result[k - N] - product;
+                result[k - N] = (result[k - N] - product).reduce();
             }
         }
     }
@@ -64,12 +69,15 @@ proptest! {
         prop_assert_eq!(fe(a) - fe(b), fe(a) + (-fe(b)));
     }
 
-    /// The NTT and its inverse compose to the identity.
+    /// In signed-Montgomery form the NTT round-trip recovers `f` scaled by `R`:
+    /// the forward transform is exact, but the inverse leaves the standard-domain
+    /// `R` that base multiplication consumes.
     #[test]
     fn ntt_roundtrip(coeffs in vec(0u16..Q, N)) {
         let f = rq(&coeffs);
+        let expected = RqElement::new(core::array::from_fn(|i| fe(coeffs[i]).to_montgomery()));
 
-        prop_assert_eq!(f.ntt().ntt_inverse(), f);
+        prop_assert_eq!(f.ntt().ntt_inverse(), expected);
     }
 
     /// Multiplication in Tq matches schoolbook multiplication in Rq.

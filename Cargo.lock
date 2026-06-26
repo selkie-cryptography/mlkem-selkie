@@ -1293,6 +1293,7 @@ dependencies = [
  "hax-lib-macros 0.1.0-pre.1",
  "hex",
  "libcrux-ml-kem",
+ "mlkem-selkie",
  "mutants",
  "proptest",
  "rand 0.8.5",

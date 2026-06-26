@@ -2,6 +2,15 @@
 //!
 //! [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
 
+use core::fmt::Debug;
+
+/// The bounds an element type must satisfy to live in a
+/// [`ParameterSet::KArray`]: enough for the vector and matrix newtypes to derive
+/// `Clone`/`Debug`/`PartialEq`/`Eq` and remain `Send + Sync`.
+pub trait KElement: Clone + Debug + PartialEq + Eq + Send + Sync {}
+
+impl<T: Clone + Debug + PartialEq + Eq + Send + Sync> KElement for T {}
+
 /// "n is set to 256 because the goal is to encapsulate keys with 256 bits of
 /// entropy (i.e., use a plaintext size of 256 bits in Kyber.CPAPKE.Enc).
 /// Smaller values of n would require to encode multiple key bits into one
@@ -31,12 +40,14 @@ pub(crate) const Q: u16 = 3329;
 // stable / when generic_const_exprs is stable
 //
 // Every parameter set is a zero-sized marker, so these supertraits cost
-// nothing: `Copy` lets the `PhantomData<P>` newtypes (`RqVector<P>`,
-// `EncapsulationKey<P>`, ...) derive `Clone` without a separate `P: Clone`
-// bound at every use site, and `Send + Sync` make the key/ciphertext types
-// thread-safe (and lets the divan benchmarks run their closures across
-// threads).
-pub trait ParameterSet: Copy + Send + Sync {
+// nothing. `Copy`/`Clone` let the `P`-parameterized newtypes (`RqVector<P>`,
+// `TqMatrix<P>`, `EncapsulationKey<P>`, ...) derive `Clone` without a separate
+// `P: Clone` bound at every use site; `Debug`/`PartialEq`/`Eq` likewise enable
+// those derives, and are required so a `TqVector<P>` (itself only `Eq` when `P`
+// is) can sit inside another parameter set's `KArray`; and `Send + Sync` make
+// the key/ciphertext types thread-safe (and let the divan benchmarks run their
+// closures across threads).
+pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
     /// Represents the dimensions of the vectors *s* and *e* in `K-PKE.KeyGen()`
     /// and the dimensions of the matrix *Â* and the vectors *r*, *e_1*, and
     /// *e_2* in `K-PKE.Encrypt()`, as defined in section 5 of the NIST
@@ -50,6 +61,21 @@ pub trait ParameterSet: Copy + Send + Sync {
     /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
     /// [CRYSTALS-Kyber version 3.02]: https://pq-crystals.org/kyber/data/kyber-specification-round3-20210804.pdf
     const K: usize;
+
+    /// A length-[`Self::K`] array of `T`: the heap-free backing store for the
+    /// `K`-dimensional vectors and matrices over the polynomial rings.
+    ///
+    /// Concrete in each parameter set (`[T; 2]`, `[T; 3]`, `[T; 4]`), which
+    /// sidesteps the unstable `generic_const_exprs` that a generic `[T;
+    /// Self::K]` would otherwise require.
+    type KArray<T>: AsRef<[T]> + Clone + Debug + PartialEq + Eq + Send + Sync
+    where
+        T: KElement;
+
+    /// Builds a [`Self::KArray`] by applying `f` to each index in `0..K`.
+    fn k_array_from_fn<T>(f: impl FnMut(usize) -> T) -> Self::KArray<T>
+    where
+        T: KElement;
 
     /// Represents the distribution `η₁` for generating the vectors *s* and *e*
     /// in `K-PKE.KeyGen()` and the vector *r* in `K-PKE.Encrypt()`, as
@@ -146,6 +172,18 @@ impl ParameterSet for MLKEM512 {
     const D_U: usize = 10;
     const D_V: usize = 4;
 
+    type KArray<T>
+        = [T; 2]
+    where
+        T: KElement;
+
+    fn k_array_from_fn<T>(f: impl FnMut(usize) -> T) -> [T; 2]
+    where
+        T: KElement,
+    {
+        core::array::from_fn(f)
+    }
+
     type PKEDecryptionKeySerialization = [u8; Self::PKE_DECRYPTION_KEY_SIZE];
     type PKEEncryptionKeySerialization = [u8; Self::PKE_ENCRYPTION_KEY_SIZE];
 
@@ -169,6 +207,18 @@ impl ParameterSet for MLKEM768 {
     const D_U: usize = 10;
     const D_V: usize = 4;
 
+    type KArray<T>
+        = [T; 3]
+    where
+        T: KElement;
+
+    fn k_array_from_fn<T>(f: impl FnMut(usize) -> T) -> [T; 3]
+    where
+        T: KElement,
+    {
+        core::array::from_fn(f)
+    }
+
     type PKEDecryptionKeySerialization = [u8; Self::PKE_DECRYPTION_KEY_SIZE];
     type PKEEncryptionKeySerialization = [u8; Self::PKE_ENCRYPTION_KEY_SIZE];
 
@@ -191,6 +241,18 @@ impl ParameterSet for MLKEM1024 {
     const ETA_2: usize = 2;
     const D_U: usize = 11;
     const D_V: usize = 5;
+
+    type KArray<T>
+        = [T; 4]
+    where
+        T: KElement;
+
+    fn k_array_from_fn<T>(f: impl FnMut(usize) -> T) -> [T; 4]
+    where
+        T: KElement,
+    {
+        core::array::from_fn(f)
+    }
 
     type PKEDecryptionKeySerialization = [u8; Self::PKE_DECRYPTION_KEY_SIZE];
     type PKEEncryptionKeySerialization = [u8; Self::PKE_ENCRYPTION_KEY_SIZE];

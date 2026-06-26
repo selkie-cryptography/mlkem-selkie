@@ -32,11 +32,14 @@ impl TqElement {
     /// Implements [Algorithm 7] of FIPS 203.
     ///
     /// [Algorithm 7]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.7
+    // reason: `count < N` guards both writes, so every index is in bounds.
+    #[allow(clippy::indexing_slicing)]
     pub fn sample_ntt(reader: &mut impl XofReader) -> Self {
-        let mut coefficients: Vec<FieldElement> = Vec::with_capacity(parameters::N);
+        let mut coefficients = [FieldElement::ZERO; parameters::N];
+        let mut count = 0;
         let mut triple = [0u8; 3];
 
-        while coefficients.len() < parameters::N {
+        while count < parameters::N {
             reader.read(&mut triple);
             let [b0, b1, b2] = triple;
 
@@ -44,17 +47,14 @@ impl TqElement {
             let d2 = (u16::from(b1) >> 4) | (u16::from(b2) << 4);
 
             if d1 < Q {
-                coefficients.push(FieldElement::new(d1));
+                coefficients[count] = FieldElement::new(d1);
+                count += 1;
             }
-            if d2 < Q && coefficients.len() < parameters::N {
-                coefficients.push(FieldElement::new(d2));
+            if d2 < Q && count < parameters::N {
+                coefficients[count] = FieldElement::new(d2);
+                count += 1;
             }
         }
-
-        // The loop guarantees exactly `N` coefficients; the fallback is unreachable.
-        let coefficients = coefficients
-            .try_into()
-            .unwrap_or([FieldElement::ZERO; parameters::N]);
 
         Self::new(coefficients)
     }

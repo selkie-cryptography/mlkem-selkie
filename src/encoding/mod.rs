@@ -152,12 +152,12 @@ impl<P: ParameterSet> TqVector<P> {
 
     /// `ByteDecode_12` applied componentwise to `384 * K` bytes.
     pub fn byte_decode(bytes: &[u8]) -> Self {
-        let polys = bytes
-            .chunks_exact(384)
-            .map(TqElement::byte_decode)
-            .collect();
+        let mut chunks = bytes.chunks_exact(384);
 
-        Self::from_vec(polys)
+        // `from_fn` drives exactly `K` iterations and `bytes` holds `384 * K`
+        // bytes, so every `next()` yields a full chunk; the empty fallback is
+        // unreachable.
+        Self::from_fn(|_| TqElement::byte_decode(chunks.next().unwrap_or_default()))
     }
 }
 
@@ -172,11 +172,11 @@ impl<P: ParameterSet> RqVector<P> {
 
     /// `Decompress_d(ByteDecode_d(.))` applied componentwise.
     pub fn decode_decompress(bytes: &[u8], d: usize) -> Self {
-        let polys = bytes
-            .chunks_exact(32 * d)
-            .map(|chunk| RqElement::decode_decompress(chunk, d))
-            .collect();
+        let mut chunks = bytes.chunks_exact(32 * d);
 
-        Self::from_vec(polys)
+        // `from_fn` drives exactly `K` iterations and `bytes` holds `32 * d * K`
+        // bytes, so every `next()` yields a full chunk; the empty fallback is
+        // unreachable.
+        Self::from_fn(|_| RqElement::decode_decompress(chunks.next().unwrap_or_default(), d))
     }
 }

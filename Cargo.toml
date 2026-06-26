@@ -37,6 +37,12 @@ sha3 = "0.10.8"
 zeroize = "1.7.0"
 
 [dev-dependencies]
+# A self dev-dependency that turns on `expose-internals` whenever the
+# dev-dependencies are active (tests, benches, examples), so the
+# internal-arithmetic property tests and benches run under a plain
+# `cargo test` / `cargo bench` without leaking the feature into the default
+# public build.
+mlkem-selkie = { path = ".", features = ["expose-internals"] }
 # Hex decoding of the Wycheproof, ACVP, and interop test vectors.
 hex = "0.4"
 # An independent, formally-verified ML-KEM implementation for the randomized
