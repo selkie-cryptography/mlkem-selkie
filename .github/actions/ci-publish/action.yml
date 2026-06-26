@@ -69,8 +69,11 @@ runs:
 
         tar czf /tmp/_payload.tgz -C "$stage" .
 
-        # Push the tarball over SFTP, then extract it on the machine. The
-        # /data/<dest>/ directory is created by the site's entrypoint.sh.
+        # Ensure the destination directory exists: the site entrypoint.sh only
+        # pre-creates the long-standing categories, so a new `dest` (e.g. a
+        # per-backend `bench-neon`) has no directory for SFTP to put into.
+        flyctl ssh console -a "$APP" -C "/bin/sh -c 'mkdir -p /data/$DEST'"
+        # Push the tarball over SFTP, then extract it on the machine.
         printf 'put /tmp/_payload.tgz /data/%s/_payload.tgz\n' "$DEST" \
           | flyctl ssh sftp shell -a "$APP"
         flyctl ssh console -a "$APP" -C \
