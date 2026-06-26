@@ -83,7 +83,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes valgrind
       - name: Build ctgrind test
-        run: cargo test --test ctgrind --features expose-internals --no-run
+        run: cargo test --test ctgrind --features ctgrind --no-run
       - name: Run under memcheck
         run: |
           set -o pipefail

@@ -183,7 +183,7 @@ impl TqElement {
     /// into `f` in Rq.
     ///
     /// Because base multiplication leaves products scaled by `R^-1`, this also
-    /// applies the [`NTT_INVERSE_SCALE`] factor that restores the standard
+    /// applies the `NTT_INVERSE_SCALE` factor that restores the standard
     /// domain — so `(f_hat * g_hat).ntt_inverse()` is the true product `f * g`,
     /// while `f.ntt().ntt_inverse()` is `f` scaled by `R` (not the identity).
     ///

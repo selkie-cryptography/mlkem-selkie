@@ -20,6 +20,12 @@ mlkem1024 = []
 # as `pub` for white-box tests, fuzzing, and benchmarks. Off by default; the
 # normal public API does not need it.
 expose-internals = []
+# Gates the Valgrind taint-tracking constant-time test (tests/ctgrind.rs) behind
+# its own feature so it builds and runs only in the dedicated Constant-time
+# workflow (ct.yml), never in the primary `cargo test` (which the self
+# dev-dependency would otherwise pull it into via `expose-internals`). Implies
+# `expose-internals` since the test reaches the internal field ops.
+ctgrind = ["expose-internals"]
 # Routes the `profile` example through dhat's heap-profiling global allocator
 # (writes dhat-heap.json). Off by default so time profiles keep the real
 # allocator. See scripts/profile.rs.
@@ -42,7 +48,7 @@ zeroize = "1.7.0"
 # internal-arithmetic property tests and benches run under a plain
 # `cargo test` / `cargo bench` without leaking the feature into the default
 # public build.
-mlkem-selkie = { path = ".", features = ["expose-internals"] }
+mlkem-selkie = { path = ".", version = "0.1.0", features = ["expose-internals"] }
 # Hex decoding of the Wycheproof, ACVP, and interop test vectors.
 hex = "0.4"
 # An independent, formally-verified ML-KEM implementation for the randomized
@@ -91,10 +97,12 @@ crabgrind = "0.2"
 name = "algebraic_properties"
 required-features = ["expose-internals"]
 
-# Valgrind taint-tracking constant-time test (Linux-only at runtime).
+# Valgrind taint-tracking constant-time test (Linux-only at runtime). Gated
+# behind the dedicated `ctgrind` feature so it stays out of the primary
+# `cargo test` and runs only in the Constant-time workflow (ct.yml).
 [[test]]
 name = "ctgrind"
-required-features = ["expose-internals"]
+required-features = ["ctgrind"]
 
 # Public-API benchmarks: keygen / encaps / decaps and key parsing.
 [[bench]]
