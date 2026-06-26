@@ -201,8 +201,10 @@ impl<P: ParameterSet> KeyPair<P> {
         let s_hat = s.ntt();
         let e_hat = e.ntt();
 
-        // t_hat = A . s_hat + e_hat
-        let t_hat = (&a_hat * &s_hat) + e_hat;
+        // t_hat = A . s_hat + e_hat. The matrix-vector base multiplication leaves
+        // the product scaled by R^-1; `to_montgomery` restores the standard
+        // domain before adding the true NTT noise e_hat.
+        let t_hat = (&a_hat * &s_hat).to_montgomery() + e_hat;
 
         Self {
             dk_pke: DecryptionKey { s_hat },

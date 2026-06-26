@@ -13,13 +13,18 @@ fn bit_rev_7_known_values() {
     assert_eq!(bit_rev_7(3), 96);
 }
 
-/// The NTT and its inverse compose to the identity on Rq.
+/// In signed-Montgomery form `ntt_inverse(ntt(f))` recovers `f` scaled by `R`:
+/// the forward transform is exact, but the inverse leaves the standard-domain
+/// `R` factor that base multiplication consumes (see
+/// [`TqElement::to_montgomery`]).
 #[test]
-fn ntt_roundtrip_identity() {
+fn ntt_round_trip_scales_by_montgomery_r() {
     let coeffs = core::array::from_fn(|i| FieldElement::new((7 * i as u16 + 1) % parameters::Q));
     let f = RqElement::new(coeffs);
 
-    assert_eq!(f.ntt().ntt_inverse(), f);
+    let expected = RqElement::new(coeffs.map(FieldElement::to_montgomery));
+
+    assert_eq!(f.ntt().ntt_inverse(), expected);
 }
 
 /// Multiplication in Tq agrees with schoolbook multiplication in Rq modulo
@@ -36,7 +41,12 @@ fn ntt_multiplication_matches_schoolbook() {
     assert_eq!(via_ntt, schoolbook_multiply(f, g));
 }
 
-/// Reference multiplication in `Zq[X] / (X^256 + 1)`.
+/// Reference multiplication in `Zq[X] / (X^256 + 1)`, computed in the canonical
+/// value domain so it matches the standard-domain product the NTT path returns.
+///
+/// Uses [`FieldElement::mul_reference`] rather than the type's Montgomery `*`,
+/// and Barrett-reduces each accumulation to keep the running sums inside `i16`
+/// (an unreduced column sums up to `N` products and would overflow).
 // reason: i, j < N so i + j < 2N and (i + j) - N < N; every index into the
 // length-N `result` is provably in bounds.
 #[allow(clippy::indexing_slicing)]
@@ -45,14 +55,14 @@ fn schoolbook_multiply(f: RqElement, g: RqElement) -> RqElement {
 
     for i in 0..parameters::N {
         for j in 0..parameters::N {
-            let product = f[i] * g[j];
+            let product = f[i].mul_reference(g[j]);
             let k = i + j;
 
             if k < parameters::N {
-                result[k] = result[k] + product;
+                result[k] = (result[k] + product).reduce();
             } else {
                 // X^256 = -1, so wrap with a sign flip.
-                result[k - parameters::N] = result[k - parameters::N] - product;
+                result[k - parameters::N] = (result[k - parameters::N] - product).reduce();
             }
         }
     }

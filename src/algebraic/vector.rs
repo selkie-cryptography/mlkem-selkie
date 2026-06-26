@@ -97,6 +97,13 @@ impl<P: ParameterSet> TqVector<P> {
     pub fn ntt_inverse(&self) -> RqVector<P> {
         RqVector::from_vec(self.polys.iter().map(|f| f.ntt_inverse()).collect())
     }
+
+    /// Scales every component by `R` (Montgomery), undoing the `R^-1` left by a
+    /// matrix-vector base multiplication so the result can be added to true NTT
+    /// values.
+    pub fn to_montgomery(&self) -> Self {
+        Self::from_vec(self.polys.iter().map(|f| f.to_montgomery()).collect())
+    }
 }
 
 impl<P: ParameterSet> Add for TqVector<P> {

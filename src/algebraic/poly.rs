@@ -5,6 +5,12 @@
 //! visible in the type system: an [`RqElement`] cannot be multiplied as though
 //! it were already transformed.
 //!
+//! Arithmetic follows the CRYSTALS-Kyber signed Montgomery convention (see
+//! [`crate::algebraic::field`]): the zeta tables are stored in Montgomery form
+//! so a butterfly's `fqmul(zeta, x)` yields the true product, base
+//! multiplication leaves products scaled by `R^-1`, and `ntt_inverse` folds the
+//! `1/128` and the compensating `R` into a single final scale (`f = 1441`).
+//!
 //! [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
 
 use core::ops::{Add, AddAssign, Index, Mul, Sub};
@@ -14,16 +20,6 @@ use crate::{algebraic::field::FieldElement, parameters};
 #[cfg(test)]
 mod tests;
 
-/// ζ, a primitive 256-th root of unity modulo q.
-///
-/// Since q is the prime 3329 = 2^8 · 13 + 1, and n = 256, there are 128
-/// primitive 256-th roots of unity and no primitive 512-th roots of unity in
-/// Zq: thus ζ^128 ≡ −1. Described in [section 4.3] of FIPS 203.
-///
-/// [section 4.3]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.3
-#[allow(dead_code)] // documents the primitive root; the zeta tables are precomputed.
-const ZETA: FieldElement = FieldElement::new(17);
-
 /// The loop strides taken by the NTT (and NTT⁻¹) butterfly stages.
 ///
 /// Listed in [NTT] direction; NTT⁻¹ walks them in reverse.
@@ -31,12 +27,17 @@ const ZETA: FieldElement = FieldElement::new(17);
 /// [NTT]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.9
 const NTT_SERIES: [usize; 7] = [128, 64, 32, 16, 8, 4, 2];
 
+/// Final NTT⁻¹ scale `f = 128^-1 * R^2 mod q = 1441` (Montgomery form), folding
+/// the `1/128` of the inverse transform with the `R` that undoes base
+/// multiplication's `R^-1`.
+const NTT_INVERSE_SCALE: FieldElement = FieldElement::from_montgomery_table(1441);
+
 /// Returns the integer represented by bit-reversing the unsigned 7-bit value
 /// that corresponds to the input integer `i` in `{0, ..., 127}`.
 ///
-/// If `r = r_0 + 2 r_1 + 4 r_2 + ... + 64 r_6` with `r_i` in `{0, 1}`, then
-/// `BitRev7(r) = r_6 + 2 r_5 + 4 r_4 + ... + 64 r_0`. Described in [section
-/// 4.3] of FIPS 203.
+/// If `r = r_0 + 2 r_1 + ... + 64 r_6` with `r_i` in `{0, 1}`, then
+/// `BitRev7(r) = r_6 + 2 r_5 + ... + 64 r_0`. Described in [section 4.3] of
+/// FIPS 203.
 ///
 /// [section 4.3]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.3
 #[allow(dead_code)] // used only by the unit tests; the zeta tables are precomputed.
@@ -76,7 +77,8 @@ pub struct RqElement([FieldElement; parameters::N]);
 
 impl RqElement {
     /// Transforms a polynomial `f` in Rq into its NTT representation `f_hat` in
-    /// Tq.
+    /// Tq, then Barrett-reduces the result so the coefficients stay small for
+    /// base multiplication.
     ///
     /// Implements [Algorithm 9, `NTT(f)`] from FIPS 203.
     ///
@@ -90,7 +92,7 @@ impl RqElement {
 
         for len in NTT_SERIES {
             for start in (0..256).step_by(2 * len) {
-                let zeta = ZETA_BIT_REV_7_MOD_Q[k];
+                let zeta = ZETA_MONT[k];
                 k += 1;
 
                 for j in start..(start + len) {
@@ -99,6 +101,10 @@ impl RqElement {
                     f_hat[j] = f_hat[j] + t;
                 }
             }
+        }
+
+        for coefficient in &mut f_hat {
+            *coefficient = coefficient.reduce();
         }
 
         TqElement::new(f_hat)
@@ -165,10 +171,8 @@ impl From<TqElement> for RqElement {
 /// Elements of the polynomial ring Tq over Zq: the NTT representation.
 ///
 /// The ring Rq is isomorphic to Tq, a direct sum of 128 quadratic extensions of
-/// Zq. The NTT is the computationally efficient isomorphism between them, so
-/// that `f *_Rq g = NTT⁻¹(NTT(f) *_Tq NTT(g))`, and `*_Tq` (a 128-way product
-/// of degree-one multiplications) is much cheaper than `*_Rq`. See [section
-/// 4.3] of FIPS 203.
+/// Zq. The NTT is the computationally efficient isomorphism between them. See
+/// [section 4.3] of FIPS 203.
 ///
 /// [section 4.3]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.3
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -177,6 +181,11 @@ pub struct TqElement([FieldElement; parameters::N]);
 impl TqElement {
     /// Transforms a polynomial `f_hat` in Tq from its NTT representation back
     /// into `f` in Rq.
+    ///
+    /// Because base multiplication leaves products scaled by `R^-1`, this also
+    /// applies the [`NTT_INVERSE_SCALE`] factor that restores the standard
+    /// domain — so `(f_hat * g_hat).ntt_inverse()` is the true product `f * g`,
+    /// while `f.ntt().ntt_inverse()` is `f` scaled by `R` (not the identity).
     ///
     /// Implements [Algorithm 10, `NTT⁻¹(f_hat)`] from FIPS 203.
     ///
@@ -189,25 +198,29 @@ impl TqElement {
 
         for len in NTT_SERIES.into_iter().rev() {
             for start in (0..256).step_by(2 * len) {
-                let zeta = ZETA_BIT_REV_7_MOD_Q[k];
+                let zeta = ZETA_MONT[k];
                 k -= 1;
 
                 for j in start..(start + len) {
                     let t = f[j];
-                    f[j] = t + f[j + len];
+                    f[j] = (t + f[j + len]).reduce();
                     f[j + len] = zeta * (f[j + len] - t);
                 }
             }
         }
 
-        // Multiply every coefficient by 128⁻¹ mod q = 3303.
-        const INVERSE_128: FieldElement = FieldElement::new(3303);
-
         for coefficient in &mut f {
-            *coefficient = *coefficient * INVERSE_128;
+            *coefficient = *coefficient * NTT_INVERSE_SCALE;
         }
 
         RqElement::new(f)
+    }
+
+    /// Scales every coefficient by `R`, undoing the `R^-1` left by base
+    /// multiplication so an NTT-domain product can be added to true NTT values
+    /// (`K-PKE.KeyGen`'s `t_hat = A . s_hat + e_hat`).
+    pub fn to_montgomery(self) -> Self {
+        Self(self.0.map(FieldElement::to_montgomery))
     }
 }
 
@@ -260,17 +273,18 @@ impl Mul for TqElement {
     ///
     /// Implements [Algorithm 11, `MultiplyNTTs(f_hat, g_hat)`] from FIPS 203,
     /// which reduces to 128 independent degree-one products via
-    /// `base_case_multiply`.
+    /// `base_case_multiply`. The result is scaled by `R^-1` (Montgomery
+    /// convention), which `ntt_inverse` later undoes.
     ///
     /// [Algorithm 11, `MultiplyNTTs(f_hat, g_hat)`]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.11
     // reason: indices 2i and 2i+1 are provably in 0..256 for i in 0..128, and the
-    // loop reads `ZETA_2...[i]` while writing `h_hat[2i]`/`h_hat[2i+1]` from
+    // loop reads `GAMMA_MONT[i]` while writing `h_hat[2i]`/`h_hat[2i+1]` from
     // `f_hat`/`g_hat`; the pairwise indexing is clearer than a chunked-iterator
     // rewrite over four parallel arrays.
     #[allow(clippy::indexing_slicing, clippy::needless_range_loop)]
     fn mul(self, rhs: Self) -> Self {
         /// Computes the product of two degree-one polynomials modulo the
-        /// quadratic `X^2 - gamma`.
+        /// quadratic `X^2 - gamma`, with `gamma` in Montgomery form.
         ///
         /// Implements [Algorithm 12, `BaseCaseMultiply(a0, a1, b0, b1, gamma)`]
         /// from FIPS 203.
@@ -300,7 +314,7 @@ impl Mul for TqElement {
                 f_hat[odd],
                 g_hat[even],
                 g_hat[odd],
-                ZETA_2_BIT_REV_7_MOD_Q_PLUS_1[i],
+                GAMMA_MONT[i],
             );
         }
 
@@ -308,32 +322,11 @@ impl Mul for TqElement {
     }
 }
 
-/// Relabels an array of canonical `u16` representatives as field elements at
-/// compile time, avoiding a per-access modular reduction in the NTT.
-///
-/// Each value is taken to already lie in `0..Q`.
-const fn field_elements<const M: usize>(values: [u16; M]) -> [FieldElement; M] {
-    let mut elements = [FieldElement::ZERO; M];
-
-    // const fn cannot iterate; the indices are bounded by the array length M.
-    #[allow(clippy::indexing_slicing)] // reason: i < M by construction.
-    let mut i = 0;
-    while i < M {
-        #[allow(clippy::indexing_slicing)] // reason: i < M by the loop guard.
-        {
-            elements[i] = FieldElement::new(values[i]);
-        }
-        i += 1;
-    }
-
-    elements
-}
-
-/// The values of `ζ^BitRev7(i) mod q` for `i` in `{0, ..., 127}` from
-/// [FIPS 203 Appendix A].
+/// The Montgomery-form values `ζ^BitRev7(i) * R mod q` for `i` in `{0, ...,
+/// 127}`, derived from the canonical [FIPS 203 Appendix A] table.
 ///
 /// [FIPS 203 Appendix A]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#appendix.A
-const ZETA_BIT_REV_7_MOD_Q: [FieldElement; 128] = field_elements([
+const ZETA_MONT: [FieldElement; 128] = FieldElement::montgomery_table([
     1, 1729, 2580, 3289, 2642, 630, 1897, 848, 1062, 1919, 193, 797, 2786, 3260, 569, 1746, 296,
     2447, 1339, 1476, 3046, 56, 2240, 1333, 1426, 2094, 535, 2882, 2393, 2879, 1974, 821, 289, 331,
     3253, 1756, 1197, 2304, 2277, 2055, 650, 1977, 2513, 632, 2865, 33, 1320, 1915, 2319, 1435,
@@ -344,15 +337,12 @@ const ZETA_BIT_REV_7_MOD_Q: [FieldElement; 128] = field_elements([
     1026, 1143, 2150, 2775, 886, 1722, 1212, 1874, 1029, 2110, 2935, 885, 2154,
 ]);
 
-/// The values of `ζ^(2 BitRev7(i) + 1) mod q` for `i` in `{0, ..., 127}` from
-/// [FIPS 203 Appendix A], with the modular reduction actually applied.
-///
-/// The second table in Appendix A did not reduce each entry mod q; these values
-/// match [BoringSSL's table].
+/// The Montgomery-form values `ζ^(2 BitRev7(i) + 1) * R mod q` for `i` in
+/// `{0, ..., 127}`, derived from the canonical [FIPS 203 Appendix A] table (the
+/// modular reduction applied, matching BoringSSL).
 ///
 /// [FIPS 203 Appendix A]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#appendix.A
-/// [BoringSSL's table]: https://boringssl.googlesource.com/boringssl/+/f1b043c28352a4e79114324ca2e86df33922e843/crypto/mlkem/mlkem.cc#163
-const ZETA_2_BIT_REV_7_MOD_Q_PLUS_1: [FieldElement; 128] = field_elements([
+const GAMMA_MONT: [FieldElement; 128] = FieldElement::montgomery_table([
     17, 3312, 2761, 568, 583, 2746, 2649, 680, 1637, 1692, 723, 2606, 2288, 1041, 1100, 2229, 1409,
     1920, 2662, 667, 3281, 48, 233, 3096, 756, 2573, 2156, 1173, 3015, 314, 3050, 279, 1703, 1626,
     1651, 1678, 2789, 540, 1789, 1540, 1847, 1482, 952, 2377, 1461, 1868, 2687, 642, 939, 2390,
