@@ -19,8 +19,20 @@ permissions:
 
 jobs:
   benchmarks:
-    name: divan wall-clock benchmarks
-    runs-on: ubuntu-latest
+    name: divan (${{ matrix.backend }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      # One run per polynomial backend build.rs selects (see ci.yml's test
+      # matrices): generic on baseline x86, AVX2 with target-cpu=v3, NEON on the
+      # aarch64 macOS runner.
+      matrix:
+        include:
+          - { backend: generic, os: ubuntu-latest, rustflags: "" }
+          - { backend: avx2, os: ubuntu-latest, rustflags: "-C target-cpu=x86-64-v3" }
+          - { backend: neon, os: macos-latest, rustflags: "" }
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,14 +53,23 @@ jobs:
         uses: ./.github/actions/ci-publish
         with:
           path: bench
-          dest: bench
+          dest: bench-${{ matrix.backend }}
           status: ok
-          summary: divan wall-clock medians
+          summary: divan wall-clock medians (${{ matrix.backend }})
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}
 
   instructions:
-    name: gungraun callgrind instruction counts
+    name: gungraun instruction counts (${{ matrix.backend }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # x86_64 only (Valgrind/callgrind): generic baseline and the AVX2 backend.
+      matrix:
+        include:
+          - { backend: generic, rustflags: "" }
+          - { backend: avx2, rustflags: "-C target-cpu=x86-64-v3" }
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -69,14 +90,23 @@ jobs:
         uses: ./.github/actions/ci-publish
         with:
           path: instructions.txt
-          dest: instructions
+          dest: instructions-${{ matrix.backend }}
           status: ok
-          summary: gungraun instruction counts
+          summary: gungraun instruction counts (${{ matrix.backend }})
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}
 
   cycles:
-    name: rdtsc megacycles (x86_64)
+    name: rdtsc megacycles (${{ matrix.backend }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # rdtsc is x86_64 only: generic baseline and the AVX2 backend.
+      matrix:
+        include:
+          - { backend: generic, rustflags: "" }
+          - { backend: avx2, rustflags: "-C target-cpu=x86-64-v3" }
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -92,7 +122,7 @@ jobs:
         uses: ./.github/actions/ci-publish
         with:
           path: cycles.txt
-          dest: cycles
+          dest: cycles-${{ matrix.backend }}
           status: ok
-          summary: rdtsc megacycles (x86_64)
+          summary: rdtsc megacycles (${{ matrix.backend }})
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}
