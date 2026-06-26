@@ -9,7 +9,10 @@
 #![allow(mixed_script_confusables)]
 #![allow(non_snake_case)]
 #![deny(missing_docs, clippy::indexing_slicing, clippy::unwrap_used)]
-#![forbid(unsafe_code)]
+// `deny`, not `forbid`: the only `unsafe` in the crate is the SIMD intrinsics in
+// the `poly::arch::{neon,avx2}` backends, each call carrying a `// SAFETY:` note.
+// Everything outside those modules stays unsafe-free.
+#![deny(unsafe_code)]
 #![warn(rust_2018_idioms)]
 
 use rand_core::{CryptoRng, RngCore};

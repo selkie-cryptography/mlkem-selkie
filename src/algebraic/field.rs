@@ -34,7 +34,12 @@ const MONT_R_SQUARED: i16 = 1353;
 /// The stored value is a representative of the residue class, not necessarily
 /// in `0..q`; [`Self::value`] returns the canonical representative.
 // TODO(ct): branch-free and division-free, hence constant-time on secret data.
+//
+// `repr(transparent)` guarantees the same layout as `i16`, so the SIMD backends
+// (`crate::algebraic::poly::arch`) can reinterpret a `[FieldElement; N]` as
+// `[i16; N]` for vector loads/stores.
 #[derive(Debug, Clone, Copy)]
+#[repr(transparent)]
 pub struct FieldElement(i16);
 
 impl FieldElement {
