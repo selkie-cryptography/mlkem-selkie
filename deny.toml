@@ -1,8 +1,17 @@
 # cargo-deny configuration. https://embarkstudios.github.io/cargo-deny/
+# Lifted from sqisign-selkie, adapted for mlkem-selkie's dependency tree.
 
 [advisories]
-# Fail on any security advisory or unmaintained/yanked crate.
+# `vulnerability` was removed — all vulnerabilities are now errors. Flag
+# unmaintained advisories for first-party (workspace) crates only, so transitive
+# dev-dependency churn (ansi_term, proc-macro-error, ...) does not fail the build.
+unmaintained = "workspace"
 yanked = "deny"
+# A dev-only `rand` 0.9 (test/bench infrastructure, never the library itself)
+# trips the ThreadRng unsoundness advisory, which only manifests with a custom
+# logger calling `rand::rng()` — a condition these tests never create, and for
+# which no patched release exists.
+ignore = ["RUSTSEC-2026-0097"]
 
 [bans]
 # Warn on duplicate versions of a dependency (the dev-only `rand` 0.8 vs the
@@ -13,11 +22,12 @@ wildcards = "deny"
 [licenses]
 # Permissive licenses acceptable for an Apache-2.0 OR MIT crate.
 allow = [
-    "Apache-2.0",
     "MIT",
+    "Apache-2.0",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
+    "CC0-1.0",
     "Unicode-3.0",
     "Zlib",
 ]

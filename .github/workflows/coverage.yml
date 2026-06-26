@@ -25,7 +25,7 @@ jobs:
       - name: Collect coverage (lib + integration tests, internals exposed)
         run: |
           cargo llvm-cov --features expose-internals --lcov --output-path lcov.info
-          cargo llvm-cov report --features expose-internals --html
+          cargo llvm-cov report --html
       - uses: actions/upload-artifact@v4
         with:
           name: coverage-lcov
