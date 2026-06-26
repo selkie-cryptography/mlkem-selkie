@@ -19,6 +19,20 @@ fn random_poly(state: &mut u32) -> [FieldElement; parameters::N] {
     })
 }
 
+/// Fills a polynomial with canonical coefficients (`0..q`). The forward NTT
+/// accumulates across stages without per-stage reduction, so its inputs must be
+/// bounded — unlike `multiply`, whose Montgomery reduction bounds every
+/// product.
+fn random_canonical_poly(state: &mut u32) -> [FieldElement; parameters::N] {
+    core::array::from_fn(|_| {
+        *state ^= *state << 13;
+        *state ^= *state >> 17;
+        *state ^= *state << 5;
+
+        FieldElement::new((*state & 0xFFFF) as u16)
+    })
+}
+
 /// `multiply` matches the scalar backend over many random input pairs.
 #[test]
 fn multiply_matches_generic() {
@@ -29,5 +43,39 @@ fn multiply_matches_generic() {
         let g = random_poly(&mut state);
 
         assert_eq!(super::multiply(&f, &g), generic::multiply(&f, &g));
+    }
+}
+
+/// `ntt` matches the scalar backend over many random canonical inputs.
+#[test]
+fn ntt_matches_generic() {
+    let mut state = 0x9E37_79B9;
+
+    for _ in 0..1000 {
+        let input = random_canonical_poly(&mut state);
+
+        let mut vectorized = input;
+        let mut scalar = input;
+        super::ntt(&mut vectorized);
+        generic::ntt(&mut scalar);
+
+        assert_eq!(vectorized, scalar);
+    }
+}
+
+/// `ntt_inverse` matches the scalar backend over many random canonical inputs.
+#[test]
+fn ntt_inverse_matches_generic() {
+    let mut state = 0xDEAD_BEEF;
+
+    for _ in 0..1000 {
+        let input = random_canonical_poly(&mut state);
+
+        let mut vectorized = input;
+        let mut scalar = input;
+        super::ntt_inverse(&mut vectorized);
+        generic::ntt_inverse(&mut scalar);
+
+        assert_eq!(vectorized, scalar);
     }
 }
