@@ -1,0 +1,7 @@
+# Don't flag public-API changes — this crate is pre-1.0 and the API is still
+# evolving.
+avoid-breaking-exported-api = false
+# Pin clippy's version-dependent lints (msrv-gated suggestions, incompatible_msrv)
+# so the gate is deterministic across toolchain versions, the clippy analog of
+# rustfmt's `style_edition`.
+msrv = "1.85"
