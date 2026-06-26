@@ -1,0 +1,32 @@
+name: Scripts compile
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/**"
+      - ".github/workflows/scripts-compile.yml"
+  pull_request:
+    paths:
+      - "scripts/**"
+      - ".github/workflows/scripts-compile.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    name: rustc -O scripts/*.rs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile standalone scripts
+        run: |
+          for script in scripts/*.rs; do
+            echo "compiling $script"
+            rustc -O --edition 2021 "$script" -o "/tmp/$(basename "$script" .rs)"
+          done

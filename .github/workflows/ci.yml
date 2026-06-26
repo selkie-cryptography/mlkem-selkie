@@ -1,196 +1,110 @@
-name: ci
+name: CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
-  schedule:
-    - cron: '0 0 * * *'
   workflow_dispatch:
-
-env:
-  CARGO_TERM_COLOR: always
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
 jobs:
-
-  build_default:
-    name: build with default features
+  fmt:
+    name: Format
     runs-on: ubuntu-latest
-
     steps:
-      - uses: actions/checkout@v4.1.1
-      - uses: actions-rs/toolchain@v1.0.7
+      - uses: actions/checkout@v4
         with:
-          toolchain: beta
-          override: true
-      - uses: actions-rs/cargo@v1.0.3
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@nightly
         with:
-          command: build
-
-  test_beta:
-    name: test on beta
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4.1.1
-      - uses: actions-rs/toolchain@v1.0.7
-        with:
-          toolchain: beta
-          override: true
-      - uses: actions-rs/cargo@v1.0.3
-        with:
-          command: test
-          args: --release --all-features
+          components: rustfmt
+      - run: cargo +nightly fmt --all --check
 
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4.1.1
-        with:
-          persist-credentials: false
-
-      - uses: actions-rs/toolchain@v1.0.7
-        with:
-          toolchain: stable
-          override: true
-
-      - name: Check workflow permissions
-        id: check_permissions
-        uses: scherermichael-oss/action-has-permission@1.0.6
-        with:
-          required-permission: write
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Run clippy action to produce annotations
-        uses: actions-rs/clippy-check@v1.0.7
-        if: ${{ steps.check_permissions.outputs.has-permission }}
-        with:
-          # GitHub displays the clippy job and its results as separate entries
-          name: Clippy (stable) Results
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features --all-targets -- -D warnings
-
-      - name: Run clippy manually without annotations
-        if: ${{ !steps.check_permissions.outputs.has-permission }}
-        run: cargo clippy --all-features --all-targets -- -D warnings
-
-  fmt:
-    name: Rustfmt
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4.1.1
-        with:
-          persist-credentials: false
-
-      - uses: actions-rs/toolchain@v1.0.7
-        with:
-          toolchain: stable
-          components: rustfmt
-          override: true
-
-      - uses: Swatinem/rust-cache@v2
-
-      - uses: actions-rs/cargo@v1.0.3
-        with:
-          command: fmt
-          args: --all -- --check
-
-  docs:
-    name: Check Rust doc
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4.1.1
-        with:
-          persist-credentials: false
-
-      - uses: actions-rs/toolchain@v1.0.7
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
-
-      - uses: actions-rs/cargo@v1.0.3
-        with:
-          command: doc
-          args: --no-deps --document-private-items --all-features
-
-
-  hax:
-    name: Check Hax high assurance translation compatibility
-    runs-on: "ubuntu-latest"
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: 🔨 OCaml Setup
-        uses: ocaml/setup-ocaml@v2
         with:
-          ocaml-compiler: 4.14.1
-
-      - name: ⤵ Get Fstar binaries
-        run: |
-          curl -L https://github.com/FStarLang/FStar/releases/download/v2023.09.03/fstar_2023.09.03_Linux_x86_64.tar.gz \
-            --output Fstar.tar.gz
-          tar --extract --file Fstar.tar.gz
-
-      # - name: ⤵ Clone HACL-star repository
-      #   uses: actions/checkout@v4
-      #   with:
-      #     repository: hacl-star/hacl-star
-      #     path: hacl-star
-
-      - name: ⤵ Clone hax repository
-        uses: actions/checkout@v4
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          repository: hacspec/hacspec-v2
-          path: hax
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy (default features)
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Clippy (all features)
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: 🔨 Setup hax
-        working-directory: hax
+  doc:
+    name: Documentation
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --no-deps --document-private-items --all-features
+
+  test:
+    name: "test (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test (default features)
+        run: cargo test --profile release-checked
+      - name: Test (expose-internals)
+        run: cargo test --profile release-checked --features expose-internals
+      - name: Doctests
+        run: cargo test --doc
+
+  feature-combinations:
+    name: Feature combinations build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build with no parameter sets
+        run: cargo build --no-default-features
+      - name: Build each parameter set alone
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes nodejs
-          ./setup.sh
+          for set in mlkem512 mlkem768 mlkem1024; do
+            cargo build --no-default-features --features "$set"
+          done
+      - name: Build with internals exposed
+        run: cargo build --no-default-features --features mlkem768,expose-internals
 
-      - name: 🏃 Extract and verify the reference code
-        run: |
-          eval $(opam env)
-          ./hax-driver.py --kyber-reference
-          env FSTAR_HOME=${{ github.workspace }}/fstar \
-              # HACL_HOME=${{ github.workspace }}/hacl-star \
-              HAX_HOME=${{ github.workspace }}/hax \
-              PATH="${PATH}:${{ github.workspace }}/fstar/bin" \
-              ./hax-driver.py --verify-extraction
-
-      # - name: 🏃 Extract the specification
-      #   run: |
-      #     eval $(opam env)
-      #     # Extract the functions in the compress module individually to test
-      #     # the function-extraction code.
-      #     # Extract functions from the remaining modules to test the
-      #     # module-extraction code.
-      #     ./hax-driver.py --crate-path specs/kyber \
-      #       --functions hacspec_kyber::compress::compress \
-      #                   hacspec_kyber::compress::decompress \
-      #                   hacspec_kyber::compress::compress_d \
-      #                   hacspec::kyber::compress::decompress_d \
-      #       --modules ind_cpa \
-      #                 hacspec_kyber \
-      #                 matrix \
-      #                 ntt \
-      #                 parameters \
-      #                 sampling \
-      #                 serialize \
-      #       --exclude-modules libcrux::hacl::sha3 libcrux::digest
+  benches-compile:
+    name: Benchmarks compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo bench --no-run --features expose-internals

@@ -1,150 +1,252 @@
-//! K-PKE: internal-only, IND-CPA-secure public key encryption.
+//! K-PKE: the internal, IND-CPA-secure public-key encryption scheme.
 //!
-//! Implements section 5 of the NIST [FIPS 203] standard.
+//! Implements [section 5] of FIPS 203: `K-PKE.KeyGen` (Algorithm 13),
+//! `K-PKE.Encrypt` (Algorithm 14), and `K-PKE.Decrypt` (Algorithm 15).
 //!
-//! [FIPS-203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
+//! K-PKE is never exposed directly. ML-KEM wraps it in the Fujisaki–Okamoto
+//! transform; in particular, ciphertexts produced inside `ML-KEM.Decaps` are
+//! secret-dependent and must be compared in constant time by the caller.
+//!
+//! [section 5]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#section.5
 
 use crate::{
-    algebraic,
-    functions::{G, PRF},
+    algebraic::{RqElement, RqVector, TqElement, TqMatrix, TqVector},
+    functions::{G, PRF, XOF},
     parameters::ParameterSet,
 };
 
-/// A K-PKE ciphertext resulting from `K-PKE.Encrypt()`, defined in section 5 of [FIPS-203].
-///
-/// Should _not_ be used outside the bounds of ML-KEM, including [being treated as 'public' data and
-/// computed over as such][cryspen-verified-mlkem]: `K-PKE` ciphertexts are created inside `ML-KEM.Decaps()` that are _not
-/// public_ and must be computed over in a side-channel-free and value-independent manner.
-///
-/// [FIPS-203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
-/// [cryspen-verified-mlkem]: https://cryspen.com/post/ml-kem-implementation/
-pub(crate) struct Ciphertext<P: ParameterSet>;
+#[cfg(test)]
+mod tests;
 
-/// A message to be encrypted via `K-PKE.Encrypt()` defined in [FIPS 203], section 5.
+/// K-PKE key generation randomness seed `d` (Algorithm 13 input).
 ///
-/// Distinct from a message that has been decrypted by `K-PKE.Decrypt()`, and distinct from the
-/// messages (shared secret) returned from `ML-KEM.Encaps()` and `ML-KEM.Decaps()`.
-///
-/// [FIPS-203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
-pub(crate) struct MessageForEncryption<P: ParameterSet>([u8; 32]);
+/// Should never be exposed outside ML-KEM.
+pub struct KeyGenRandomnessSeed<P: ParameterSet>([u8; 32], core::marker::PhantomData<P>);
 
-/// A message decrypted via `K-PKE.Decrypt()` defined in [FIPS 203], section 5.
-///
-/// Distinct from a message that is to be encrypted by `K-PKE.Encrypt()`, and distinct from the
-/// messages (shared secret) returned from `ML-KEM.Encaps()` and `ML-KEM.Decaps()`.
-///
-/// [FIPS-203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
-pub(crate) struct DecryptedMessage<P: ParameterSet>([u8; 32]);
+impl<P: ParameterSet> KeyGenRandomnessSeed<P> {
+    /// Constructs the seed from 32 random bytes.
+    pub fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes, core::marker::PhantomData)
+    }
+}
 
-/// A K-PKE encryption key from section 5 of [FIPS-203].
-///
-/// Should _not_ be used outside the bounds of ML-KEM.
-///
-/// [FIPS-203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
-// TODO: revisit making interior bytes pub(crate)
-pub(crate) struct EncryptionKey<P: ParameterSet>();
+/// A K-PKE encryption key: the NTT-domain vector `t_hat` and the matrix seed
+/// `rho` (section 5 of FIPS 203).
+#[derive(Clone)]
+pub struct EncryptionKey<P: ParameterSet> {
+    /// `t_hat = A . s_hat + e_hat`, the public vector in Tq.
+    t_hat: TqVector<P>,
+    /// The 32-byte seed from which the public matrix `A` is regenerated.
+    rho: [u8; 32],
+}
 
-/// A K-PKE decryption key from section 5 of [FIPS-203].
-///
-/// Should _not_ be used outside the bounds of ML-KEM.
-///
-/// [FIPS-203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
-pub(crate) struct DecryptionKey<P: ParameterSet>();
+impl<P: ParameterSet> EncryptionKey<P> {
+    /// Serializes to `ByteEncode_12(t_hat) ‖ rho`, of length
+    /// `P::PKE_ENCRYPTION_KEY_SIZE`.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = self.t_hat.byte_encode();
+        bytes.extend_from_slice(&self.rho);
 
-impl<P> DecryptionKey<P>
-where
-    P: ParameterSet,
-{
-    /// Byte serialization of the K-PKE encapsulation key.
+        bytes
+    }
+
+    /// Parses an encryption key from `384 * K + 32` bytes.
     ///
-    /// Should be _internal only_.
-    fn serialize(self) -> P::PKEDecryptionKeySerialization {
-        todo!()
-    }
-}
-
-/// Seed randomness used to generate the matrix Â during `K-PKE` (and thus `ML-KEM`) [key
-/// generation][FIPS 203].
-///
-/// See section 5.1 of [FIPS 203].
-///
-/// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
-struct MatrixSeedRandomness(pub(self) [u8; 32]);
-
-/// Seed randomness used to sample the secret vector `s` and the noise `e` during `K-PKE` (and thus
-/// `ML-KEM`) [key generation][FIPS 203].
-///
-/// See section 5.1 of [FIPS 203].
-///
-/// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
-struct SecretAndNoiseSamplingRandomness(pub(self) [u8; 32]);
-
-/// K-PKE key generation randomness seed from section 5 of [FIPS-203].
-///
-/// Should _not_ be used outside the bounds of ML-KEM.
-///
-/// [FIPS-203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
-pub(crate) struct KeyGenRandomnessSeed<P: ParameterSet>([u8; 32]);
-
-impl<P> KeyGenRandomnessSeed<P>
-where
-    P: ParameterSet,
-{
-    /// K-PKE key generation randomness seed constructor.
-    pub(crate) fn new(bytes: [u8; 32]) -> Self {
-        Self(bytes)
-    }
-}
-
-impl<P> From<KeyGenRandomnessSeed<P>> for (MatrixSeedRandomness, SecretAndNoiseSamplingRandomness)
-where
-    P: ParameterSet,
-{
-    fn from(
-        d: KeyGenRandomnessSeed<P>,
-    ) -> (MatrixSeedRandomness, SecretAndNoiseSamplingRandomness) {
-        let [rho, sigma] = G(&d.0);
-
-        return (
-            MatrixSeedRandomness(rho),
-            SecretAndNoiseSamplingRandomness(sigma),
-        );
-    }
-}
-
-/// A K-PKE key pair derived via Algorithm 12 in [FIPS 203], section 5.
-///
-/// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
-// TODO: revisit making struct members pub(crate)
-pub(crate) struct KeyPair<P: ParameterSet> {
-    /// K-PKE decryption key key.
-    pub(crate) dk_pke: DecryptionKey<P>,
-    /// ML-KEM encryption key.
-    pub(crate) ek_pke: EncryptionKey<P>,
-}
-
-impl<P> KeyPair<P>
-where
-    P: ParameterSet,
-{
-    /// Generate a `K-PKE` key pair based on the provided seed randomness.
+    /// # Panics
     ///
-    /// This diverges from Algorithm 12 in section 5.1 of [FIPS 203] but is otherwise aligned.  We
-    /// do not provided a similar randomized (internally sourcing fresh randomness) implementation
-    /// as for `ML-KEM.KeyGen()` as this associated function should never be exposed in the public
-    /// API, it is only used internally, and the `ML-KEM.KeyGen()` implementation that calls it will
-    /// source fresh randomness for it.
-    ///
-    /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
-    pub(crate) fn new_derand(seed: KeyGenRandomnessSeed<P>) -> Result<KeyPair<P>, Error> {
-        // (ρ,σ) ← G(d)                  ▷ expand to two pseudorandom 32-byte seeds
-        let (rho, sigma) = seed.into();
+    /// Debug-asserts the input length; callers in `ML-KEM` validate the length
+    /// at the public boundary before parsing (FIPS 203 section 7.2).
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        debug_assert_eq!(bytes.len(), P::PKE_ENCRYPTION_KEY_SIZE);
 
-        // Generate matrix Â
+        let (encoded_t, rho_bytes) = bytes.split_at(384 * P::K);
+
+        let t_hat = TqVector::<P>::byte_decode(encoded_t);
+        let mut rho = [0u8; 32];
+        rho.copy_from_slice(rho_bytes);
+
+        Self { t_hat, rho }
     }
 
-    /// Get the K-PKE encryption key.
-    pub(crate) fn ek(self) -> EncryptionKey<P> {
-        self.ek_pke
+    /// `K-PKE.Encrypt`: encrypts a 32-byte message under explicit encryption
+    /// randomness `r`.
+    ///
+    /// Implements [Algorithm 14] of FIPS 203.
+    ///
+    /// [Algorithm 14]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.14
+    pub fn encrypt(&self, message: &[u8; 32], randomness: &[u8; 32]) -> Ciphertext<P> {
+        let a_hat = TqMatrix::<P>::expand(&self.rho);
+
+        let mut n = 0u8;
+        let y = RqVector::<P>::sample_cbd(P::ETA_1, randomness, &mut n);
+        let e1 = RqVector::<P>::sample_cbd(P::ETA_2, randomness, &mut n);
+        let e2 = RqElement::sample_cbd(P::ETA_2, &PRF(P::ETA_2, randomness, n));
+
+        let y_hat = y.ntt();
+
+        // u = NTT⁻¹(A^T . y_hat) + e1
+        let u = (&a_hat.transpose() * &y_hat).ntt_inverse() + e1;
+
+        // mu = Decompress_1(ByteDecode_1(m))
+        let mu = RqElement::from_message(message);
+
+        // v = NTT⁻¹(t_hat^T . y_hat) + e2 + mu
+        let v = (&self.t_hat * &y_hat).ntt_inverse() + e2 + mu;
+
+        let mut bytes = u.compress_encode(P::D_U);
+        bytes.extend_from_slice(&v.compress_encode(P::D_V));
+
+        Ciphertext::from_bytes(bytes)
+    }
+}
+
+/// A K-PKE decryption key: the NTT-domain secret vector `s_hat` (section 5 of
+/// FIPS 203).
+// No `PartialEq`/`Eq`: this is secret key material.
+pub struct DecryptionKey<P: ParameterSet> {
+    /// `s_hat = NTT(s)`, the secret vector in Tq.
+    s_hat: TqVector<P>,
+}
+
+impl<P: ParameterSet> DecryptionKey<P> {
+    /// Serializes to `ByteEncode_12(s_hat)`, of length
+    /// `P::PKE_DECRYPTION_KEY_SIZE`.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.s_hat.byte_encode()
+    }
+
+    /// Parses a decryption key from `384 * K` bytes.
+    ///
+    /// # Panics
+    ///
+    /// Debug-asserts the input length; callers validate at the public boundary.
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        debug_assert_eq!(bytes.len(), P::PKE_DECRYPTION_KEY_SIZE);
+
+        Self {
+            s_hat: TqVector::<P>::byte_decode(bytes),
+        }
+    }
+
+    /// `K-PKE.Decrypt`: recovers the 32-byte message from a ciphertext.
+    ///
+    /// Implements [Algorithm 15] of FIPS 203.
+    ///
+    /// [Algorithm 15]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.15
+    // TODO(ct): the underlying field arithmetic is variable-time. In
+    // `ML-KEM.Decaps` the recovered message is secret-derived (Algorithm 18
+    // line 5), so this must be made constant-time before production use.
+    pub fn decrypt(&self, ciphertext: &Ciphertext<P>) -> [u8; 32] {
+        let (c1, c2) = ciphertext.as_bytes().split_at(32 * P::D_U * P::K);
+
+        let u = RqVector::<P>::decode_decompress(c1, P::D_U);
+        let v = RqElement::decode_decompress(c2, P::D_V);
+
+        // w = v - NTT⁻¹(s_hat^T . NTT(u))
+        let w = v - (&self.s_hat * &u.ntt()).ntt_inverse();
+
+        w.compress_message()
+    }
+}
+
+/// A K-PKE ciphertext: the serialized, compressed `(u, v)` pair.
+///
+/// Stored as bytes so that `ML-KEM.Decaps` can compare it against a
+/// re-encryption for the implicit-rejection check.
+pub struct Ciphertext<P: ParameterSet>(Vec<u8>, core::marker::PhantomData<P>);
+
+impl<P: ParameterSet> Ciphertext<P> {
+    /// Wraps `32 * (D_U * K + D_V)` ciphertext bytes.
+    pub fn from_bytes(bytes: Vec<u8>) -> Self {
+        debug_assert_eq!(bytes.len(), P::CIPHERTEXT_SIZE);
+
+        Self(bytes, core::marker::PhantomData)
+    }
+
+    /// Returns the serialized ciphertext bytes.
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+/// A K-PKE key pair (Algorithm 13 output).
+pub struct KeyPair<P: ParameterSet> {
+    /// The secret decryption key.
+    pub dk_pke: DecryptionKey<P>,
+    /// The public encryption key.
+    pub ek_pke: EncryptionKey<P>,
+}
+
+impl<P: ParameterSet> KeyPair<P> {
+    /// `K-PKE.KeyGen`: derives a key pair deterministically from the seed `d`.
+    ///
+    /// Diverges from [Algorithm 13] only in that the randomness `d` is supplied
+    /// rather than sampled internally; ML-KEM sources fresh randomness for it.
+    /// Follows FIPS 203 final in expanding `(rho, sigma) ← G(d ‖ k)`, where `k`
+    /// is the parameter byte `P::K` — the domain separator the initial public
+    /// draft omitted.
+    ///
+    /// [Algorithm 13]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.13
+    pub fn new_derand(seed: KeyGenRandomnessSeed<P>) -> Self {
+        let mut g_input = seed.0.to_vec();
+        g_input.push(P::K as u8);
+        let (rho, sigma) = G(&g_input);
+
+        let a_hat = TqMatrix::<P>::expand(&rho);
+
+        let mut n = 0u8;
+        let s = RqVector::<P>::sample_cbd(P::ETA_1, &sigma, &mut n);
+        let e = RqVector::<P>::sample_cbd(P::ETA_1, &sigma, &mut n);
+
+        let s_hat = s.ntt();
+        let e_hat = e.ntt();
+
+        // t_hat = A . s_hat + e_hat
+        let t_hat = (&a_hat * &s_hat) + e_hat;
+
+        Self {
+            dk_pke: DecryptionKey { s_hat },
+            ek_pke: EncryptionKey { t_hat, rho },
+        }
+    }
+}
+
+impl<P: ParameterSet> TqMatrix<P> {
+    /// Regenerates the public matrix `A_hat` from the seed `rho`.
+    ///
+    /// Each entry `A_hat[i][j] = SampleNTT(XOF(rho, j, i))`, per Algorithm 13
+    /// lines 3-7 (and identically in Algorithm 14): the column index `j` is the
+    /// first domain byte and the row index `i` the second, matching the FIPS
+    /// 203 test vectors. `K-PKE.KeyGen` uses `A_hat` directly while
+    /// `K-PKE.Encrypt` multiplies by its transpose.
+    fn expand(rho: &[u8; 32]) -> Self {
+        let rows = (0..P::K)
+            .map(|i| {
+                let row = (0..P::K)
+                    .map(|j| TqElement::sample_ntt(&mut XOF(rho, j as u8, i as u8)))
+                    .collect();
+
+                TqVector::<P>::from_vec(row)
+            })
+            .collect();
+
+        Self::from_rows(rows)
+    }
+}
+
+impl<P: ParameterSet> RqVector<P> {
+    /// Samples a length-`K` vector from the centered binomial distribution
+    /// `D_eta`, advancing the PRF counter `n` once per component.
+    fn sample_cbd(eta: usize, seed: &[u8; 32], n: &mut u8) -> Self {
+        let polys = (0..P::K)
+            .map(|_| {
+                let bytes = PRF(eta, seed, *n);
+                *n += 1;
+
+                RqElement::sample_cbd(eta, &bytes)
+            })
+            .collect();
+
+        Self::from_vec(polys)
     }
 }

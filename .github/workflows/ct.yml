@@ -1,0 +1,66 @@
+name: Constant-time
+
+on:
+  pull_request:
+    paths:
+      - "benches/dudect.rs"
+      - "benches/tacet.rs"
+      - "tests/ctgrind.rs"
+      - "src/**"
+      - ".github/workflows/ct.yml"
+  workflow_dispatch:
+    inputs:
+      slow:
+        description: "Run the slow ctgrind keygen/decaps tests (CTGRIND_SLOW)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  statistical:
+    name: dudect + tacet
+    runs-on: ubuntu-latest
+    # The field arithmetic is currently variable-time (the `TODO(ct)` markers)
+    # and decapsulation's implicit-rejection check is a plain `==`, so these
+    # harnesses report leakage by design until the constant-time rework lands.
+    # `continue-on-error` keeps the signal visible without failing the PR.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: dudect t-test
+        run: cargo bench --bench dudect --features expose-internals
+      - name: tacet attacker-model analysis
+        run: cargo bench --bench tacet --features expose-internals
+
+  ctgrind:
+    name: ctgrind (Valgrind taint tracking)
+    runs-on: ubuntu-latest
+    # `decapsulate` is expected to fail until the implicit-rejection comparison
+    # is made constant-time; the field-op tests should pass (no secret branch).
+    continue-on-error: true
+    env:
+      CTGRIND_SLOW: ${{ inputs.slow && '1' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Valgrind
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes valgrind
+      - name: Build ctgrind test
+        run: cargo test --test ctgrind --features expose-internals --no-run
+      - name: Run under memcheck
+        run: |
+          bin=$(find target/debug/deps -maxdepth 1 -type f -name 'ctgrind-*' ! -name '*.d' -perm -u+x | head -1)
+          echo "running $bin under valgrind"
+          valgrind --tool=memcheck --error-exitcode=1 "$bin" --test-threads=1
+

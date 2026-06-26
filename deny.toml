@@ -1,0 +1,28 @@
+# cargo-deny configuration. https://embarkstudios.github.io/cargo-deny/
+
+[advisories]
+# Fail on any security advisory or unmaintained/yanked crate.
+yanked = "deny"
+
+[bans]
+# Warn on duplicate versions of a dependency (the dev-only `rand` 0.8 vs the
+# 0.9 pulled by dudect-bencher is known and accepted).
+multiple-versions = "warn"
+wildcards = "deny"
+
+[licenses]
+# Permissive licenses acceptable for an Apache-2.0 OR MIT crate.
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "allow" # the hax-lib-macros proof dependency is a git source.

@@ -1,6 +1,6 @@
-/// ML-KEM parameter sets from section 7 of the NIST [FIPS 203] standard.
-///
-/// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
+//! ML-KEM parameter sets from section 7 of the NIST [FIPS 203] standard.
+//!
+//! [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
 
 /// "n is set to 256 because the goal is to encapsulate keys with 256 bits of
 /// entropy (i.e., use a plaintext size of 256 bits in Kyber.CPAPKE.Enc).
@@ -29,7 +29,14 @@ pub(crate) const Q: u16 = 3329;
 /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
 // TODO: revisit the *Serialization associated types when default values are
 // stable / when generic_const_exprs is stable
-pub(crate) trait ParameterSet {
+//
+// Every parameter set is a zero-sized marker, so these supertraits cost
+// nothing: `Copy` lets the `PhantomData<P>` newtypes (`RqVector<P>`,
+// `EncapsulationKey<P>`, ...) derive `Clone` without a separate `P: Clone`
+// bound at every use site, and `Send + Sync` make the key/ciphertext types
+// thread-safe (and lets the divan benchmarks run their closures across
+// threads).
+pub trait ParameterSet: Copy + Send + Sync {
     /// Represents the dimensions of the vectors *s* and *e* in `K-PKE.KeyGen()`
     /// and the dimensions of the matrix *Â* and the vectors *r*, *e_1*, and
     /// *e_2* in `K-PKE.Encrypt()`, as defined in section 5 of the NIST
@@ -92,43 +99,46 @@ pub(crate) trait ParameterSet {
     const PKE_DECRYPTION_KEY_SIZE: usize = 384 * Self::K;
 
     /// Decryption key byte serialization, a byte array of fixed length
-    /// [`PKE_DECRYPTION_KEY_SIZE`].
+    /// [`Self::PKE_DECRYPTION_KEY_SIZE`].
     type PKEDecryptionKeySerialization: AsRef<[u8]> + TryFrom<Vec<u8>>;
 
     /// The derived K-PKE encryption key size in bytes.
     const PKE_ENCRYPTION_KEY_SIZE: usize = (384 * Self::K) + 32;
 
     /// Encryption key byte serialization, a byte array of fixed length
-    /// [`PKE_ENCRYPTION_KEY_SIZE`].
+    /// [`Self::PKE_ENCRYPTION_KEY_SIZE`].
     type PKEEncryptionKeySerialization: AsRef<[u8]> + TryFrom<Vec<u8>>;
 
     /// The derived secret decapsulation key size in bytes.
     const DECAPS_KEY_SIZE: usize = (768 * Self::K) + 96;
 
     /// Decapsulation key byte serialization, a byte array of fixed length
-    /// [`DECAPS_KEY_SIZE`].
+    /// [`Self::DECAPS_KEY_SIZE`].
     type DecapsKeySerialization: AsRef<[u8]> + TryFrom<Vec<u8>>;
 
     /// The derived public encapsulation key size in bytes.
     const ENCAPS_KEY_SIZE: usize = (384 * Self::K) + 32;
 
     /// Encapsulation key byte serialization, a byte array of fixed length
-    /// [`ENCAPS_KEY_SIZE`].
+    /// [`Self::ENCAPS_KEY_SIZE`].
     type EncapsKeySerialization: AsRef<[u8]> + TryFrom<Vec<u8>>;
 
     /// The derived public ciphertext size in bytes.
     const CIPHERTEXT_SIZE: usize = 32 * ((Self::D_U * Self::K) + Self::D_V);
 
     /// Ciphertext byte serialization, a byte array of fixed length
-    /// [`CIPHERTEXT_SIZE`].
+    /// [`Self::CIPHERTEXT_SIZE`].
     type CiphertextSerialization: AsRef<[u8]> + TryFrom<Vec<u8>>;
 }
 
 /// The ML-KEM-512 parameter set defined in [FIPS 203], section 7.
 ///
 /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
-pub(crate) struct MLKEM512;
+#[cfg(feature = "mlkem512")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MLKEM512;
 
+#[cfg(feature = "mlkem512")]
 impl ParameterSet for MLKEM512 {
     const K: usize = 2;
     const ETA_1: usize = 3;
@@ -147,8 +157,11 @@ impl ParameterSet for MLKEM512 {
 /// The ML-KEM-768 parameter set defined in [FIPS 203], section 7.
 ///
 /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
-pub(crate) struct MLKEM768;
+#[cfg(feature = "mlkem768")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MLKEM768;
 
+#[cfg(feature = "mlkem768")]
 impl ParameterSet for MLKEM768 {
     const K: usize = 3;
     const ETA_1: usize = 2;
@@ -167,8 +180,11 @@ impl ParameterSet for MLKEM768 {
 /// The ML-KEM-1024 parameter set defined in [FIPS 203], section 7.
 ///
 /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
-pub(crate) struct MLKEM1024;
+#[cfg(feature = "mlkem1024")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MLKEM1024;
 
+#[cfg(feature = "mlkem1024")]
 impl ParameterSet for MLKEM1024 {
     const K: usize = 4;
     const ETA_1: usize = 2;

@@ -9,16 +9,142 @@ keywords = ["cryptography", "post-quantum", "quantum-resistant",
             "quantum-resilient", "mlkem", "ml-kem", "fips203", "kyber"]
 
 [features]
-# Enable to expose test-only functionality
-test = []
+default = ["mlkem512", "mlkem768", "mlkem1024"]
+# Each parameter set is independently selectable; enabling one exposes its marker
+# type and a nicely-aliased `mlkem{512,768,1024}` module. All three are on by
+# default.
+mlkem512 = []
+mlkem768 = []
+mlkem1024 = []
+# Re-expose the internal modules (algebraic, PKE, encoding, functions, sampling)
+# as `pub` for white-box tests, fuzzing, and benchmarks. Off by default; the
+# normal public API does not need it.
+expose-internals = []
+# Routes the `profile` example through dhat's heap-profiling global allocator
+# (writes dhat-heap.json). Off by default so time profiles keep the real
+# allocator. See scripts/profile.rs.
+dhat-heap = []
 
 [dependencies]
-# Provides NIST 800-90A compliant CTR_DRBG implementation using AES via RustCrypto
-drbg = "0.2.0"
-# libcrux = "0.0.1"
-rand = "0.8.5"
+# AES-256 block cipher, the core of our vendored SP 800-90A CTR_DRBG (src/drbg.rs).
+aes = "0.9"
+# RngCore / CryptoRng traits; the DRBG and the public KeyGen/Encaps APIs are
+# generic over them.
+rand_core = "0.6"
+# SHA3-256/512 and SHAKE128/256 for H, G, J, PRF, and the XOF (src/functions.rs).
 sha3 = "0.10.8"
+# Zeroizing secret key material. TODO: apply ZeroizeOnDrop to DecapsulationKey.
 zeroize = "1.7.0"
+
+[dev-dependencies]
+# Hex decoding of the Wycheproof, ACVP, and interop test vectors.
+hex = "0.4"
+# An independent, formally-verified ML-KEM implementation for the randomized
+# cross-implementation interop tests (tests/libcrux_xtest.rs).
+libcrux-ml-kem = { version = "0.0.9", default-features = false, features = [
+    "mlkem512",
+    "mlkem768",
+    "mlkem1024",
+] }
+# OsRng for round-trip property tests of the randomized API.
+rand = "0.8"
+# Deserializing the Wycheproof and ACVP JSON vectors (hand-rolled schema, no `wycheproof` crate).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Wall-clock median benchmarks (benches/mlkem.rs, benches/algebraic.rs).
+divan = "0.1"
+# Heap profiling for the `profile` example, under the `dhat-heap` feature.
+dhat = "0.3"
+# Property-based tests (tests/*_properties.rs).
+proptest = "1"
+# `#[cfg_attr(test, mutants::skip)]` attribute for cargo-mutants.
+mutants = "0.0.4"
+# Constant-time t-test (benches/dudect.rs).
+dudect-bencher = "0.7"
+# Attacker-model-aware constant-time analysis (benches/tacet.rs).
+tacet = "0.4"
+# Deterministic callgrind instruction counts (benches/instructions.rs).
+gungraun = "0.19"
+
+# x86_64-only: the rdtsc `cycles` bench. criterion-cycles-per-byte has no
+# unprivileged cycle source on aarch64, so the deps and the bench body are
+# confined to x86_64 (a skip stub compiles elsewhere).
+[target.'cfg(target_arch = "x86_64")'.dev-dependencies]
+criterion = "0.8"
+criterion-cycles-per-byte = "0.8"
+
+# Linux-only: crabgrind issues Valgrind client requests for the ctgrind
+# taint-tracking constant-time test. Its build script needs <valgrind/valgrind.h>
+# (absent on stock macOS), so it is confined to Linux; tests/ctgrind.rs compiles
+# to an empty target elsewhere.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+crabgrind = "0.2"
+
+# Property tests that reach internal field/ring arithmetic.
+[[test]]
+name = "algebraic_properties"
+required-features = ["expose-internals"]
+
+# Valgrind taint-tracking constant-time test (Linux-only at runtime).
+[[test]]
+name = "ctgrind"
+required-features = ["expose-internals"]
+
+# Public-API benchmarks: keygen / encaps / decaps and key parsing.
+[[bench]]
+name = "mlkem"
+harness = false
+
+# Internal hot-path benchmarks (NTT, sampling, encoding); needs the internals
+# exposed.
+[[bench]]
+name = "algebraic"
+harness = false
+required-features = ["expose-internals"]
+
+# Constant-time t-test bench (dudect). Reaches internal field ops.
+[[bench]]
+name = "dudect"
+harness = false
+required-features = ["expose-internals"]
+
+# Attacker-model constant-time analysis (tacet).
+[[bench]]
+name = "tacet"
+harness = false
+required-features = ["expose-internals"]
+
+# Deterministic callgrind instruction counts (gungraun).
+[[bench]]
+name = "instructions"
+harness = false
+required-features = ["expose-internals"]
+
+# rdtsc megacycles (criterion-cycles-per-byte); x86_64-only at runtime, skip
+# stub elsewhere. Public API only, so no feature gate.
+[[bench]]
+name = "cycles"
+harness = false
+
+# Release codegen with full debuginfo, for flamegraphs / samply / dhat so hot
+# paths match production while the profiler can still attribute inlined frames.
+[profile.profiling]
+inherits = "release"
+debug = true
+
+# Release optimization with debug-assertions + overflow-checks retained, for CI
+# test runs (catches arithmetic UB that the unoptimized debug profile would also
+# catch, but at release speed).
+[profile.release-checked]
+inherits = "release"
+debug-assertions = true
+overflow-checks = true
+
+# cargo-mutants builds a fresh tree per mutant, so build time dominates; inherit
+# release-checked but drop debuginfo. Pairs with .cargo/mutants.toml.
+[profile.mutants]
+inherits = "release-checked"
+debug = "none"
 
 # When using the hax toolchain, we have more dependencies.  This is only
 # required when doing proofs.

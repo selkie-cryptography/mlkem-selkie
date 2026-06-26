@@ -1,0 +1,32 @@
+name: Mutants
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  incremental:
+    name: cargo-mutants (changed code)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants,cargo-nextest
+      - uses: Swatinem/rust-cache@v2
+      - name: Mutate only the PR diff
+        run: |
+          git diff "origin/${{ github.base_ref }}" > pr.diff
+          cargo mutants --no-shuffle -j 2 --in-diff pr.diff
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutants-out
+          path: mutants.out

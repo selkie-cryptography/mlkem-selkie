@@ -1,0 +1,46 @@
+name: Cancel PR runs on close
+
+# When a PR closes (merged or otherwise), cancel any still-running workflow runs
+# for the PR's head_sha (CI, perf, mutants, coverage). GitHub does not do this
+# automatically. Cancelled runs render as "cancelled", not "failure", so this
+# does not pollute the PR's checks.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  # cancelWorkflowRun is an `actions: write` operation.
+  actions: write
+  contents: read
+
+jobs:
+  cancel:
+    name: Cancel queued + in-progress runs for this PR's head_sha
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const head_sha = context.payload.pull_request.head.sha;
+            core.info(`cancelling queued/in-progress runs for head_sha=${head_sha}`);
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRunsForRepo,
+              { owner: context.repo.owner, repo: context.repo.repo, head_sha, per_page: 100 },
+            );
+            let cancelled = 0;
+            for (const r of runs) {
+              // Skip self, or this job would cancel its own run mid-loop.
+              if (r.id === context.runId) continue;
+              if (r.status === 'queued' || r.status === 'in_progress') {
+                core.info(`  cancel run ${r.id} ${r.name} (${r.status})`);
+                await github.rest.actions.cancelWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  run_id: r.id,
+                });
+                cancelled++;
+              }
+            }
+            core.info(`cancelled ${cancelled} run(s)`);

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>mlkem-selkie · CI dashboard</title>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --panel: #161b22;
+        --border: #30363d;
+        --text: #e6edf3;
+        --muted: #8b949e;
+        --accent: #58a6ff;
+        --ok: #3fb950;
+        --warn: #d29922;
+        --radius: 10px;
+        --gap: 1rem;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, sans-serif;
+      }
+      main { max-width: 60rem; margin: 0 auto; padding: 2.5rem 1.25rem; }
+      header { margin-bottom: 2rem; }
+      h1 { margin: 0; font-size: 2rem; letter-spacing: -0.02em; }
+      .tagline { color: var(--muted); margin-top: 0.25rem; }
+      .badges { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1.25rem 0; }
+      .badges img { height: 20px; }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+        gap: var(--gap);
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 1.1rem 1.25rem;
+      }
+      .card h2 { margin: 0 0 0.5rem; font-size: 1rem; color: var(--accent); }
+      .card ul { margin: 0; padding-left: 1.1rem; color: var(--muted); }
+      .card li { margin: 0.15rem 0; }
+      .pill {
+        display: inline-block;
+        font-size: 0.78rem;
+        color: var(--ok);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 0.05rem 0.55rem;
+      }
+      footer { margin-top: 2.5rem; color: var(--muted); font-size: 0.85rem; }
+      a { color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>mlkem-selkie</h1>
+        <p class="tagline">Rust ML-KEM (FIPS 203) — beautiful, secure code.</p>
+        <div class="badges">
+          <a href="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/ci.yml"
+            ><img alt="CI" src="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/ci.yml/badge.svg?branch=main"
+          /></a>
+          <a href="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/perf.yml"
+            ><img alt="Perf" src="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/perf.yml/badge.svg?branch=main"
+          /></a>
+          <a href="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/mutants.yml"
+            ><img alt="Mutants" src="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/mutants.yml/badge.svg?branch=main"
+          /></a>
+          <a href="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/audit.yml"
+            ><img alt="Audit" src="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/audit.yml/badge.svg?branch=main"
+          /></a>
+        </div>
+      </header>
+
+      <section class="grid">
+        <article class="card">
+          <h2>Conformance</h2>
+          <ul>
+            <li>Wycheproof (C2SP) — all 12 ML-KEM files</li>
+            <li>NIST ACVP FIPS 203 KATs (keyGen + encapDecap)</li>
+            <li>libcrux interop — 512 / 768 / 1024</li>
+            <li>BoringSSL interop oracle (opt-in)</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h2>Quality gates</h2>
+          <ul>
+            <li>fmt · clippy (default + all-features)</li>
+            <li>rustdoc (private items, deny warnings)</li>
+            <li>proptest property suites</li>
+            <li>cargo-mutants on every PR diff</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h2>Performance</h2>
+          <ul>
+            <li>divan wall-clock (public + internal)</li>
+            <li>gungraun callgrind instruction counts</li>
+            <li>rdtsc megacycles (x86_64)</li>
+            <li>dhat heap profiling example</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h2>Constant-time <span class="pill" style="color: var(--warn)">in progress</span></h2>
+          <ul>
+            <li>dudect t-test harness</li>
+            <li>tacet attacker-model analysis</li>
+            <li>Field arithmetic CT rework pending (TODO(ct))</li>
+          </ul>
+        </article>
+      </section>
+
+      <footer>
+        <p>
+          “In very ancient times some of the Clan Coneely … were changed by ‘art
+          magick’ into seals.” — Connemara Folk-Lore.
+          <a href="https://github.com/selkie-cryptography/mlkem-selkie">Source on GitHub</a>.
+        </p>
+      </footer>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,44 @@
+# cargo-mutants configuration. https://mutants.rs/
+#
+# Run locally:
+#   cargo mutants                       # full run
+#   cargo mutants --in-diff <(git diff main)  # only changed code
+#
+# The suite runs lib unit tests AND the integration tests under `tests/`
+# (wycheproof, ACVP KATs, proptests, libcrux interop) so the end-to-end checks
+# participate in killing mutants. Requires `cargo-nextest` on PATH.
+
+# nextest as the default test tool. CI assumes this.
+test_tool = "nextest"
+
+# Build profile for cargo-mutants's internal cargo invocations. Pairs with
+# `[profile.mutants]` in Cargo.toml, which inherits release-checked but drops
+# debuginfo — build time dominates per-mutant cost.
+profile = "mutants"
+
+# Run mutants with the internals exposed so the white-box property and unit
+# tests (algebraic_properties, field/NTT/encoding) can kill arithmetic mutants,
+# under the release-checked profile (debug-assertions + overflow-checks).
+additional_cargo_test_args = [
+    "--features",
+    "expose-internals",
+    "--cargo-profile",
+    "mutants",
+]
+
+# Timeout: 2x baseline with a 60s floor. The NTT rejection-sampling and DRBG
+# loops can spin on a mutated bound; the build/test timeouts cap those rather
+# than annotating every loop predicate with `mutants::skip`.
+timeout_multiplier = 2.0
+minimum_test_timeout = 60
+build_timeout_multiplier = 3.0
+
+# --- Exclusions ---
+#
+# Keep this list minimal. A surviving mutant is a signal, not noise; only
+# exclude where mutation *cannot* produce a meaningful test failure.
+exclude_re = [
+    # Debug formatting is a diagnostic aid, not a correctness property; mutating
+    # it to a no-op fails no functional test.
+    "impl Debug for",
+]
