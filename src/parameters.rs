@@ -1,6 +1,6 @@
 //! ML-KEM parameter sets from section 7 of the NIST [FIPS 203] standard.
 //!
-//! [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
+//! [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
 
 use core::fmt::Debug;
 
@@ -58,7 +58,7 @@ impl From<Eta> for usize {
 /// Parameter sets for ML-KEM as defined in the NIST [FIPS 203] standard,
 /// section 7.
 ///
-/// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
+/// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
 // TODO: revisit the *Serialization associated types when default values are
 // stable / when generic_const_exprs is stable
 //
@@ -81,7 +81,7 @@ pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
     /// consequence, efficiency) to different levels." - [CRYSTALS-Kyber
     /// version 3.02]
     ///
-    /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
+    /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
     /// [CRYSTALS-Kyber version 3.02]: https://pq-crystals.org/kyber/data/kyber-specification-round3-20210804.pdf
     const K: usize;
 
@@ -107,7 +107,7 @@ pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
     /// "The parameter η₁ defines the noise of *s* and *e* in Algorithm 4 and of
     /// *r* in Algorithm 5." - [CRYSTALS-Kyber version 3.02]
     ///
-    /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
+    /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
     /// [CRYSTALS-Kyber version 3.02]: https://pq-crystals.org/kyber/data/kyber-specification-round3-20210804.pdf
     const ETA_1: Eta;
 
@@ -118,7 +118,7 @@ pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
     /// "The parameter η₂ defines the noise of e1 and e2 in Algorithm 5." -
     /// [CRYSTALS-Kyber version 3.02]
     ///
-    /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
+    /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
     /// [CRYSTALS-Kyber version 3.02]: https://pq-crystals.org/kyber/data/kyber-specification-round3-20210804.pdf
     const ETA_2: Eta;
 
@@ -127,7 +127,7 @@ pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
     /// `K-PKE.Encrypt()` and `K-PKE.Decrypt()`, as defined in section 5 of
     /// the NIST [FIPS 203] standard.
     ///
-    /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
+    /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
     const D_U: usize;
 
     /// Represents the other byte range parameter for `Compress`,
@@ -135,7 +135,7 @@ pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
     /// `K-PKE.Encrypt()` and `K-PKE.Decrypt()`, as defined in section 5 of
     /// the NIST [FIPS 203] standard.
     ///
-    /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
+    /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
     const D_V: usize;
 
     /// The derived K-PKE decryption key size in bytes.
@@ -176,7 +176,7 @@ pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
 
 /// The ML-KEM-512 parameter set defined in [FIPS 203], section 7.
 ///
-/// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
+/// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
 #[cfg(feature = "mlkem512")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MLKEM512;
@@ -211,7 +211,7 @@ impl ParameterSet for MLKEM512 {
 
 /// The ML-KEM-768 parameter set defined in [FIPS 203], section 7.
 ///
-/// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
+/// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
 #[cfg(feature = "mlkem768")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MLKEM768;
@@ -246,7 +246,7 @@ impl ParameterSet for MLKEM768 {
 
 /// The ML-KEM-1024 parameter set defined in [FIPS 203], section 7.
 ///
-/// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
+/// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
 #[cfg(feature = "mlkem1024")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MLKEM1024;
