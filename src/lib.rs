@@ -59,7 +59,7 @@ pub use parameters::MLKEM512;
 pub use parameters::MLKEM768;
 #[cfg(feature = "mlkem1024")]
 pub use parameters::MLKEM1024;
-pub use parameters::ParameterSet;
+pub use parameters::{Eta, ParameterSet};
 
 use crate::{
     PKE::Ciphertext as PkeCiphertext,

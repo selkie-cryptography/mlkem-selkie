@@ -15,7 +15,7 @@ use sha3::digest::XofReader;
 
 use crate::{
     algebraic::{FieldElement, PolynomialRingElement, RqElement, TqElement},
-    parameters::{self, Q},
+    parameters::{self, Eta, Q},
 };
 
 #[cfg(test)]
@@ -71,7 +71,8 @@ impl RqElement {
     /// Implements [Algorithm 8] of FIPS 203.
     ///
     /// [Algorithm 8]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.8
-    pub fn sample_cbd(eta: usize, bytes: &[u8]) -> Self {
+    pub fn sample_cbd(eta: Eta, bytes: &[u8]) -> Self {
+        let eta = usize::from(eta);
         debug_assert_eq!(bytes.len(), 64 * eta);
 
         let mut bits = bytes

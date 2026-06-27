@@ -10,10 +10,14 @@
 //! [section 4.1]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.1
 //! [`SampleNTT`]: crate::sampling
 
+use core::ops::Deref;
+
 use sha3::{
     Digest, Sha3_256, Sha3_512, Shake128, Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
+
+use crate::parameters::Eta;
 
 /// [eXtendable-output function][FIPS 203] (`XOF`): a lightly constrained
 /// invocation of SHAKE128.
@@ -38,29 +42,63 @@ pub fn XOF(rho: &[u8; 32], i: u8, j: u8) -> impl XofReader {
     h.finalize_xof()
 }
 
-/// `PRF` from [FIPS 203 section 4.1][FIPS 203] takes a parameter `eta` of value
-/// 2 or 3, a 32-byte input `s`, and a 1-byte input `b`, and returns a
-/// `64 * eta`-byte output.
+/// The output of [`PRF`]: an exactly-sized SHAKE256 squeeze, one variant per
+/// value of [`Eta`].
 ///
-/// This is SHAKE256 with the one-byte domain separator `b` post-fixed to `s`
-/// and the output length scaled in 64-byte chunks.
+/// Each variant holds precisely `64 * eta` bytes with no slack, so [`Deref`]
+/// and [`AsRef`] can only ever yield a length matching the requested `eta`;
+/// there is no unused tail to read by accident.
+pub enum PrfOutput {
+    /// `eta = 2`: a `64 * 2`-byte squeeze.
+    Eta2([u8; 64 * 2]),
+    /// `eta = 3`: a `64 * 3`-byte squeeze.
+    Eta3([u8; 64 * 3]),
+}
+
+impl Deref for PrfOutput {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        match self {
+            PrfOutput::Eta2(bytes) => bytes,
+            PrfOutput::Eta3(bytes) => bytes,
+        }
+    }
+}
+
+impl AsRef<[u8]> for PrfOutput {
+    fn as_ref(&self) -> &[u8] {
+        self
+    }
+}
+
+/// `PRF` from [FIPS 203 section 4.1][FIPS 203] takes the distribution parameter
+/// [`Eta`], a 32-byte input `s`, and a 1-byte domain separator `b`, and returns
+/// its `64 * eta`-byte output as a [`PrfOutput`].
 ///
-/// The output length `64 * eta` is a runtime value rather than a const generic
-/// so that callers may pass `P::ETA_1` / `P::ETA_2` directly, which is not
-/// possible in const-generic position without `generic_const_exprs`.
+/// This is SHAKE256 with `b` post-fixed to `s`. The output is an exactly-sized
+/// stack array (no allocation), one [`PrfOutput`] variant per [`Eta`].
 ///
 /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.1
 #[must_use]
-pub fn PRF(eta: usize, s: &[u8; 32], b: u8) -> Vec<u8> {
+pub fn PRF(eta: Eta, s: &[u8; 32], b: u8) -> PrfOutput {
     let mut h = Shake256::default();
     h.update(s);
     h.update(&[b]);
     let mut reader = h.finalize_xof();
 
-    let mut output = vec![0u8; 64 * eta];
-    reader.read(&mut output);
-
-    output
+    match eta {
+        Eta::Two => {
+            let mut bytes = [0u8; 64 * 2];
+            reader.read(&mut bytes);
+            PrfOutput::Eta2(bytes)
+        }
+        Eta::Three => {
+            let mut bytes = [0u8; 64 * 3];
+            reader.read(&mut bytes);
+            PrfOutput::Eta3(bytes)
+        }
+    }
 }
 
 /// `H` from [section 4.1] takes a variable-length byte input and returns a

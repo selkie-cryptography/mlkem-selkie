@@ -4,6 +4,7 @@
 
 use divan::{Bencher, black_box};
 use mlkem_selkie::{
+    Eta,
     algebraic::{FieldElement, PolynomialRingElement, RqElement, TqElement},
     functions::XOF,
 };
@@ -49,7 +50,7 @@ fn multiply(bencher: Bencher<'_, '_>) {
 fn sample_poly_cbd(bencher: Bencher<'_, '_>) {
     let bytes = vec![0xA5u8; 64 * 3];
 
-    bencher.bench(|| RqElement::sample_cbd(3, black_box(&bytes)));
+    bencher.bench(|| RqElement::sample_cbd(Eta::Three, black_box(&bytes)));
 }
 
 /// `SampleNTT`: rejection sampling a uniform Tq element from a SHAKE128 stream.

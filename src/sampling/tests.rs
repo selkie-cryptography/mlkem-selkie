@@ -10,8 +10,8 @@ use super::*;
 /// All-zero CBD input yields the zero polynomial.
 #[test]
 fn sample_poly_cbd_zero_input() {
-    for &eta in &[2usize, 3] {
-        let poly = RqElement::sample_cbd(eta, &vec![0u8; 64 * eta]);
+    for eta in [Eta::Two, Eta::Three] {
+        let poly = RqElement::sample_cbd(eta, &vec![0u8; 64 * usize::from(eta)]);
 
         assert_eq!(poly, RqElement::ZERO);
     }
@@ -21,22 +21,24 @@ fn sample_poly_cbd_zero_input() {
 /// represented modulo q.
 #[test]
 fn sample_poly_cbd_range() {
-    let eta = 3;
+    let eta = Eta::Three;
+    let n = usize::from(eta);
+
     // Alternating bits exercise both the positive and negative tails.
-    let bytes: Vec<u8> = (0..64 * eta).map(|i| (i as u8).wrapping_mul(37)).collect();
+    let bytes: Vec<u8> = (0..64 * n).map(|i| (i as u8).wrapping_mul(37)).collect();
 
     let poly = RqElement::sample_cbd(eta, &bytes);
 
     for coeff in poly.coefficients() {
         let v = coeff.value();
-        let centered = if v <= eta as u16 {
+        let centered = if v <= n as u16 {
             i32::from(v)
         } else {
             i32::from(v) - i32::from(Q)
         };
 
         assert!(
-            (-(eta as i32)..=(eta as i32)).contains(&centered),
+            (-(n as i32)..=(n as i32)).contains(&centered),
             "coefficient {v} out of CBD range",
         );
     }

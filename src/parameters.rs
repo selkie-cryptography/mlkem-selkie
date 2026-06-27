@@ -32,6 +32,29 @@ pub(crate) const N: usize = 256;
 // TODO: should this be a `FieldElement`?
 pub(crate) const Q: u16 = 3329;
 
+/// The centered-binomial-distribution parameter `eta`, which FIPS 203 fixes to
+/// either 2 or 3 across every parameter set (the `ETA_1` and `ETA_2` feeding
+/// `PRF_eta` in [section 4.1][FIPS 203]). Modeling it as a closed enum keeps
+/// `PRF` and CBD sampling from ever handling a width outside `{2, 3}`.
+///
+/// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.1
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Eta {
+    /// `eta = 2`.
+    Two,
+    /// `eta = 3`.
+    Three,
+}
+
+impl From<Eta> for usize {
+    fn from(eta: Eta) -> usize {
+        match eta {
+            Eta::Two => 2,
+            Eta::Three => 3,
+        }
+    }
+}
+
 /// Parameter sets for ML-KEM as defined in the NIST [FIPS 203] standard,
 /// section 7.
 ///
@@ -86,7 +109,7 @@ pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
     ///
     /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
     /// [CRYSTALS-Kyber version 3.02]: https://pq-crystals.org/kyber/data/kyber-specification-round3-20210804.pdf
-    const ETA_1: usize;
+    const ETA_1: Eta;
 
     /// Represents the distribution η₂ for generating the vectors *e_1* and
     /// *e_2* in `K-PKE.Encrypt()`, as defined in section 5 of the NIST
@@ -97,7 +120,7 @@ pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
     ///
     /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
     /// [CRYSTALS-Kyber version 3.02]: https://pq-crystals.org/kyber/data/kyber-specification-round3-20210804.pdf
-    const ETA_2: usize;
+    const ETA_2: Eta;
 
     /// Represents one of the byte range parameters for `Compress`,
     /// `Decompress`, `ByteEncode`, and `ByteDecode` as used in
@@ -114,12 +137,6 @@ pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
     ///
     /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.ipd.pdf
     const D_V: usize;
-
-    /// The derived `PRF_η₁` output length in bytes.
-    const ETA1_X_64: usize = 64 * Self::ETA_1;
-
-    /// The derived `PRF_η₂` output length in bytes.
-    const ETA2_X_64: usize = 64 * Self::ETA_2;
 
     /// The derived K-PKE decryption key size in bytes.
     const PKE_DECRYPTION_KEY_SIZE: usize = 384 * Self::K;
@@ -167,8 +184,8 @@ pub struct MLKEM512;
 #[cfg(feature = "mlkem512")]
 impl ParameterSet for MLKEM512 {
     const K: usize = 2;
-    const ETA_1: usize = 3;
-    const ETA_2: usize = 2;
+    const ETA_1: Eta = Eta::Three;
+    const ETA_2: Eta = Eta::Two;
     const D_U: usize = 10;
     const D_V: usize = 4;
 
@@ -202,8 +219,8 @@ pub struct MLKEM768;
 #[cfg(feature = "mlkem768")]
 impl ParameterSet for MLKEM768 {
     const K: usize = 3;
-    const ETA_1: usize = 2;
-    const ETA_2: usize = 2;
+    const ETA_1: Eta = Eta::Two;
+    const ETA_2: Eta = Eta::Two;
     const D_U: usize = 10;
     const D_V: usize = 4;
 
@@ -237,8 +254,8 @@ pub struct MLKEM1024;
 #[cfg(feature = "mlkem1024")]
 impl ParameterSet for MLKEM1024 {
     const K: usize = 4;
-    const ETA_1: usize = 2;
-    const ETA_2: usize = 2;
+    const ETA_1: Eta = Eta::Two;
+    const ETA_2: Eta = Eta::Two;
     const D_U: usize = 11;
     const D_V: usize = 5;
 

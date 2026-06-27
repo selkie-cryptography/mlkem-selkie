@@ -12,7 +12,7 @@
 use crate::{
     algebraic::{RqElement, RqVector, TqElement, TqMatrix, TqVector},
     functions::{G, PRF, XOF},
-    parameters::ParameterSet,
+    parameters::{Eta, ParameterSet},
 };
 
 #[cfg(test)]
@@ -231,12 +231,12 @@ impl<P: ParameterSet> TqMatrix<P> {
 impl<P: ParameterSet> RqVector<P> {
     /// Samples a length-`K` vector from the centered binomial distribution
     /// `D_eta`, advancing the PRF counter `n` once per component.
-    fn sample_cbd(eta: usize, seed: &[u8; 32], n: &mut u8) -> Self {
+    fn sample_cbd(eta: Eta, seed: &[u8; 32], n: &mut u8) -> Self {
         Self::from_fn(|_| {
-            let bytes = PRF(eta, seed, *n);
+            let output = PRF(eta, seed, *n);
             *n += 1;
 
-            RqElement::sample_cbd(eta, &bytes)
+            RqElement::sample_cbd(eta, &output)
         })
     }
 }
