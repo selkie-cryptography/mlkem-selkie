@@ -94,7 +94,7 @@ impl<P: ParameterSet> EncryptionKey<P> {
         let v = (&self.t_hat * &y_hat).ntt_inverse() + e2 + mu;
 
         let mut bytes = u.compress_encode(P::D_U);
-        bytes.extend_from_slice(&v.compress_encode(P::D_V));
+        bytes.extend(v.compress_encode(P::D_V));
 
         Ciphertext::from_bytes(bytes)
     }

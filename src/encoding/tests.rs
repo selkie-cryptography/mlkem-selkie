@@ -10,11 +10,9 @@ use crate::{
 #[test]
 fn pack_unpack_roundtrip() {
     for &d in &[1usize, 4, 5, 10, 11, 12] {
-        let values: Vec<u16> = (0..parameters::N as u16)
-            .map(|i| i & ((1 << d) - 1))
-            .collect();
+        let values: [u16; parameters::N] = core::array::from_fn(|i| (i as u16) & ((1 << d) - 1));
 
-        let packed = pack(&values, d);
+        let packed: Vec<u8> = pack(values, d).collect();
 
         assert_eq!(packed.len(), parameters::N * d / 8);
         assert_eq!(unpack(&packed, d), values);
@@ -27,7 +25,7 @@ fn byte_encode_12_roundtrip() {
     let coeffs = core::array::from_fn(|i| FieldElement::new((31 * i as u16 + 5) % parameters::Q));
     let poly = TqElement::new(coeffs);
 
-    let encoded = poly.byte_encode();
+    let encoded: Vec<u8> = poly.byte_encode().collect();
 
     assert_eq!(encoded.len(), 384);
     assert_eq!(TqElement::byte_decode(&encoded), poly);
@@ -38,16 +36,18 @@ fn byte_encode_12_roundtrip() {
 #[test]
 fn byte_decode_12_reduces_mod_q() {
     // Pack a raw 12-bit value of q (3329) into the first coefficient slot.
-    let mut values = vec![0u16; parameters::N];
+    let mut values = [0u16; parameters::N];
     if let Some(first) = values.first_mut() {
         *first = parameters::Q;
     }
-    let bytes = pack(&values, 12);
+
+    let bytes: Vec<u8> = pack(values, 12).collect();
 
     let decoded = TqElement::byte_decode(&bytes);
 
     // q mod q == 0, so the re-encoding differs from the malformed input.
-    assert_ne!(decoded.byte_encode(), bytes);
+    let reencoded: Vec<u8> = decoded.byte_encode().collect();
+    assert_ne!(reencoded, bytes);
 }
 
 /// Message bytes survive a `Decompress_1` / `Compress_1` round-trip.

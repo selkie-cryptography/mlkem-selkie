@@ -19,7 +19,7 @@
 
 use crate::{
     algebraic::{FieldElement, PolynomialRingElement, RqElement, RqVector, TqElement, TqVector},
-    parameters::ParameterSet,
+    parameters::{N, ParameterSet},
 };
 
 #[cfg(test)]
@@ -29,64 +29,67 @@ mod tests;
 /// compression).
 const D_12: usize = 12;
 
-/// Packs `d`-bit values into bytes, least-significant bit first.
+/// Packs `N` `d`-bit values into a byte stream, least-significant bit first.
 ///
 /// Implements `BitsToBytes` composed with the bit decomposition of
 /// `ByteEncode_d` (Algorithm 5): the bit at position `j` of `values[i]` is
 /// written to global bit `i * d + j`, which lands in byte `(i * d + j) / 8`.
-fn pack(values: &[u16], d: usize) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(values.len() * d / 8);
+/// The `N * d / 8` packed bytes are yielded lazily, so a caller can drive them
+/// into an owned buffer without an intermediate allocation.
+fn pack(values: [u16; N], d: usize) -> impl Iterator<Item = u8> {
+    let mut values = values.into_iter();
     let mut accumulator: u32 = 0;
     let mut bits = 0usize;
 
-    for &value in values {
-        accumulator |= u32::from(value) << bits;
-        bits += d;
+    core::iter::from_fn(move || {
+        loop {
+            if bits >= 8 {
+                let byte = (accumulator & 0xFF) as u8;
+                accumulator >>= 8;
+                bits -= 8;
 
-        while bits >= 8 {
-            bytes.push((accumulator & 0xFF) as u8);
-            accumulator >>= 8;
-            bits -= 8;
+                return Some(byte);
+            }
+
+            let value = values.next()?;
+            accumulator |= u32::from(value) << bits;
+            bits += d;
         }
-    }
-
-    bytes
+    })
 }
 
-/// Unpacks `d`-bit values from bytes, least-significant bit first.
+/// Unpacks `N` `d`-bit values from bytes, least-significant bit first.
 ///
 /// Inverse of [`pack`]; implements the bit recomposition of `ByteDecode_d`
-/// (Algorithm 6). Returns `bytes.len() * 8 / d` values, each in `0..2^d`.
-fn unpack(bytes: &[u8], d: usize) -> Vec<u16> {
-    let count = bytes.len() * 8 / d;
+/// (Algorithm 6). Reads the leading `N * d / 8` bytes, each value in `0..2^d`;
+/// a short input is zero-padded.
+fn unpack(bytes: &[u8], d: usize) -> [u16; N] {
     let mask = (1u32 << d) - 1;
 
-    let mut values = Vec::with_capacity(count);
-    let mut byte_stream = bytes.iter();
+    let mut bytes = bytes.iter();
     let mut accumulator: u32 = 0;
     let mut bits = 0usize;
 
-    for _ in 0..count {
+    core::array::from_fn(|_| {
         while bits < d {
-            let byte = byte_stream.next().copied().unwrap_or(0);
+            let byte = bytes.next().copied().unwrap_or(0);
             accumulator |= u32::from(byte) << bits;
             bits += 8;
         }
 
-        values.push((accumulator & mask) as u16);
+        let value = (accumulator & mask) as u16;
         accumulator >>= d;
         bits -= d;
-    }
 
-    values
+        value
+    })
 }
 
 impl TqElement {
-    /// `ByteEncode_12`: serializes the 256 NTT coefficients into 384 bytes.
-    pub fn byte_encode(&self) -> Vec<u8> {
-        let values: Vec<u16> = self.coefficients().iter().map(|c| c.value()).collect();
-
-        pack(&values, D_12)
+    /// `ByteEncode_12`: serializes the 256 NTT coefficients as 384 bytes,
+    /// yielded lazily.
+    pub fn byte_encode(&self) -> impl Iterator<Item = u8> {
+        pack(self.coefficients().map(|c| c.value()), D_12)
     }
 
     /// `ByteDecode_12`: deserializes 384 bytes into 256 NTT coefficients.
@@ -97,9 +100,7 @@ impl TqElement {
     ///
     /// [section 7.2]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.7.2
     pub fn byte_decode(bytes: &[u8]) -> Self {
-        let values = unpack(bytes, D_12);
-        let coefficients =
-            core::array::from_fn(|i| FieldElement::new(*values.get(i).unwrap_or(&0)));
+        let coefficients = unpack(bytes, D_12).map(FieldElement::new);
 
         Self::new(coefficients)
     }
@@ -107,19 +108,15 @@ impl TqElement {
 
 impl RqElement {
     /// `ByteEncode_d(Compress_d(self))`: compresses each coefficient to `d`
-    /// bits and packs the result into `32 * d` bytes.
-    pub fn compress_encode(&self, d: usize) -> Vec<u8> {
-        let values: Vec<u16> = self.coefficients().iter().map(|c| c.compress(d)).collect();
-
-        pack(&values, d)
+    /// bits and packs the result as `32 * d` bytes, yielded lazily.
+    pub fn compress_encode(&self, d: usize) -> impl Iterator<Item = u8> {
+        pack(self.coefficients().map(|c| c.compress(d)), d)
     }
 
     /// `Decompress_d(ByteDecode_d(bytes))`: unpacks `d`-bit values and
     /// decompresses each back into Zq.
     pub fn decode_decompress(bytes: &[u8], d: usize) -> Self {
-        let values = unpack(bytes, d);
-        let coefficients =
-            core::array::from_fn(|i| FieldElement::decompress(*values.get(i).unwrap_or(&0), d));
+        let coefficients = unpack(bytes, d).map(|v| FieldElement::decompress(v, d));
 
         Self::new(coefficients)
     }
@@ -135,19 +132,19 @@ impl RqElement {
     /// Deserializes this polynomial back into a 32-byte message via
     /// `Compress_1`, recovering `m` in `K-PKE.Decrypt`.
     pub fn compress_message(&self) -> [u8; 32] {
-        let encoded = self.compress_encode(1);
+        let mut bytes = self.compress_encode(1);
 
-        core::array::from_fn(|i| *encoded.get(i).unwrap_or(&0))
+        core::array::from_fn(|_| bytes.next().unwrap_or(0))
     }
 }
 
 impl<P: ParameterSet> TqVector<P> {
     /// `ByteEncode_12` applied componentwise: `384 * K` bytes.
     pub fn byte_encode(&self) -> Vec<u8> {
-        self.as_slice()
-            .iter()
-            .flat_map(TqElement::byte_encode)
-            .collect()
+        let mut out = Vec::with_capacity(384 * P::K);
+        out.extend(self.as_slice().iter().flat_map(TqElement::byte_encode));
+
+        out
     }
 
     /// `ByteDecode_12` applied componentwise to `384 * K` bytes.
@@ -164,10 +161,14 @@ impl<P: ParameterSet> TqVector<P> {
 impl<P: ParameterSet> RqVector<P> {
     /// `ByteEncode_d(Compress_d(.))` applied componentwise: `32 * d * K` bytes.
     pub fn compress_encode(&self, d: usize) -> Vec<u8> {
-        self.as_slice()
-            .iter()
-            .flat_map(|poly| poly.compress_encode(d))
-            .collect()
+        let mut out = Vec::with_capacity(32 * d * P::K);
+        out.extend(
+            self.as_slice()
+                .iter()
+                .flat_map(|poly| poly.compress_encode(d)),
+        );
+
+        out
     }
 
     /// `Decompress_d(ByteDecode_d(.))` applied componentwise.

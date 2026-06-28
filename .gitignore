@@ -20,3 +20,5 @@ pr.diff
 /bench
 /ct
 *.txt.tmp
+
+/references
