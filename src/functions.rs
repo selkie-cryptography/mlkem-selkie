@@ -1,10 +1,16 @@
-//! Cryptographic function instantiations (hashes, PRFs, XOF) for [ML-KEM] from
-//! [section 4.1].
+//! Cryptographic function instantiations for [ML-KEM] from [section 4.1], plus
+//! the batched-Keccak primitives that vectorize the parallel sampling streams.
 //!
 //! ML-KEM instantiates its symmetric primitives with the SHA-3 family: `H` and
 //! `G` are SHA3-256 and SHA3-512, `J` is SHAKE256, `PRF` is SHAKE256 with a
-//! length-scaled output, and `XOF` is SHAKE128 exposed as a streaming reader so
-//! that the rejection sampler [`SampleNTT`] can pull as many bytes as it needs.
+//! length-scaled output, and `XOF` is SHAKE128 exposed as a streaming reader.
+//!
+//! Matrix expansion ([`SampleNTT`]) and CBD sampling each run many independent
+//! SHAKE streams, so [`Shake128X4`] and [`shake256_x4`] squeeze four lanes at
+//! once, dispatched at compile time (the `mlkem_selkie_arch` cfg from
+//! `build.rs`) to AVX2 4-way, NEON 2-way, or scalar Keccak. Their output is
+//! bit-identical to the scalar `XOF`/`PRF`; the scalar paths remain the
+//! per-stream reference and the portable fallback.
 //!
 //! [ML-KEM]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
 //! [section 4.1]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.1
@@ -12,6 +18,12 @@
 
 use core::ops::Deref;
 
+#[cfg(mlkem_selkie_arch = "avx2")]
+use libcrux_sha3::avx2::x4::incremental as keccak4;
+#[cfg(mlkem_selkie_arch = "neon")]
+use libcrux_sha3::neon::x2::incremental as keccak2;
+#[cfg(not(any(mlkem_selkie_arch = "avx2", mlkem_selkie_arch = "neon")))]
+use sha3::Shake128Reader;
 use sha3::{
     Digest, Sha3_256, Sha3_512, Shake128, Shake256,
     digest::{ExtendableOutput, Update, XofReader},
@@ -23,11 +35,11 @@ use crate::parameters::Eta;
 /// invocation of SHAKE128.
 ///
 /// Takes one 32-byte input and two 1-byte inputs and produces a streaming,
-/// variable-length output. Invoked to provide a stream of pseudorandom bytes
-/// for the sampling algorithm `SampleNTT` (Algorithm 7 in [FIPS 203]). As
-/// `SampleNTT` performs rejection sampling, the total number of bytes needed is
-/// not known when `XOF` is invoked, hence the streaming [`XofReader`] return
-/// type rather than a fixed-size buffer.
+/// variable-length output for the rejection sampler `SampleNTT` (Algorithm 7 in
+/// [FIPS 203]). Because `SampleNTT` cannot know in advance how many bytes it
+/// will need, the return type is a streaming [`XofReader`] rather than a
+/// fixed-size buffer. This is the scalar per-stream path; matrix expansion
+/// drives four streams at once through the batched [`Shake128X4`].
 ///
 /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.1
 // XXX: normally we newtype 32 raw bytes to distinguish them from any other
@@ -101,6 +113,168 @@ pub fn PRF(eta: Eta, s: &[u8; 32], b: u8) -> PrfOutput {
     }
 }
 
+/// Runs four independent SHAKE256 squeezes in parallel: `outputs[i]` receives
+/// `SHAKE256(inputs[i])` truncated to its length.
+///
+/// Dispatches at compile time (via the `mlkem_selkie_arch` cfg from `build.rs`)
+/// to batched Keccak — AVX2 4-way, or NEON 2-way run twice — and otherwise to
+/// four scalar squeezes. The batched output is bit-identical to calling the
+/// scalar SHAKE256 four times; this backs the parallel `PRF` streams of CBD
+/// sampling (`RqVector::sample_cbd`).
+pub fn shake256_x4(inputs: [&[u8]; 4], outputs: [&mut [u8]; 4]) {
+    #[cfg(mlkem_selkie_arch = "avx2")]
+    {
+        let [i0, i1, i2, i3] = inputs;
+        let [o0, o1, o2, o3] = outputs;
+        libcrux_sha3::avx2::x4::shake256(i0, i1, i2, i3, o0, o1, o2, o3);
+    }
+
+    #[cfg(mlkem_selkie_arch = "neon")]
+    {
+        let [i0, i1, i2, i3] = inputs;
+        let [o0, o1, o2, o3] = outputs;
+        libcrux_sha3::neon::x2::shake256(i0, i1, o0, o1);
+        libcrux_sha3::neon::x2::shake256(i2, i3, o2, o3);
+    }
+
+    #[cfg(not(any(mlkem_selkie_arch = "avx2", mlkem_selkie_arch = "neon")))]
+    for (input, output) in inputs.into_iter().zip(outputs) {
+        let mut h = Shake256::default();
+        h.update(input);
+        h.finalize_xof().read(output);
+    }
+}
+
+/// SHAKE128 rate (squeeze-block size) in bytes.
+pub const SHAKE128_BLOCK: usize = 168;
+
+/// Three SHAKE128 blocks — the first squeeze for `SampleNTT`, enough to sample
+/// a full ring element with overwhelming probability.
+pub const SHAKE128_THREE_BLOCKS: usize = 3 * SHAKE128_BLOCK;
+
+/// Four parallel SHAKE128 squeeze streams over distinct 34-byte seeds, for
+/// batched `SampleNTT` matrix expansion.
+///
+/// [`Self::absorb`] takes the four seeds; the squeeze methods then produce
+/// fixed blocks for all four lanes at once. Compile-time dispatch (the
+/// `mlkem_selkie_arch` cfg from `build.rs`) maps the four lanes onto AVX2
+/// 4-way, NEON 2-way run twice, or four scalar SHAKE128 readers — the squeezed
+/// bytes are bit-identical to four independent scalar SHAKE128 streams.
+#[cfg(mlkem_selkie_arch = "avx2")]
+pub struct Shake128X4(keccak4::KeccakState);
+
+/// See the AVX2 variant; this holds two NEON 2-way states (lanes 0–1 and 2–3).
+#[cfg(mlkem_selkie_arch = "neon")]
+pub struct Shake128X4([keccak2::KeccakState; 2]);
+
+/// See the AVX2 variant; this holds four scalar SHAKE128 readers.
+#[cfg(not(any(mlkem_selkie_arch = "avx2", mlkem_selkie_arch = "neon")))]
+pub struct Shake128X4([Shake128Reader; 4]);
+
+impl Shake128X4 {
+    /// Absorbs four 34-byte seeds (`rho ‖ j ‖ i`), one per lane.
+    #[cfg(mlkem_selkie_arch = "avx2")]
+    #[must_use]
+    pub fn absorb(seeds: &[[u8; 34]; 4]) -> Self {
+        let [d0, d1, d2, d3] = seeds;
+        let mut state = keccak4::init();
+        keccak4::shake128_absorb_final(&mut state, d0, d1, d2, d3);
+
+        Self(state)
+    }
+
+    /// Absorbs four 34-byte seeds (`rho ‖ j ‖ i`), one per lane.
+    #[cfg(mlkem_selkie_arch = "neon")]
+    #[must_use]
+    pub fn absorb(seeds: &[[u8; 34]; 4]) -> Self {
+        let [d0, d1, d2, d3] = seeds;
+        let mut lo = keccak2::init();
+        let mut hi = keccak2::init();
+        keccak2::shake128_absorb_final(&mut lo, d0, d1);
+        keccak2::shake128_absorb_final(&mut hi, d2, d3);
+
+        Self([lo, hi])
+    }
+
+    /// Absorbs four 34-byte seeds (`rho ‖ j ‖ i`), one per lane.
+    #[cfg(not(any(mlkem_selkie_arch = "avx2", mlkem_selkie_arch = "neon")))]
+    #[must_use]
+    pub fn absorb(seeds: &[[u8; 34]; 4]) -> Self {
+        Self(seeds.each_ref().map(|seed| {
+            let mut h = Shake128::default();
+            h.update(seed);
+
+            h.finalize_xof()
+        }))
+    }
+
+    /// Squeezes the first three blocks (504 bytes) from each lane.
+    #[cfg(mlkem_selkie_arch = "avx2")]
+    pub fn squeeze_first_three_blocks(&mut self) -> [[u8; SHAKE128_THREE_BLOCKS]; 4] {
+        let mut out = [[0u8; SHAKE128_THREE_BLOCKS]; 4];
+        let [o0, o1, o2, o3] = &mut out;
+        keccak4::shake128_squeeze_first_three_blocks(&mut self.0, o0, o1, o2, o3);
+
+        out
+    }
+
+    /// Squeezes the first three blocks (504 bytes) from each lane.
+    #[cfg(mlkem_selkie_arch = "neon")]
+    pub fn squeeze_first_three_blocks(&mut self) -> [[u8; SHAKE128_THREE_BLOCKS]; 4] {
+        let mut out = [[0u8; SHAKE128_THREE_BLOCKS]; 4];
+        let [o0, o1, o2, o3] = &mut out;
+        let [lo, hi] = &mut self.0;
+        keccak2::shake128_squeeze_first_three_blocks(lo, o0, o1);
+        keccak2::shake128_squeeze_first_three_blocks(hi, o2, o3);
+
+        out
+    }
+
+    /// Squeezes the first three blocks (504 bytes) from each lane.
+    #[cfg(not(any(mlkem_selkie_arch = "avx2", mlkem_selkie_arch = "neon")))]
+    pub fn squeeze_first_three_blocks(&mut self) -> [[u8; SHAKE128_THREE_BLOCKS]; 4] {
+        let mut out = [[0u8; SHAKE128_THREE_BLOCKS]; 4];
+        for (reader, lane) in self.0.iter_mut().zip(&mut out) {
+            reader.read(lane);
+        }
+
+        out
+    }
+
+    /// Squeezes one further block (168 bytes) from each lane.
+    #[cfg(mlkem_selkie_arch = "avx2")]
+    pub fn squeeze_next_block(&mut self) -> [[u8; SHAKE128_BLOCK]; 4] {
+        let mut out = [[0u8; SHAKE128_BLOCK]; 4];
+        let [o0, o1, o2, o3] = &mut out;
+        keccak4::shake128_squeeze_next_block(&mut self.0, o0, o1, o2, o3);
+
+        out
+    }
+
+    /// Squeezes one further block (168 bytes) from each lane.
+    #[cfg(mlkem_selkie_arch = "neon")]
+    pub fn squeeze_next_block(&mut self) -> [[u8; SHAKE128_BLOCK]; 4] {
+        let mut out = [[0u8; SHAKE128_BLOCK]; 4];
+        let [o0, o1, o2, o3] = &mut out;
+        let [lo, hi] = &mut self.0;
+        keccak2::shake128_squeeze_next_block(lo, o0, o1);
+        keccak2::shake128_squeeze_next_block(hi, o2, o3);
+
+        out
+    }
+
+    /// Squeezes one further block (168 bytes) from each lane.
+    #[cfg(not(any(mlkem_selkie_arch = "avx2", mlkem_selkie_arch = "neon")))]
+    pub fn squeeze_next_block(&mut self) -> [[u8; SHAKE128_BLOCK]; 4] {
+        let mut out = [[0u8; SHAKE128_BLOCK]; 4];
+        for (reader, lane) in self.0.iter_mut().zip(&mut out) {
+            reader.read(lane);
+        }
+
+        out
+    }
+}
+
 /// `H` from [section 4.1] takes a variable-length byte input and returns a
 /// 32-byte output.
 ///
@@ -158,4 +332,59 @@ pub fn G(preimage: &[u8]) -> ([u8; 32], [u8; 32]) {
     b.copy_from_slice(right);
 
     (a, b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `shake256_x4` produces the same four outputs as four scalar SHAKE256
+    /// squeezes — exercising whichever batched backend `build.rs` selected.
+    #[test]
+    fn shake256_x4_matches_scalar() {
+        let inputs = [[10u8; 33], [20u8; 33], [30u8; 33], [40u8; 33]];
+
+        let mut batched = [[0u8; 192]; 4];
+        shake256_x4(
+            inputs.each_ref().map(<[u8; 33]>::as_slice),
+            batched.each_mut().map(<[u8; 192]>::as_mut_slice),
+        );
+
+        let scalar: [[u8; 192]; 4] = core::array::from_fn(|i| {
+            let mut h = Shake256::default();
+            h.update(inputs.get(i).map_or(&[][..], <[u8; 33]>::as_slice));
+            let mut out = [0u8; 192];
+            h.finalize_xof().read(&mut out);
+
+            out
+        });
+
+        assert_eq!(batched, scalar);
+    }
+
+    /// `Shake128X4`'s three-block then next-block squeezes match four scalar
+    /// SHAKE128 streams — exercising whichever batched backend was selected.
+    #[test]
+    fn shake128_x4_matches_scalar() {
+        let seeds: [[u8; 34]; 4] =
+            core::array::from_fn(|i| core::array::from_fn(|k| (i * 7 + k) as u8));
+
+        let mut state = Shake128X4::absorb(&seeds);
+        let first = state.squeeze_first_three_blocks();
+        let next = state.squeeze_next_block();
+
+        for ((seed, lane_first), lane_next) in seeds.iter().zip(&first).zip(&next) {
+            let mut h = Shake128::default();
+            h.update(seed);
+            let mut reader = h.finalize_xof();
+
+            let mut scalar_first = [0u8; SHAKE128_THREE_BLOCKS];
+            let mut scalar_next = [0u8; SHAKE128_BLOCK];
+            reader.read(&mut scalar_first);
+            reader.read(&mut scalar_next);
+
+            assert_eq!(lane_first, &scalar_first);
+            assert_eq!(lane_next, &scalar_next);
+        }
+    }
 }

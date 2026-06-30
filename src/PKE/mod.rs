@@ -12,8 +12,8 @@
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{
-    algebraic::{RqElement, RqVector, TqElement, TqMatrix, TqVector},
-    functions::{G, PRF, XOF},
+    algebraic::{PolynomialRingElement, RqElement, RqVector, TqElement, TqMatrix, TqVector},
+    functions::{G, PRF, shake256_x4},
     parameters::{Eta, ParameterSet},
 };
 
@@ -261,21 +261,81 @@ impl<P: ParameterSet> TqMatrix<P> {
     /// 203 test vectors. `K-PKE.KeyGen` uses `A_hat` directly while
     /// `K-PKE.Encrypt` multiplies by its transpose.
     fn expand(rho: &[u8; 32]) -> Self {
-        Self::from_fn(|i| {
-            TqVector::<P>::from_fn(|j| TqElement::sample_ntt(&mut XOF(rho, j as u8, i as u8)))
-        })
+        let k = P::K;
+
+        // `A_hat`'s `K*K` entries in row-major order — `A_hat[i][j] =
+        // SampleNTT(rho ‖ j ‖ i)` — sampled four lanes at a time across the flat
+        // entry list (not per row), so `K=2` fills one batch exactly with no
+        // wasted lanes; the final partial batch (`K=3`) over-samples and discards.
+        let mut next = 0usize;
+        let mut batch = [TqElement::ZERO; 4];
+        let mut taken = 4usize;
+
+        let mut entries = core::iter::from_fn(move || {
+            if taken == 4 {
+                let base = next;
+                let seeds: [[u8; 34]; 4] = core::array::from_fn(|lane| {
+                    let n = base + lane;
+                    let mut seed = [0u8; 34];
+                    let (prefix, suffix) = seed.split_at_mut(32);
+                    prefix.copy_from_slice(rho);
+                    suffix.copy_from_slice(&[(n % k) as u8, (n / k) as u8]);
+
+                    seed
+                });
+                batch = TqElement::sample_ntt_x4(&seeds);
+                taken = 0;
+                next += 4;
+            }
+
+            let element = batch.get(taken).copied();
+            taken += 1;
+
+            element
+        });
+
+        Self::from_fn(|_| TqVector::<P>::from_fn(|_| entries.next().unwrap_or(TqElement::ZERO)))
     }
 }
 
 impl<P: ParameterSet> RqVector<P> {
     /// Samples a length-`K` vector from the centered binomial distribution
     /// `D_eta`, advancing the PRF counter `n` once per component.
+    ///
+    /// The `K` `PRF` squeezes (`seed ‖ (n+0..n+K)`) run in one batched Keccak
+    /// call; lanes past `K` are computed and discarded. Each lane squeezes the
+    /// `64 * eta`-byte CBD input (the buffer is sized for the largest `eta`).
     fn sample_cbd(eta: Eta, seed: &[u8; 32], n: &mut u8) -> Self {
-        Self::from_fn(|_| {
-            let output = PRF(eta, seed, *n);
-            *n += 1;
+        let prf_len = 64 * usize::from(eta);
 
-            RqElement::sample_cbd(eta, &output)
+        let inputs: [[u8; 33]; 4] = core::array::from_fn(|lane| {
+            let mut input = [0u8; 33];
+            let (prefix, suffix) = input.split_at_mut(32);
+            prefix.copy_from_slice(seed);
+            suffix.copy_from_slice(&[n.wrapping_add(lane as u8)]);
+
+            input
+        });
+        *n += P::K as u8;
+
+        let mut outputs = [[0u8; 64 * 3]; 4];
+        let [o0, o1, o2, o3] = &mut outputs;
+        shake256_x4(
+            inputs.each_ref().map(<[u8; 33]>::as_slice),
+            [
+                o0.as_mut_slice(),
+                o1.as_mut_slice(),
+                o2.as_mut_slice(),
+                o3.as_mut_slice(),
+            ],
+        );
+
+        let mut outputs = outputs.into_iter();
+        Self::from_fn(|_| {
+            let output = outputs.next().unwrap_or([0u8; 64 * 3]);
+            let (bytes, _) = output.split_at(prf_len);
+
+            RqElement::sample_cbd(eta, bytes)
         })
     }
 }

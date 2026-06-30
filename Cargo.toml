@@ -45,6 +45,19 @@ subtle = "2"
 # Zeroizing secret key material on drop and the decaps/keygen stack transients.
 zeroize = { version = "1.7.0", features = ["derive"] }
 
+# Batched (SIMD) Keccak for the parallel SHAKE streams in matrix expansion
+# (`SampleNTT`) and CBD sampling — AVX2 4-way / NEON 2-way, pulled in only on
+# the targets that use them (the scalar `sha3` path needs none). Same Keccak
+# `libcrux-ml-kem` (our interop dev-dep) uses, so the batched output is
+# bit-identical to scalar. Pinned to an exact `=0.0.9` revision: it's a pre-1.0
+# crate on the crypto-critical path, and we want any version change to require
+# a deliberate audit pass. See `src/functions.rs`.
+[target.'cfg(all(target_arch = "aarch64", target_feature = "neon"))'.dependencies]
+libcrux-sha3 = { version = "=0.0.9", default-features = false, features = ["simd128"] }
+
+[target.'cfg(all(target_arch = "x86_64", target_feature = "avx2"))'.dependencies]
+libcrux-sha3 = { version = "=0.0.9", default-features = false, features = ["simd256"] }
+
 [dev-dependencies]
 # A self dev-dependency that turns on `expose-internals` whenever the
 # dev-dependencies are active (tests, benches, examples), so the
