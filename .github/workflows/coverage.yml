@@ -26,6 +26,12 @@ jobs:
         run: |
           cargo llvm-cov --features expose-internals --lcov --output-path lcov.info
           cargo llvm-cov report --html
+      - name: Gate on coverage floor
+        run: |
+          cargo llvm-cov report \
+            --fail-under-lines 95 \
+            --fail-under-functions 94 \
+            --fail-under-regions 96
       - uses: actions/upload-artifact@v4
         with:
           name: coverage-lcov
