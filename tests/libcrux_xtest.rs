@@ -52,12 +52,12 @@ fn interop_mlkem512() {
         let theirs = libcrux_ml_kem::mlkem512::generate_key_pair(seed);
 
         assert_eq!(
-            ours.encapsulation_key.to_bytes(),
+            ours.encapsulation_key.to_bytes().as_ref(),
             theirs.public_key().as_slice(),
             "iter {i}: ek mismatch",
         );
         assert_eq!(
-            ours.decapsulation_key.to_bytes(),
+            ours.decapsulation_key.to_bytes().as_ref(),
             theirs.private_key().as_slice(),
             "iter {i}: dk mismatch",
         );
@@ -97,12 +97,12 @@ fn interop_mlkem768() {
         let theirs = libcrux_ml_kem::mlkem768::generate_key_pair(seed);
 
         assert_eq!(
-            ours.encapsulation_key.to_bytes(),
+            ours.encapsulation_key.to_bytes().as_ref(),
             theirs.public_key().as_slice(),
             "iter {i}: ek mismatch",
         );
         assert_eq!(
-            ours.decapsulation_key.to_bytes(),
+            ours.decapsulation_key.to_bytes().as_ref(),
             theirs.private_key().as_slice(),
             "iter {i}: dk mismatch",
         );
@@ -142,12 +142,12 @@ fn interop_mlkem1024() {
         let theirs = libcrux_ml_kem::mlkem1024::generate_key_pair(seed);
 
         assert_eq!(
-            ours.encapsulation_key.to_bytes(),
+            ours.encapsulation_key.to_bytes().as_ref(),
             theirs.public_key().as_slice(),
             "iter {i}: ek mismatch",
         );
         assert_eq!(
-            ours.decapsulation_key.to_bytes(),
+            ours.decapsulation_key.to_bytes().as_ref(),
             theirs.private_key().as_slice(),
             "iter {i}: dk mismatch",
         );

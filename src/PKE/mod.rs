@@ -41,13 +41,18 @@ pub struct EncryptionKey<P: ParameterSet> {
 }
 
 impl<P: ParameterSet> EncryptionKey<P> {
-    /// Serializes to `ByteEncode_12(t_hat) ‖ rho`, of length
-    /// `P::PKE_ENCRYPTION_KEY_SIZE`.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = self.t_hat.byte_encode();
-        bytes.extend_from_slice(&self.rho);
+    /// Returns an iterator over the encryption key's serialized bytes,
+    /// `ByteEncode_12(t_hat) ‖ rho`, yielded lazily so a fixed buffer can be
+    /// packed without an intermediate allocation.
+    pub(crate) fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
+        self.t_hat.byte_encode().chain(self.rho)
+    }
 
-        bytes
+    /// Serializes to `ByteEncode_12(t_hat) ‖ rho`, the fixed-size
+    /// `P::PKEEncryptionKeySerialization`, assembled on the stack.
+    pub fn to_bytes(&self) -> P::PKEEncryptionKeySerialization {
+        let mut bytes = self.bytes();
+        P::pke_encryption_key_from_fn(|_| bytes.next().unwrap_or(0))
     }
 
     /// Parses an encryption key from `384 * K + 32` bytes.
@@ -111,10 +116,17 @@ pub struct DecryptionKey<P: ParameterSet> {
 }
 
 impl<P: ParameterSet> DecryptionKey<P> {
-    /// Serializes to `ByteEncode_12(s_hat)`, of length
-    /// `P::PKE_DECRYPTION_KEY_SIZE`.
-    pub fn to_bytes(&self) -> Vec<u8> {
+    /// Returns an iterator over the decryption key's serialized bytes,
+    /// `ByteEncode_12(s_hat)`, yielded lazily.
+    pub(crate) fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
         self.s_hat.byte_encode()
+    }
+
+    /// Serializes to `ByteEncode_12(s_hat)`, the fixed-size
+    /// `P::PKEDecryptionKeySerialization`, assembled on the stack.
+    pub fn to_bytes(&self) -> P::PKEDecryptionKeySerialization {
+        let mut bytes = self.bytes();
+        P::pke_decryption_key_from_fn(|_| bytes.next().unwrap_or(0))
     }
 
     /// Parses a decryption key from `384 * K` bytes.
@@ -200,8 +212,10 @@ impl<P: ParameterSet> KeyPair<P> {
     ///
     /// [Algorithm 13]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.13
     pub fn new_derand(seed: KeyGenRandomnessSeed<P>) -> Self {
-        let mut g_input = seed.0.to_vec();
-        g_input.push(P::K as u8);
+        let mut g_input = [0u8; 33];
+        let (d_part, k_part) = g_input.split_at_mut(32);
+        d_part.copy_from_slice(&seed.0);
+        k_part.copy_from_slice(&[P::K as u8]);
         let (rho, sigma) = G(&g_input);
 
         let a_hat = TqMatrix::<P>::expand(&rho);

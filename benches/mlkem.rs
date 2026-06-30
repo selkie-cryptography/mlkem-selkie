@@ -56,7 +56,7 @@ fn parse_encapsulation_key<P: ParameterSet>(bencher: Bencher<'_, '_>) {
         .encapsulation_key
         .to_bytes();
 
-    bencher.bench(|| EncapsulationKey::<P>::from_bytes(black_box(&bytes)));
+    bencher.bench(|| EncapsulationKey::<P>::from_bytes(black_box(bytes.as_ref())));
 }
 
 /// `Ciphertext::from_bytes` length validation.

@@ -1,19 +1,12 @@
-// [ML-KEM] Selkie
-//
-// [ML-KEM]: https://doi.org/10.6028/NIST.FIPS.203
-
-#![doc(
-    html_logo_url = "https://user-images.githubusercontent.com/552961/197638905-f5144be3-a2f2-48c2-9ecb-26e4e34d8d8a.svg#gh-light-mode-only"
-)]
 #![doc = include_str!("../README.md")]
-#![allow(mixed_script_confusables)]
 #![allow(non_snake_case)]
+#![allow(mixed_script_confusables)]
 #![deny(missing_docs, clippy::indexing_slicing, clippy::unwrap_used)]
 // `deny`, not `forbid`: the only `unsafe` in the crate is the SIMD intrinsics in
 // the `poly::arch::{neon,avx2}` backends, each call carrying a `// SAFETY:` note.
 // Everything outside those modules stays unsafe-free.
 #![deny(unsafe_code)]
-#![warn(rust_2018_idioms)]
+#![warn(rust_2018_idioms, unused_lifetimes, unused_qualifications)]
 
 use rand_core::{CryptoRng, RngCore};
 
@@ -196,15 +189,18 @@ pub struct EncapsulationKey<P: ParameterSet> {
 
 impl<P: ParameterSet> From<&EncapsulationKey<P>> for EncapsulationKeyHash {
     fn from(ek: &EncapsulationKey<P>) -> Self {
-        Self(H(&ek.to_bytes()))
+        Self(H(ek.to_bytes().as_ref()))
     }
 }
 
 impl<P: ParameterSet> EncapsulationKey<P> {
-    /// Serializes the encapsulation key to `384 * K + 32` bytes.
+    /// Serializes the encapsulation key to its `384 * K + 32` bytes
+    /// (`P::EncapsKeySerialization`), assembled on the stack with no heap
+    /// allocation.
     #[must_use]
-    pub fn to_bytes(&self) -> Vec<u8> {
-        self.ek_pke.to_bytes()
+    pub fn to_bytes(&self) -> P::EncapsKeySerialization {
+        let mut bytes = self.ek_pke.bytes();
+        P::encaps_key_from_fn(|_| bytes.next().unwrap_or(0))
     }
 
     /// Parses an encapsulation key from bytes; see the [`TryFrom`] impl for the
@@ -242,9 +238,11 @@ impl<P: ParameterSet> EncapsulationKey<P> {
     /// [Algorithm 17]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.17
     #[must_use]
     pub fn encapsulate_derand(&self, m: &[u8; 32]) -> (SharedSecret, Ciphertext<P>) {
-        // (K, r) <- G(m || H(ek))
-        let mut g_input = m.to_vec();
-        g_input.extend_from_slice(&H(&self.to_bytes()));
+        // (K, r) <- G(m || H(ek)); preimage assembled in a 64-byte stack buffer.
+        let mut g_input = [0u8; 64];
+        let (m_part, h_part) = g_input.split_at_mut(32);
+        m_part.copy_from_slice(m);
+        h_part.copy_from_slice(&H(self.to_bytes().as_ref()));
         let (k, r) = G(&g_input);
 
         let ciphertext = self.ek_pke.encrypt(m, &r);
@@ -282,7 +280,7 @@ impl<P: ParameterSet> TryFrom<&[u8]> for EncapsulationKey<P> {
         // equation 7.1): ByteEncode_12(ByteDecode_12(ek)) must equal ek. The
         // round-trip differs iff a coefficient decoded from a value >= q, so a
         // mismatch yields `EncapsulationKeyModulusCheckFailed`.
-        if ek_pke.to_bytes() != bytes {
+        if ek_pke.to_bytes().as_ref() != bytes {
             return Err(Error::EncapsulationKeyModulusCheckFailed);
         }
 
@@ -316,16 +314,19 @@ impl<P: ParameterSet> DecapsulationKey<P> {
         &self.ek
     }
 
-    /// Serializes the decapsulation key to `768 * K + 96` bytes, as
-    /// `dk_PKE ‖ ek ‖ H(ek) ‖ z`.
+    /// Serializes the decapsulation key to its `768 * K + 96` bytes
+    /// (`P::DecapsKeySerialization`), as `dk_PKE ‖ ek ‖ H(ek) ‖ z`, assembled
+    /// on the stack with no heap allocation.
     #[must_use]
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = self.dk_pke.to_bytes();
-        bytes.extend_from_slice(&self.ek.to_bytes());
-        bytes.extend_from_slice(self.h_ek.as_bytes());
-        bytes.extend_from_slice(self.z.as_bytes());
+    pub fn to_bytes(&self) -> P::DecapsKeySerialization {
+        let mut bytes = self
+            .dk_pke
+            .bytes()
+            .chain(self.ek.ek_pke.bytes())
+            .chain(*self.h_ek.as_bytes())
+            .chain(*self.z.as_bytes());
 
-        bytes
+        P::decaps_key_from_fn(|_| bytes.next().unwrap_or(0))
     }
 
     /// Parses a decapsulation key from bytes; see the [`TryFrom`] impl for the
@@ -353,15 +354,15 @@ impl<P: ParameterSet> DecapsulationKey<P> {
         // m' <- K-PKE.Decrypt(dk_PKE, c)
         let m_prime = self.dk_pke.decrypt(&ciphertext.0);
 
-        // (K', r') <- G(m' || h)
-        let mut g_input = m_prime.to_vec();
-        g_input.extend_from_slice(self.h_ek.as_bytes());
+        // (K', r') <- G(m' || h); preimage assembled in a 64-byte stack buffer.
+        let mut g_input = [0u8; 64];
+        let (m_part, h_part) = g_input.split_at_mut(32);
+        m_part.copy_from_slice(&m_prime);
+        h_part.copy_from_slice(self.h_ek.as_bytes());
         let (k_prime, r_prime) = G(&g_input);
 
-        // K_bar <- J(z || c)
-        let mut j_input = self.z.as_bytes().to_vec();
-        j_input.extend_from_slice(ciphertext.as_bytes());
-        let k_bar = J(&j_input);
+        // K_bar <- J(z || c); absorbed in two parts, no joined buffer.
+        let k_bar = J(self.z.as_bytes(), ciphertext.as_bytes());
 
         // c' <- K-PKE.Encrypt(ek_PKE, m', r'); implicit reject if c != c'.
         let c_prime = self.ek.ek_pke.encrypt(&m_prime, &r_prime);

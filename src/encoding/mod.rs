@@ -139,12 +139,11 @@ impl RqElement {
 }
 
 impl<P: ParameterSet> TqVector<P> {
-    /// `ByteEncode_12` applied componentwise: `384 * K` bytes.
-    pub fn byte_encode(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(384 * P::K);
-        out.extend(self.as_slice().iter().flat_map(TqElement::byte_encode));
-
-        out
+    /// `ByteEncode_12` applied componentwise: `384 * K` bytes, yielded lazily
+    /// so the key serialization can pack them into a fixed buffer without
+    /// an intermediate allocation.
+    pub fn byte_encode(&self) -> impl Iterator<Item = u8> + '_ {
+        self.as_slice().iter().flat_map(TqElement::byte_encode)
     }
 
     /// `ByteDecode_12` applied componentwise to `384 * K` bytes.

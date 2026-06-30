@@ -10,11 +10,11 @@ use crate::{
 #[test]
 fn pack_unpack_roundtrip() {
     for &d in &[1usize, 4, 5, 10, 11, 12] {
-        let values: [u16; parameters::N] = core::array::from_fn(|i| (i as u16) & ((1 << d) - 1));
+        let values: [u16; N] = core::array::from_fn(|i| (i as u16) & ((1 << d) - 1));
 
         let packed: Vec<u8> = pack(values, d).collect();
 
-        assert_eq!(packed.len(), parameters::N * d / 8);
+        assert_eq!(packed.len(), N * d / 8);
         assert_eq!(unpack(&packed, d), values);
     }
 }
@@ -36,7 +36,7 @@ fn byte_encode_12_roundtrip() {
 #[test]
 fn byte_decode_12_reduces_mod_q() {
     // Pack a raw 12-bit value of q (3329) into the first coefficient slot.
-    let mut values = [0u16; parameters::N];
+    let mut values = [0u16; N];
     if let Some(first) = values.first_mut() {
         *first = parameters::Q;
     }

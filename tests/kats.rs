@@ -96,13 +96,13 @@ fn keygen_case<P: ParameterSet>(test: &TestCase) {
     let keypair = KeyPair::<P>::generate_derand(&seed);
 
     assert_eq!(
-        keypair.encapsulation_key.to_bytes(),
+        keypair.encapsulation_key.to_bytes().as_ref(),
         hex::decode(&test.ek).expect("ek hex"),
         "tc {}: ek mismatch",
         test.tc_id
     );
     assert_eq!(
-        keypair.decapsulation_key.to_bytes(),
+        keypair.decapsulation_key.to_bytes().as_ref(),
         hex::decode(&test.dk).expect("dk hex"),
         "tc {}: dk mismatch",
         test.tc_id

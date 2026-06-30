@@ -112,7 +112,7 @@ fn interop_boringssl_mlkem768() {
 
         // 1. Keygen byte-identity.
         assert_eq!(
-            keypair.encapsulation_key.to_bytes(),
+            keypair.encapsulation_key.to_bytes().as_ref(),
             ek,
             "iter {i}: ek mismatch"
         );

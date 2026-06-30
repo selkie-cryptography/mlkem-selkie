@@ -28,12 +28,12 @@ fn check_roundtrip<P: ParameterSet>(seed: &[u8; 64], message: &[u8; 32]) {
     assert_eq!(sender.as_bytes(), receiver.as_bytes());
 
     let ek_bytes = keypair.encapsulation_key.to_bytes();
-    let ek = EncapsulationKey::<P>::from_bytes(&ek_bytes).expect("valid ek");
-    assert_eq!(ek.to_bytes(), ek_bytes);
+    let ek = EncapsulationKey::<P>::from_bytes(ek_bytes.as_ref()).expect("valid ek");
+    assert_eq!(ek.to_bytes().as_ref(), ek_bytes.as_ref());
 
     let dk_bytes = keypair.decapsulation_key.to_bytes();
-    let dk = DecapsulationKey::<P>::from_bytes(&dk_bytes).expect("valid dk");
-    assert_eq!(dk.to_bytes(), dk_bytes);
+    let dk = DecapsulationKey::<P>::from_bytes(dk_bytes.as_ref()).expect("valid dk");
+    assert_eq!(dk.to_bytes().as_ref(), dk_bytes.as_ref());
 
     let parsed = Ciphertext::<P>::from_bytes(ciphertext.as_bytes()).expect("valid ct");
     assert_eq!(parsed.as_bytes(), ciphertext.as_bytes());

@@ -59,8 +59,10 @@ impl From<Eta> for usize {
 /// section 7.
 ///
 /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
-// TODO: revisit the *Serialization associated types when default values are
-// stable / when generic_const_exprs is stable
+// TODO: collapse the *Serialization associated types and their `*_from_fn`
+// builders into plain `[u8; SIZE]` return types once `generic_const_exprs` is
+// stable — they exist only because a generic `[u8; Self::SIZE]` is not yet
+// expressible on stable Rust.
 //
 // Every parameter set is a zero-sized marker, so these supertraits cost
 // nothing. `Copy`/`Clone` let the `P`-parameterized newtypes (`RqVector<P>`,
@@ -143,28 +145,57 @@ pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
 
     /// Decryption key byte serialization, a byte array of fixed length
     /// [`Self::PKE_DECRYPTION_KEY_SIZE`].
-    type PKEDecryptionKeySerialization: AsRef<[u8]> + TryFrom<Vec<u8>>;
+    type PKEDecryptionKeySerialization: AsRef<[u8]>;
+
+    /// Builds a [`Self::PKEDecryptionKeySerialization`] on the stack by
+    /// applying `f` to each byte index. Concrete per parameter set, like
+    /// [`Self::ciphertext_from_fn`].
+    fn pke_decryption_key_from_fn(
+        f: impl FnMut(usize) -> u8,
+    ) -> Self::PKEDecryptionKeySerialization;
 
     /// The derived K-PKE encryption key size in bytes.
     const PKE_ENCRYPTION_KEY_SIZE: usize = (384 * Self::K) + 32;
 
     /// Encryption key byte serialization, a byte array of fixed length
     /// [`Self::PKE_ENCRYPTION_KEY_SIZE`].
-    type PKEEncryptionKeySerialization: AsRef<[u8]> + TryFrom<Vec<u8>>;
+    type PKEEncryptionKeySerialization: AsRef<[u8]>;
+
+    /// Builds a [`Self::PKEEncryptionKeySerialization`] on the stack by
+    /// applying `f` to each byte index. Concrete per parameter set, like
+    /// [`Self::ciphertext_from_fn`].
+    fn pke_encryption_key_from_fn(
+        f: impl FnMut(usize) -> u8,
+    ) -> Self::PKEEncryptionKeySerialization;
 
     /// The derived secret decapsulation key size in bytes.
     const DECAPS_KEY_SIZE: usize = (768 * Self::K) + 96;
 
     /// Decapsulation key byte serialization, a byte array of fixed length
     /// [`Self::DECAPS_KEY_SIZE`].
-    type DecapsKeySerialization: AsRef<[u8]> + TryFrom<Vec<u8>>;
+    type DecapsKeySerialization: AsRef<[u8]>;
+
+    /// Builds a [`Self::DecapsKeySerialization`] on the stack by applying `f`
+    /// to each byte index. Concrete per parameter set, like
+    /// [`Self::ciphertext_from_fn`].
+    fn decaps_key_from_fn(f: impl FnMut(usize) -> u8) -> Self::DecapsKeySerialization;
 
     /// The derived public encapsulation key size in bytes.
     const ENCAPS_KEY_SIZE: usize = (384 * Self::K) + 32;
 
     /// Encapsulation key byte serialization, a byte array of fixed length
     /// [`Self::ENCAPS_KEY_SIZE`].
-    type EncapsKeySerialization: AsRef<[u8]> + TryFrom<Vec<u8>>;
+    ///
+    /// `Send + Sync` (like [`Self::CiphertextSerialization`]) so the value
+    /// `EncapsulationKey::to_bytes` returns can cross threads — the divan
+    /// benchmarks capture it.
+    type EncapsKeySerialization: AsRef<[u8]> + Send + Sync;
+
+    /// Builds a [`Self::EncapsKeySerialization`] by applying `f` to each byte
+    /// index, assembling the encapsulation-key buffer on the stack so
+    /// `to_bytes` and `H(ek)` need no heap. Concrete per parameter set,
+    /// like [`Self::ciphertext_from_fn`].
+    fn encaps_key_from_fn(f: impl FnMut(usize) -> u8) -> Self::EncapsKeySerialization;
 
     /// The derived public ciphertext size in bytes.
     const CIPHERTEXT_SIZE: usize = 32 * ((Self::D_U * Self::K) + Self::D_V);
@@ -220,6 +251,26 @@ impl ParameterSet for MLKEM512 {
         core::array::from_fn(f)
     }
 
+    fn encaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::ENCAPS_KEY_SIZE] {
+        core::array::from_fn(f)
+    }
+
+    fn pke_encryption_key_from_fn(
+        f: impl FnMut(usize) -> u8,
+    ) -> [u8; Self::PKE_ENCRYPTION_KEY_SIZE] {
+        core::array::from_fn(f)
+    }
+
+    fn pke_decryption_key_from_fn(
+        f: impl FnMut(usize) -> u8,
+    ) -> [u8; Self::PKE_DECRYPTION_KEY_SIZE] {
+        core::array::from_fn(f)
+    }
+
+    fn decaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::DECAPS_KEY_SIZE] {
+        core::array::from_fn(f)
+    }
+
     type PKEDecryptionKeySerialization = [u8; Self::PKE_DECRYPTION_KEY_SIZE];
     type PKEEncryptionKeySerialization = [u8; Self::PKE_ENCRYPTION_KEY_SIZE];
 
@@ -259,6 +310,26 @@ impl ParameterSet for MLKEM768 {
         core::array::from_fn(f)
     }
 
+    fn encaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::ENCAPS_KEY_SIZE] {
+        core::array::from_fn(f)
+    }
+
+    fn pke_encryption_key_from_fn(
+        f: impl FnMut(usize) -> u8,
+    ) -> [u8; Self::PKE_ENCRYPTION_KEY_SIZE] {
+        core::array::from_fn(f)
+    }
+
+    fn pke_decryption_key_from_fn(
+        f: impl FnMut(usize) -> u8,
+    ) -> [u8; Self::PKE_DECRYPTION_KEY_SIZE] {
+        core::array::from_fn(f)
+    }
+
+    fn decaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::DECAPS_KEY_SIZE] {
+        core::array::from_fn(f)
+    }
+
     type PKEDecryptionKeySerialization = [u8; Self::PKE_DECRYPTION_KEY_SIZE];
     type PKEEncryptionKeySerialization = [u8; Self::PKE_ENCRYPTION_KEY_SIZE];
 
@@ -295,6 +366,26 @@ impl ParameterSet for MLKEM1024 {
     }
 
     fn ciphertext_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::CIPHERTEXT_SIZE] {
+        core::array::from_fn(f)
+    }
+
+    fn encaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::ENCAPS_KEY_SIZE] {
+        core::array::from_fn(f)
+    }
+
+    fn pke_encryption_key_from_fn(
+        f: impl FnMut(usize) -> u8,
+    ) -> [u8; Self::PKE_ENCRYPTION_KEY_SIZE] {
+        core::array::from_fn(f)
+    }
+
+    fn pke_decryption_key_from_fn(
+        f: impl FnMut(usize) -> u8,
+    ) -> [u8; Self::PKE_DECRYPTION_KEY_SIZE] {
+        core::array::from_fn(f)
+    }
+
+    fn decaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::DECAPS_KEY_SIZE] {
         core::array::from_fn(f)
     }
 

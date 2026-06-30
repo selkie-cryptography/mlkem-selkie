@@ -115,17 +115,21 @@ pub fn H(preimage: &[u8]) -> [u8; 32] {
     h.finalize().into()
 }
 
-/// `J` from [section 4.1] takes a variable-length byte input and returns a
-/// 32-byte output.
+/// `J` from [section 4.1] hashes the 32-byte rejection seed `z` followed by the
+/// ciphertext `c`, returning a 32-byte output.
 ///
-/// This is SHAKE256 truncated to 32 bytes, used to derive the implicit
-/// rejection shared secret in `ML-KEM.Decaps`.
+/// This is SHAKE256 truncated to 32 bytes. `ML-KEM.Decaps` is its only caller
+/// and always evaluates `J(z ‖ c)` (Algorithm 18), so rather than take a single
+/// `B*` preimage like the abstract `J`, this absorbs `z` and `c` in two
+/// `update`s — identical to hashing the concatenation, but without allocating a
+/// joined buffer for the ciphertext-sized input.
 ///
 /// [section 4.1]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.1
 #[must_use]
-pub fn J(preimage: &[u8]) -> [u8; 32] {
+pub fn J(z: &[u8; 32], c: &[u8]) -> [u8; 32] {
     let mut h = Shake256::default();
-    h.update(preimage);
+    h.update(z);
+    h.update(c);
     let mut reader = h.finalize_xof();
 
     let mut output = [0u8; 32];

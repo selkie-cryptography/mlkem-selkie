@@ -26,10 +26,10 @@ fn roundtrip_all_parameter_sets() {
 /// The per-parameter-set aliased API resolves and round-trips.
 #[test]
 fn aliased_module_roundtrip() {
-    let keypair: crate::mlkem768::KeyPair = crate::mlkem768::KeyPair::generate(&mut OsRng);
+    let keypair: mlkem768::KeyPair = mlkem768::KeyPair::generate(&mut OsRng);
 
     let (sender, ciphertext) = keypair.encapsulation_key.encapsulate(&mut OsRng);
-    let parsed = crate::mlkem768::Ciphertext::from_bytes(ciphertext.as_bytes()).expect("valid ct");
+    let parsed = mlkem768::Ciphertext::from_bytes(ciphertext.as_bytes()).expect("valid ct");
     let receiver = keypair.decapsulation_key.decapsulate(&parsed);
 
     assert_eq!(sender.as_bytes(), receiver.as_bytes());
