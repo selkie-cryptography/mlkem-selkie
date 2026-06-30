@@ -1,5 +1,7 @@
 //! Known-answer self-test for the AES256-CTR-DRBG.
 
+use rand_core::RngCore;
+
 use super::*;
 
 /// Seeding the DRBG with a fixed 48-byte entropy input and drawing 128 bytes
@@ -35,4 +37,27 @@ fn matches_reference_seed_first_128_bytes() {
 
     assert_eq!(got, EXPECTED_HEX);
     assert_eq!(drbg.bytes_consumed(), 128);
+}
+
+/// The `RngCore` convenience methods (`next_u32`, `next_u64`,
+/// `try_fill_bytes`) are deterministic from the seed: two DRBGs seeded
+/// identically produce the same sequence of outputs, and `try_fill_bytes`
+/// is infallible.
+#[test]
+fn rng_core_helpers_are_deterministic_from_seed() {
+    let seed = [0xA5u8; SEEDLEN];
+
+    let mut a = Aes256CtrDrbg::new(&seed);
+    let mut b = Aes256CtrDrbg::new(&seed);
+
+    assert_eq!(a.next_u32(), b.next_u32());
+    assert_eq!(a.next_u64(), b.next_u64());
+
+    let mut a_buf = [0u8; 20];
+    let mut b_buf = [0u8; 20];
+    a.try_fill_bytes(&mut a_buf)
+        .expect("try_fill_bytes is infallible for Aes256CtrDrbg");
+    b.try_fill_bytes(&mut b_buf)
+        .expect("try_fill_bytes is infallible for Aes256CtrDrbg");
+    assert_eq!(a_buf, b_buf);
 }

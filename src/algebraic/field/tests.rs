@@ -68,3 +68,36 @@ fn compress_matches_textbook_division() {
         }
     }
 }
+
+/// `From<u8>` and `From<FieldElement> for u16` agree with the canonical
+/// `FieldElement::new` / `value` reductions.
+#[test]
+fn from_u8_and_to_u16_roundtrip() {
+    for raw in 0u16..=u16::from(u8::MAX) {
+        let from_u8 = FieldElement::from(raw as u8);
+        let from_u16 = FieldElement::from(raw);
+
+        assert_eq!(from_u8, from_u16);
+        assert_eq!(u16::from(from_u16), raw % parameters::Q);
+    }
+}
+
+/// `montgomery_table` agrees with applying `to_montgomery` element-wise to
+/// the source array. The function is `const` and used at compile time to
+/// build the NTT zeta table, but we call it at runtime here so coverage
+/// instrumentation sees the body.
+#[test]
+fn montgomery_table_matches_element_wise() {
+    let raw: [u16; 128] =
+        core::array::from_fn(|i| ((i as u16).wrapping_mul(57) + 11) % parameters::Q);
+
+    let table = FieldElement::montgomery_table(raw);
+
+    for (i, (entry, source)) in table.iter().zip(raw.iter()).enumerate() {
+        assert_eq!(
+            *entry,
+            FieldElement::new(*source).to_montgomery(),
+            "i = {i}"
+        );
+    }
+}
