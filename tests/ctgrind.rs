@@ -16,11 +16,11 @@
 //!   target/debug/deps/ctgrind-* --test-threads=1
 //! ```
 //!
-//! NOTE: the field `% q` reductions do not branch on their operands, but
-//! `ML-KEM.Decaps`'s implicit-rejection check is a short-circuiting `==` over
-//! secret-derived ciphertext bytes plus an `if/else` secret select, so the
-//! `decapsulate` test is *expected to fail* until the constant-time rework
-//! (`TODO(ct)`).
+//! NOTE: the field reductions are branch-free (signed Montgomery / Barrett),
+//! and `ML-KEM.Decaps`'s implicit-rejection check compares and selects over the
+//! secret-derived ciphertext bytes in constant time (`subtle`'s `ct_eq` /
+//! `conditional_select`; see `DecapsulationKey::decapsulate`), so the
+//! `decapsulate` test should report no secret-dependent branch under Valgrind.
 
 use core::ffi::c_void;
 

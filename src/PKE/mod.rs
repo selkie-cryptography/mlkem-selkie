@@ -147,9 +147,9 @@ impl<P: ParameterSet> DecryptionKey<P> {
     /// Implements [Algorithm 15] of FIPS 203.
     ///
     /// [Algorithm 15]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.15
-    // TODO(ct): the underlying field arithmetic is variable-time. In
-    // `ML-KEM.Decaps` the recovered message is secret-derived (Algorithm 18
-    // line 5), so this must be made constant-time before production use.
+    // The recovered message is secret-derived in `ML-KEM.Decaps` (Algorithm 18
+    // line 5); the field arithmetic here is constant-time (signed Montgomery /
+    // Barrett, branch-free — see `crate::algebraic::field`).
     pub fn decrypt(&self, ciphertext: &Ciphertext<P>) -> [u8; 32] {
         let (c1, c2) = ciphertext.as_bytes().split_at(32 * P::D_U * P::K);
 

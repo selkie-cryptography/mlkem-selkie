@@ -9,6 +9,7 @@
 #![warn(rust_2018_idioms, unused_lifetimes, unused_qualifications)]
 
 use rand_core::{CryptoRng, RngCore};
+use subtle::{ConditionallySelectable, ConstantTimeEq};
 
 // The internal building blocks (field/ring arithmetic, K-PKE, the samplers, the
 // serialization layer, and the symmetric primitives) are private by default and
@@ -343,12 +344,18 @@ impl<P: ParameterSet> DecapsulationKey<P> {
     /// returned secret is derived from the rejection seal `z` rather than from
     /// the decrypted message.
     ///
+    /// # Constant-time
+    ///
+    /// The decrypted message `m'` and the re-encryption `c'` are secret-derived
+    /// ([Algorithm 18] lines 5, 8). The ciphertext comparison and the
+    /// `K'`/`K_bar` selection use `subtle` (`ct_eq` /
+    /// `conditional_select`), so neither the equality result nor which
+    /// secret is returned leaks through a branch or an early exit. The
+    /// field arithmetic feeding `m'` is itself constant-time (Montgomery/
+    /// Barrett; see [`crate::algebraic`]).
+    ///
     /// [Algorithm 18]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.18
     /// [Algorithm 21]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.21
-    // TODO(ct): the re-encryption comparison and the field arithmetic it feeds
-    // are variable-time. The decrypted message m' and ciphertext c' are
-    // secret-derived (Algorithm 18 lines 5, 8); make the comparison and
-    // selection constant-time before production use.
     #[must_use]
     pub fn decapsulate(&self, ciphertext: &Ciphertext<P>) -> SharedSecret {
         // m' <- K-PKE.Decrypt(dk_PKE, c)
@@ -364,14 +371,26 @@ impl<P: ParameterSet> DecapsulationKey<P> {
         // K_bar <- J(z || c); absorbed in two parts, no joined buffer.
         let k_bar = J(self.z.as_bytes(), ciphertext.as_bytes());
 
-        // c' <- K-PKE.Encrypt(ek_PKE, m', r'); implicit reject if c != c'.
+        // c' <- K-PKE.Encrypt(ek_PKE, m', r')
         let c_prime = self.ek.ek_pke.encrypt(&m_prime, &r_prime);
 
-        if ciphertext.as_bytes() == c_prime.as_bytes() {
-            SharedSecret(k_prime)
-        } else {
-            SharedSecret(k_bar)
-        }
+        // Implicit rejection (Algorithm 18 lines 8-10): return K' if c == c',
+        // else the rejection secret K_bar — compared and selected in constant
+        // time so the outcome over secret-derived bytes never branches or
+        // short-circuits.
+        let matches = ciphertext.as_bytes().ct_eq(c_prime.as_bytes());
+
+        let mut k_prime = k_prime.into_iter();
+        let mut k_bar = k_bar.into_iter();
+        let secret = core::array::from_fn(|_| {
+            u8::conditional_select(
+                &k_bar.next().unwrap_or(0),
+                &k_prime.next().unwrap_or(0),
+                matches,
+            )
+        });
+
+        SharedSecret(secret)
     }
 }
 

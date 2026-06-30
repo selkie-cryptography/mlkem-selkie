@@ -39,6 +39,9 @@ aes = "0.9"
 rand_core = "0.6"
 # SHA3-256/512 and SHAKE128/256 for H, G, J, PRF, and the XOF (src/functions.rs).
 sha3 = "0.10.8"
+# Constant-time equality and selection for the `ML-KEM.Decaps` implicit-rejection
+# check, which compares and selects over secret-derived bytes (src/lib.rs).
+subtle = "2"
 # Zeroizing secret key material. TODO: apply ZeroizeOnDrop to DecapsulationKey.
 zeroize = "1.7.0"
 
