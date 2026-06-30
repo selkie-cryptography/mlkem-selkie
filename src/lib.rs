@@ -112,24 +112,40 @@ impl SharedSecret {
 pub struct Ciphertext<P: ParameterSet>(PkeCiphertext<P>);
 
 impl<P: ParameterSet> Ciphertext<P> {
-    /// Parses a ciphertext from bytes.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidCiphertextLength`] unless the input is
-    /// `P::CIPHERTEXT_SIZE` bytes long.
+    /// Parses a ciphertext from bytes; see the [`TryFrom`] impl for the error
+    /// conditions.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
-        if bytes.len() != P::CIPHERTEXT_SIZE {
-            return Err(Error::InvalidCiphertextLength);
-        }
-
-        Ok(Self(PkeCiphertext::from_bytes(bytes.to_vec())))
+        Self::try_from(bytes)
     }
 
     /// Returns the serialized ciphertext bytes.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_bytes()
+    }
+}
+
+impl<P: ParameterSet> TryFrom<&[u8]> for Ciphertext<P> {
+    type Error = Error;
+
+    /// Parses a ciphertext from bytes, applying the [section 7.3] ciphertext
+    /// type check.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidCiphertextLength`] unless the input is
+    /// `P::CIPHERTEXT_SIZE` bytes long ([section 7.3] check 1).
+    ///
+    /// [section 7.3]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.7.3
+    fn try_from(bytes: &[u8]) -> Result<Self, Error> {
+        // Ciphertext type check (FIPS 203 section 7.3, decapsulation input
+        // check 1): c must be 32 * (D_U * K + D_V) bytes, else
+        // `InvalidCiphertextLength`. Run on every decapsulation, per section 7.3.
+        if bytes.len() != P::CIPHERTEXT_SIZE {
+            return Err(Error::InvalidCiphertextLength);
+        }
+
+        Ok(Self(PkeCiphertext::from_bytes(bytes)))
     }
 }
 
@@ -191,30 +207,10 @@ impl<P: ParameterSet> EncapsulationKey<P> {
         self.ek_pke.to_bytes()
     }
 
-    /// Parses an encapsulation key from bytes, applying the [section 7.2] input
-    /// validation.
-    ///
-    /// # Errors
-    ///
-    /// - [`Error::InvalidEncapsulationKeyLength`] if the length is wrong.
-    /// - [`Error::EncapsulationKeyModulusCheckFailed`] if any coefficient is
-    ///   not in `0..q`, detected by a `ByteDecode_12` / `ByteEncode_12`
-    ///   round-trip.
-    ///
-    /// [section 7.2]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.7.2
+    /// Parses an encapsulation key from bytes; see the [`TryFrom`] impl for the
+    /// section 7.2 validation and error conditions.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
-        if bytes.len() != P::ENCAPS_KEY_SIZE {
-            return Err(Error::InvalidEncapsulationKeyLength);
-        }
-
-        let ek_pke = PKE::EncryptionKey::<P>::from_bytes(bytes);
-
-        // Modulus check: the parsed key must re-encode to the original bytes.
-        if ek_pke.to_bytes() != bytes {
-            return Err(Error::EncapsulationKeyModulusCheckFailed);
-        }
-
-        Ok(Self { ek_pke })
+        Self::try_from(bytes)
     }
 
     /// `ML-KEM.Encaps`: generates a shared secret and a ciphertext
@@ -257,6 +253,43 @@ impl<P: ParameterSet> EncapsulationKey<P> {
     }
 }
 
+impl<P: ParameterSet> TryFrom<&[u8]> for EncapsulationKey<P> {
+    type Error = Error;
+
+    /// Parses an encapsulation key from bytes, applying the [section 7.2]
+    /// encapsulation key check.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidEncapsulationKeyLength`] — the type check: the input
+    ///   is not `384 * K + 32` bytes ([section 7.2] check 1).
+    /// - [`Error::EncapsulationKeyModulusCheckFailed`] — the modulus check
+    ///   (equation 7.1): some coefficient is not in `0..q`, so the
+    ///   `ByteDecode_12` / `ByteEncode_12` round-trip does not reproduce the
+    ///   input ([section 7.2] check 2).
+    ///
+    /// [section 7.2]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.7.2
+    fn try_from(bytes: &[u8]) -> Result<Self, Error> {
+        // Type check (FIPS 203 section 7.2, encapsulation key check 1): ek must
+        // be 384 * K + 32 bytes, else `InvalidEncapsulationKeyLength`.
+        if bytes.len() != P::ENCAPS_KEY_SIZE {
+            return Err(Error::InvalidEncapsulationKeyLength);
+        }
+
+        let ek_pke = PKE::EncryptionKey::<P>::from_bytes(bytes);
+
+        // Modulus check (FIPS 203 section 7.2, encapsulation key check 2,
+        // equation 7.1): ByteEncode_12(ByteDecode_12(ek)) must equal ek. The
+        // round-trip differs iff a coefficient decoded from a value >= q, so a
+        // mismatch yields `EncapsulationKeyModulusCheckFailed`.
+        if ek_pke.to_bytes() != bytes {
+            return Err(Error::EncapsulationKeyModulusCheckFailed);
+        }
+
+        Ok(Self { ek_pke })
+    }
+}
+
 /// An ML-KEM decapsulation (secret) key.
 ///
 /// Bundles the K-PKE decryption key with the material needed to run the
@@ -295,43 +328,10 @@ impl<P: ParameterSet> DecapsulationKey<P> {
         bytes
     }
 
-    /// Parses a decapsulation key from bytes.
-    ///
-    /// # Errors
-    ///
-    /// - [`Error::InvalidDecapsulationKeyLength`] if the length is wrong.
-    /// - [`Error::DecapsulationKeyHashMismatch`] if the embedded `H(ek)` does
-    ///   not match a freshly computed hash of the embedded encapsulation key.
+    /// Parses a decapsulation key from bytes; see the [`TryFrom`] impl for the
+    /// error conditions.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
-        if bytes.len() != P::DECAPS_KEY_SIZE {
-            return Err(Error::InvalidDecapsulationKeyLength);
-        }
-
-        let (dk_pke_bytes, rest) = bytes.split_at(P::PKE_DECRYPTION_KEY_SIZE);
-        let (ek_bytes, rest) = rest.split_at(P::ENCAPS_KEY_SIZE);
-        let (h_ek_bytes, z_bytes) = rest.split_at(32);
-
-        let dk_pke = PKE::DecryptionKey::<P>::from_bytes(dk_pke_bytes);
-        let ek = EncapsulationKey {
-            ek_pke: PKE::EncryptionKey::<P>::from_bytes(ek_bytes),
-        };
-
-        let mut h_ek_array = [0u8; 32];
-        h_ek_array.copy_from_slice(h_ek_bytes);
-        let h_ek = EncapsulationKeyHash(h_ek_array);
-        if EncapsulationKeyHash::from(&ek) != h_ek {
-            return Err(Error::DecapsulationKeyHashMismatch);
-        }
-
-        let mut z = [0u8; 32];
-        z.copy_from_slice(z_bytes);
-
-        Ok(Self {
-            dk_pke,
-            ek,
-            h_ek,
-            z: RejectionSeed::from(z),
-        })
+        Self::try_from(bytes)
     }
 
     /// `ML-KEM.Decaps`: recovers the shared secret from a ciphertext, with
@@ -371,6 +371,62 @@ impl<P: ParameterSet> DecapsulationKey<P> {
         } else {
             SharedSecret(k_bar)
         }
+    }
+}
+
+impl<P: ParameterSet> TryFrom<&[u8]> for DecapsulationKey<P> {
+    type Error = Error;
+
+    /// Parses a decapsulation key from bytes, applying the [section 7.3]
+    /// decapsulation key checks.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidDecapsulationKeyLength`] — the decapsulation key type
+    ///   check: the input is not `768 * K + 96` bytes ([section 7.3] check 2).
+    /// - [`Error::DecapsulationKeyHashMismatch`] — the hash check (equation
+    ///   7.2): the embedded `H(ek)` does not match a fresh hash of the embedded
+    ///   encapsulation key ([section 7.3] check 3).
+    ///
+    /// [section 7.3]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.7.3
+    fn try_from(bytes: &[u8]) -> Result<Self, Error> {
+        // Decapsulation key type check (FIPS 203 section 7.3, decapsulation
+        // input check 2): dk must be 768 * K + 96 bytes, else
+        // `InvalidDecapsulationKeyLength`.
+        if bytes.len() != P::DECAPS_KEY_SIZE {
+            return Err(Error::InvalidDecapsulationKeyLength);
+        }
+
+        // dk = dk_PKE ‖ ek ‖ H(ek) ‖ z
+        let (dk_pke_bytes, rest) = bytes.split_at(P::PKE_DECRYPTION_KEY_SIZE);
+        let (ek_bytes, rest) = rest.split_at(P::ENCAPS_KEY_SIZE);
+        let (h_ek_bytes, z_bytes) = rest.split_at(32);
+
+        let dk_pke = PKE::DecryptionKey::<P>::from_bytes(dk_pke_bytes);
+        let ek = EncapsulationKey {
+            ek_pke: PKE::EncryptionKey::<P>::from_bytes(ek_bytes),
+        };
+
+        let mut h_ek_array = [0u8; 32];
+        h_ek_array.copy_from_slice(h_ek_bytes);
+        let h_ek = EncapsulationKeyHash(h_ek_array);
+
+        // Hash check (FIPS 203 section 7.3, decapsulation input check 3,
+        // equation 7.2): the stored H(ek) must equal a fresh hash of the
+        // embedded ek, else `DecapsulationKeyHashMismatch`.
+        if EncapsulationKeyHash::from(&ek) != h_ek {
+            return Err(Error::DecapsulationKeyHashMismatch);
+        }
+
+        let mut z = [0u8; 32];
+        z.copy_from_slice(z_bytes);
+
+        Ok(Self {
+            dk_pke,
+            ek,
+            h_ek,
+            z: RejectionSeed::from(z),
+        })
     }
 }
 

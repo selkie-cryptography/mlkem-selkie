@@ -159,16 +159,13 @@ impl<P: ParameterSet> TqVector<P> {
 }
 
 impl<P: ParameterSet> RqVector<P> {
-    /// `ByteEncode_d(Compress_d(.))` applied componentwise: `32 * d * K` bytes.
-    pub fn compress_encode(&self, d: usize) -> Vec<u8> {
-        let mut out = Vec::with_capacity(32 * d * P::K);
-        out.extend(
-            self.as_slice()
-                .iter()
-                .flat_map(|poly| poly.compress_encode(d)),
-        );
-
-        out
+    /// `ByteEncode_d(Compress_d(.))` applied componentwise: `32 * d * K` bytes,
+    /// yielded lazily so `K-PKE.Encrypt` can pack them straight into the
+    /// ciphertext buffer without an intermediate allocation.
+    pub fn compress_encode(&self, d: usize) -> impl Iterator<Item = u8> + '_ {
+        self.as_slice()
+            .iter()
+            .flat_map(move |poly| poly.compress_encode(d))
     }
 
     /// `Decompress_d(ByteDecode_d(.))` applied componentwise.

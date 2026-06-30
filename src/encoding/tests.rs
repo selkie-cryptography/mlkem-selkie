@@ -73,7 +73,7 @@ fn vector_compress_roundtrip() {
         RqElement::new(coeffs)
     });
 
-    let encoded = vector.compress_encode(d);
+    let encoded: Vec<u8> = vector.compress_encode(d).collect();
 
     assert_eq!(encoded.len(), 32 * d * MLKEM512::K);
     assert_eq!(RqVector::<MLKEM512>::decode_decompress(&encoded, d), vector);

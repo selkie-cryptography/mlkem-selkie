@@ -93,10 +93,12 @@ impl<P: ParameterSet> EncryptionKey<P> {
         // v = NTT⁻¹(t_hat^T . y_hat) + e2 + mu
         let v = (&self.t_hat * &y_hat).ntt_inverse() + e2 + mu;
 
-        let mut bytes = u.compress_encode(P::D_U);
-        bytes.extend(v.compress_encode(P::D_V));
+        // Serialize Compress(u) ‖ Compress(v) straight into the fixed-size
+        // ciphertext buffer; both halves yield their bytes lazily, so no
+        // intermediate heap allocation backs the encoding.
+        let mut bytes = u.compress_encode(P::D_U).chain(v.compress_encode(P::D_V));
 
-        Ciphertext::from_bytes(bytes)
+        Ciphertext(P::ciphertext_from_fn(|_| bytes.next().unwrap_or(0)))
     }
 }
 
@@ -151,21 +153,31 @@ impl<P: ParameterSet> DecryptionKey<P> {
 
 /// A K-PKE ciphertext: the serialized, compressed `(u, v)` pair.
 ///
-/// Stored as bytes so that `ML-KEM.Decaps` can compare it against a
-/// re-encryption for the implicit-rejection check.
-pub struct Ciphertext<P: ParameterSet>(Vec<u8>, core::marker::PhantomData<P>);
+/// Stored as a fixed-size `[u8; CIPHERTEXT_SIZE]` (via
+/// [`ParameterSet::CiphertextSerialization`]) so the value is heap-free and
+/// `ML-KEM.Decaps` can compare it against a re-encryption for the
+/// implicit-rejection check.
+pub struct Ciphertext<P: ParameterSet>(P::CiphertextSerialization);
 
 impl<P: ParameterSet> Ciphertext<P> {
-    /// Wraps `32 * (D_U * K + D_V)` ciphertext bytes.
-    pub fn from_bytes(bytes: Vec<u8>) -> Self {
+    /// Wraps `32 * (D_U * K + D_V)` ciphertext bytes, copying them into the
+    /// fixed-size buffer.
+    ///
+    /// # Panics
+    ///
+    /// Debug-asserts the input length; callers in `ML-KEM` validate the length
+    /// at the public boundary before parsing (FIPS 203 section 7.2).
+    pub fn from_bytes(bytes: &[u8]) -> Self {
         debug_assert_eq!(bytes.len(), P::CIPHERTEXT_SIZE);
 
-        Self(bytes, core::marker::PhantomData)
+        Self(P::ciphertext_from_fn(|i| {
+            bytes.get(i).copied().unwrap_or(0)
+        }))
     }
 
     /// Returns the serialized ciphertext bytes.
     pub fn as_bytes(&self) -> &[u8] {
-        &self.0
+        self.0.as_ref()
     }
 }
 

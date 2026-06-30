@@ -171,7 +171,22 @@ pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
 
     /// Ciphertext byte serialization, a byte array of fixed length
     /// [`Self::CIPHERTEXT_SIZE`].
-    type CiphertextSerialization: AsRef<[u8]> + TryFrom<Vec<u8>>;
+    ///
+    /// Carries `Send + Sync` (like [`Self::KArray`]) so the heap-free
+    /// ciphertext type that wraps it stays thread-safe — the divan benchmarks
+    /// move ciphertexts across threads.
+    type CiphertextSerialization: AsRef<[u8]> + Send + Sync;
+
+    /// Builds a [`Self::CiphertextSerialization`] by applying `f` to each byte
+    /// index in `0..CIPHERTEXT_SIZE`.
+    ///
+    /// Assembles the fixed-size ciphertext buffer on the stack, so
+    /// `K-PKE.Encrypt` can serialize the compressed `(u, v)` pair straight into
+    /// it without a heap allocation. Concrete in each parameter set for the
+    /// same reason as [`Self::k_array_from_fn`]: a generic `[u8;
+    /// Self::CIPHERTEXT_SIZE]` would otherwise require the unstable
+    /// `generic_const_exprs`.
+    fn ciphertext_from_fn(f: impl FnMut(usize) -> u8) -> Self::CiphertextSerialization;
 }
 
 /// The ML-KEM-512 parameter set defined in [FIPS 203], section 7.
@@ -198,6 +213,10 @@ impl ParameterSet for MLKEM512 {
     where
         T: KElement,
     {
+        core::array::from_fn(f)
+    }
+
+    fn ciphertext_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::CIPHERTEXT_SIZE] {
         core::array::from_fn(f)
     }
 
@@ -236,6 +255,10 @@ impl ParameterSet for MLKEM768 {
         core::array::from_fn(f)
     }
 
+    fn ciphertext_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::CIPHERTEXT_SIZE] {
+        core::array::from_fn(f)
+    }
+
     type PKEDecryptionKeySerialization = [u8; Self::PKE_DECRYPTION_KEY_SIZE];
     type PKEEncryptionKeySerialization = [u8; Self::PKE_ENCRYPTION_KEY_SIZE];
 
@@ -268,6 +291,10 @@ impl ParameterSet for MLKEM1024 {
     where
         T: KElement,
     {
+        core::array::from_fn(f)
+    }
+
+    fn ciphertext_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::CIPHERTEXT_SIZE] {
         core::array::from_fn(f)
     }
 
