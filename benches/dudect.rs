@@ -14,7 +14,7 @@
 use std::hint::black_box;
 
 use dudect_bencher::{BenchRng, Class, CtRunner, ctbench_main};
-use mlkem_selkie::{Aes256CtrDrbg, Ciphertext, KeyPair, MLKEM512, algebraic::FieldElement};
+use mlkem_selkie::{Ciphertext, KeyPair, MLKEM512, algebraic::FieldElement, drbg::Aes256CtrDrbg};
 use rand_core::RngCore;
 
 /// A random field element.

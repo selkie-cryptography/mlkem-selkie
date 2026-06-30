@@ -1289,6 +1289,7 @@ dependencies = [
  "dhat",
  "divan",
  "dudect-bencher",
+ "getrandom 0.2.12",
  "gungraun",
  "hax-lib-macros 0.1.0-pre.1",
  "hex",

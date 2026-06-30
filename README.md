@@ -9,17 +9,17 @@ and `mlkem1024` — so the generic `KeyPair<MLKEM768>` reads as `mlkem768::KeyPa
 
 ```rust
 use mlkem_selkie::mlkem768;
-use rand::rngs::OsRng;
 
-// Generate an ML-KEM-768 key pair.
+// Generate an ML-KEM-768 key pair. The module sources its own randomness via
+// `getrandom` + an internal SP 800-90A AES-256-CTR-DRBG.
 let mlkem768::KeyPair {
     encapsulation_key: encaps_key,
     decapsulation_key: decaps_key,
-} = mlkem768::KeyPair::generate(&mut OsRng);
+} = mlkem768::KeyPair::generate();
 
 // The sender encapsulates a fresh shared secret under the encapsulation key,
 // and transmits the ciphertext.
-let (sender_secret, ciphertext) = encaps_key.encapsulate(&mut OsRng);
+let (sender_secret, ciphertext) = encaps_key.encapsulate();
 
 // The holder of the decapsulation key recovers the same shared secret.
 let receiver_secret = decaps_key.decapsulate(&ciphertext);

@@ -27,7 +27,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use mlkem_selkie::{Aes256CtrDrbg, KeyPair, MLKEM768};
+use mlkem_selkie::{KeyPair, MLKEM768, drbg::Aes256CtrDrbg};
 use rand_core::RngCore;
 
 /// Number of random interop iterations (ML-KEM-768).

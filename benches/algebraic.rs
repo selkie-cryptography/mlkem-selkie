@@ -4,9 +4,8 @@
 
 use divan::{Bencher, black_box};
 use mlkem_selkie::{
-    Eta,
     algebraic::{FieldElement, PolynomialRingElement, RqElement, TqElement},
-    functions::XOF,
+    parameters::Eta,
 };
 
 fn main() {
@@ -56,9 +55,7 @@ fn sample_poly_cbd(bencher: Bencher<'_, '_>) {
 /// `SampleNTT`: rejection sampling a uniform Tq element from a SHAKE128 stream.
 #[divan::bench]
 fn sample_ntt(bencher: Bencher<'_, '_>) {
-    bencher
-        .with_inputs(|| XOF(&[7u8; 32], 0, 0))
-        .bench_refs(TqElement::sample_ntt);
+    bencher.bench(|| TqElement::sample_ntt(black_box(&[7u8; 32]), 0, 0));
 }
 
 /// `ByteEncode_12` of an NTT-domain polynomial.

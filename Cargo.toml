@@ -34,8 +34,14 @@ dhat-heap = []
 [dependencies]
 # AES-256 block cipher, the core of our vendored SP 800-90A CTR_DRBG (src/drbg.rs).
 aes = "0.9"
-# RngCore / CryptoRng traits; the DRBG and the public KeyGen/Encaps APIs are
-# generic over them.
+# OS entropy source — the seed input to the internal `Aes256CtrDrbg` that
+# `KeyPair::generate` and `EncapsulationKey::encapsulate` use to source the
+# in-module randomness FIPS 203 §3.3 requires. The public API takes no caller
+# RNG (matching BoringSSL / aws-lc-rs / Go `crypto/mlkem` / RustCrypto's
+# default), so we read from the OS directly rather than pulling in `rand`.
+getrandom = "0.2"
+# `RngCore` (the trait the DRBG implements so `KeyPair::generate` can call
+# `drbg.fill_bytes`) and the `CryptoRng` marker (asserted on `Aes256CtrDrbg`).
 rand_core = "0.6"
 # SHA3-256/512 and SHAKE128/256 for H, G, J, PRF, and the XOF (src/functions.rs).
 sha3 = "0.10.8"

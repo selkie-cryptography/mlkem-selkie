@@ -21,7 +21,7 @@
 //!
 //! [libcrux]: https://github.com/cryspen/libcrux
 
-use mlkem_selkie::{Aes256CtrDrbg, Ciphertext, KeyPair, MLKEM512, MLKEM768, MLKEM1024};
+use mlkem_selkie::{Ciphertext, KeyPair, MLKEM512, MLKEM768, MLKEM1024, drbg::Aes256CtrDrbg};
 use rand_core::RngCore;
 
 /// Number of random interop iterations per parameter set.

@@ -1,15 +1,13 @@
 //! End-to-end tests of the ML-KEM public API.
 
-use rand::rngs::OsRng;
-
 use super::*;
 
 /// A generated key pair encapsulates and decapsulates to the same shared
 /// secret.
 fn encaps_decaps_agree<P: ParameterSet>() {
-    let keypair = KeyPair::<P>::generate(&mut OsRng);
+    let keypair = KeyPair::<P>::generate();
 
-    let (sender_secret, ciphertext) = keypair.encapsulation_key.encapsulate(&mut OsRng);
+    let (sender_secret, ciphertext) = keypair.encapsulation_key.encapsulate();
     let receiver_secret = keypair.decapsulation_key.decapsulate(&ciphertext);
 
     assert_eq!(sender_secret.as_bytes(), receiver_secret.as_bytes());
@@ -26,9 +24,9 @@ fn roundtrip_all_parameter_sets() {
 /// The per-parameter-set aliased API resolves and round-trips.
 #[test]
 fn aliased_module_roundtrip() {
-    let keypair: mlkem768::KeyPair = mlkem768::KeyPair::generate(&mut OsRng);
+    let keypair: mlkem768::KeyPair = mlkem768::KeyPair::generate();
 
-    let (sender, ciphertext) = keypair.encapsulation_key.encapsulate(&mut OsRng);
+    let (sender, ciphertext) = keypair.encapsulation_key.encapsulate();
     let parsed = mlkem768::Ciphertext::from_bytes(ciphertext.as_bytes()).expect("valid ct");
     let receiver = keypair.decapsulation_key.decapsulate(&parsed);
 

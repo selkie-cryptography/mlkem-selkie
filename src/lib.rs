@@ -8,7 +8,7 @@
 #![deny(unsafe_code)]
 #![warn(rust_2018_idioms, unused_lifetimes, unused_qualifications)]
 
-use rand_core::{CryptoRng, RngCore};
+use rand_core::RngCore;
 use subtle::{ConditionallySelectable, ConstantTimeEq};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -41,20 +41,35 @@ mod sampling;
 #[cfg(feature = "expose-internals")]
 pub mod sampling;
 
+#[cfg(not(feature = "expose-internals"))]
 mod drbg;
+#[cfg(feature = "expose-internals")]
+pub mod drbg;
+
+#[cfg(not(feature = "expose-internals"))]
 mod parameters;
+#[cfg(feature = "expose-internals")]
+pub mod parameters;
 
 #[cfg(test)]
 mod tests;
 
-pub use drbg::{Aes256CtrDrbg, SEEDLEN};
+// `Aes256CtrDrbg` and `Eta` are intentionally not part of the public API:
+// the DRBG is the internal SP 800-90A §10.2.1 engine that `KeyPair::generate`
+// and `EncapsulationKey::encapsulate` seed from the caller's RNG to perform
+// the in-module randomness sampling FIPS 203 §3.3 requires (not a downstream
+// production-RNG affordance); `Eta` is an internal type whose values external
+// callers only ever forward as `<P as ParameterSet>::ETA_*`. `expose-internals`
+// re-exposes both via the inner modules for tests, benches, and KAT replay
+// (which uses `generate_derand`/`encapsulate_derand` to skip the internal DRBG
+// and consume the test-vector seed directly).
 #[cfg(feature = "mlkem512")]
 pub use parameters::MLKEM512;
 #[cfg(feature = "mlkem768")]
 pub use parameters::MLKEM768;
 #[cfg(feature = "mlkem1024")]
 pub use parameters::MLKEM1024;
-pub use parameters::{Eta, ParameterSet};
+pub use parameters::ParameterSet;
 
 use crate::{
     PKE::Ciphertext as PkeCiphertext,
@@ -217,19 +232,32 @@ impl<P: ParameterSet> EncapsulationKey<P> {
     }
 
     /// `ML-KEM.Encaps`: generates a shared secret and a ciphertext
-    /// encapsulating it under this key, sourcing fresh randomness.
+    /// encapsulating it under this key.
     ///
     /// Implements [Algorithm 20] of FIPS 203 (its [Algorithm 17] internal
-    /// core).
+    /// core). Per FIPS 203 §3.3 ("the sampling of random values...shall be
+    /// performed by the cryptographic module"), the module sources its own
+    /// randomness: 48 bytes are read from the OS via [`getrandom`], seeded
+    /// into an SP 800-90A §10.2.1 `Aes256CtrDrbg`, and the 32-byte
+    /// encapsulation randomness `m` is drawn from the DRBG.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the OS entropy source is unavailable.
     ///
     /// [Algorithm 20]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.20
     /// [Algorithm 17]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.17
-    pub fn encapsulate<R: CryptoRng + RngCore>(
-        &self,
-        rng: &mut R,
-    ) -> (SharedSecret, Ciphertext<P>) {
+    /// [`getrandom`]: getrandom::getrandom
+    #[must_use]
+    pub fn encapsulate(&self) -> (SharedSecret, Ciphertext<P>) {
+        let mut entropy = [0u8; drbg::SEEDLEN];
+        getrandom::getrandom(&mut entropy)
+            .expect("ML-KEM.Encaps: OS entropy source (`getrandom`) unavailable");
+        let mut drbg = drbg::Aes256CtrDrbg::new(&entropy);
+        entropy.zeroize();
+
         let mut m = [0u8; 32];
-        rng.fill_bytes(&mut m);
+        drbg.fill_bytes(&mut m);
 
         let result = self.encapsulate_derand(&m);
         m.zeroize();
@@ -481,18 +509,31 @@ pub struct KeyPair<P: ParameterSet> {
 }
 
 impl<P: ParameterSet> KeyPair<P> {
-    /// `ML-KEM.KeyGen`: generates a fresh key pair, sourcing all randomness
-    /// from `rng`.
+    /// `ML-KEM.KeyGen`: generates a fresh key pair.
     ///
-    /// Implements [Algorithm 19] of FIPS 203. The 32-byte seeds `d` and `z` are
-    /// drawn from `rng`, which must be a NIST SP 800-90A/B/C-approved RBG of
-    /// the security strength required by the parameter set (see section
-    /// 3.3).
+    /// Implements [Algorithm 19] of FIPS 203. Per FIPS 203 §3.3 ("the sampling
+    /// of random values...shall be performed by the cryptographic module"),
+    /// the module sources its own randomness: 48 bytes are read from the OS
+    /// via [`getrandom`], seeded into an SP 800-90A §10.2.1
+    /// `Aes256CtrDrbg`, and the 64-byte `d ‖ z` keygen seed is drawn
+    /// from the DRBG.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the OS entropy source is unavailable.
     ///
     /// [Algorithm 19]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.19
-    pub fn generate<R: CryptoRng + RngCore>(rng: &mut R) -> Self {
+    /// [`getrandom`]: getrandom::getrandom
+    #[must_use]
+    pub fn generate() -> Self {
+        let mut entropy = [0u8; drbg::SEEDLEN];
+        getrandom::getrandom(&mut entropy)
+            .expect("ML-KEM.KeyGen: OS entropy source (`getrandom`) unavailable");
+        let mut drbg = drbg::Aes256CtrDrbg::new(&entropy);
+        entropy.zeroize();
+
         let mut seed = [0u8; 64];
-        rng.fill_bytes(&mut seed);
+        drbg.fill_bytes(&mut seed);
 
         let keypair = Self::generate_derand(&seed);
         seed.zeroize();
