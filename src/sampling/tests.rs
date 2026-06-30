@@ -1,10 +1,5 @@
 //! Unit tests for ring-element sampling.
 
-use sha3::{
-    Shake128,
-    digest::{ExtendableOutput, Update},
-};
-
 use super::*;
 
 /// All-zero CBD input yields the zero polynomial.
@@ -48,14 +43,8 @@ fn sample_poly_cbd_range() {
 /// coefficients.
 #[test]
 fn sample_ntt_deterministic_and_canonical() {
-    let seed = |label: u8| {
-        let mut h = Shake128::default();
-        h.update(&[label; 34]);
-        h.finalize_xof()
-    };
-
-    let a = TqElement::sample_ntt(&mut seed(7));
-    let b = TqElement::sample_ntt(&mut seed(7));
+    let a = TqElement::sample_ntt(&[7u8; 32], 7, 7);
+    let b = TqElement::sample_ntt(&[7u8; 32], 7, 7);
 
     assert_eq!(a, b);
 

@@ -16,7 +16,7 @@ use sha3::digest::XofReader;
 
 use crate::{
     algebraic::{FieldElement, PolynomialRingElement, RqElement, TqElement},
-    functions::Shake128X4,
+    functions::{Shake128X4, XOF},
     parameters::{self, Eta, Q},
 };
 
@@ -24,20 +24,21 @@ use crate::{
 mod tests;
 
 impl TqElement {
-    /// `SampleNTT`: rejection-samples a uniformly random element of Tq from a
-    /// SHAKE128 output stream.
+    /// `SampleNTT`: rejection-samples a uniformly random element of Tq from
+    /// `XOF(rho, j, i)` per Algorithm 13/14 of FIPS 203.
     ///
-    /// Reads three bytes at a time, interpreting them as two 12-bit candidates,
-    /// and keeps each candidate that is less than q until 256 coefficients have
-    /// been collected. [`Self::sample_ntt_x4`] is the batched form that drives
-    /// four streams at once for matrix expansion.
+    /// Reads three bytes at a time from the [`XOF`] stream, interpreting them
+    /// as two 12-bit candidates, and keeps each candidate that is less than `q`
+    /// until 256 coefficients have been collected. [`Self::sample_ntt_x4`] is
+    /// the batched form that drives four streams at once for matrix expansion.
     ///
     /// Implements [Algorithm 7] of FIPS 203.
     ///
     /// [Algorithm 7]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.7
     // reason: `count < N` guards both writes, so every index is in bounds.
     #[allow(clippy::indexing_slicing)]
-    pub fn sample_ntt(reader: &mut impl XofReader) -> Self {
+    pub fn sample_ntt(rho: &[u8; 32], i: u8, j: u8) -> Self {
+        let mut reader = XOF(rho, i, j);
         let mut coefficients = [FieldElement::ZERO; parameters::N];
         let mut count = 0;
         let mut triple = [0u8; 3];

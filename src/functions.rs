@@ -22,10 +22,8 @@ use core::ops::Deref;
 use libcrux_sha3::avx2::x4::incremental as keccak4;
 #[cfg(mlkem_selkie_arch = "neon")]
 use libcrux_sha3::neon::x2::incremental as keccak2;
-#[cfg(not(any(mlkem_selkie_arch = "avx2", mlkem_selkie_arch = "neon")))]
-use sha3::Shake128Reader;
 use sha3::{
-    Digest, Sha3_256, Sha3_512, Shake128, Shake256,
+    Digest, Sha3_256, Sha3_512, Shake128, Shake128Reader, Shake256,
     digest::{ExtendableOutput, Update, XofReader},
 };
 
@@ -49,7 +47,7 @@ mod tests;
 // array of 32 bytes, but following the convention for hashes and PRFs we let
 // this seed `rho` be raw bytes.
 #[must_use]
-pub fn XOF(rho: &[u8; 32], i: u8, j: u8) -> impl XofReader {
+pub fn XOF(rho: &[u8; 32], i: u8, j: u8) -> Shake128Reader {
     let mut h = Shake128::default();
     h.update(rho);
     h.update(&[i, j]);
@@ -203,11 +201,13 @@ impl Shake128X4 {
     #[cfg(not(any(mlkem_selkie_arch = "avx2", mlkem_selkie_arch = "neon")))]
     #[must_use]
     pub fn absorb(seeds: &[[u8; 34]; 4]) -> Self {
+        // Decompose each seed back into `(rho, j, i)` and feed it through `XOF`
+        // — keeping the scalar fallback aligned with the per-stream entry point.
+        // `XOF`'s `update(rho); update(&[a, b])` matches `SHAKE128(rho ‖ a ‖ b)`,
+        // and the seed is `rho ‖ j ‖ i`, so call as `XOF(&rho, j, i)`.
         Self(seeds.each_ref().map(|seed| {
-            let mut h = Shake128::default();
-            h.update(seed);
-
-            h.finalize_xof()
+            let [rho @ .., j, i] = *seed;
+            XOF(&rho, j, i)
         }))
     }
 

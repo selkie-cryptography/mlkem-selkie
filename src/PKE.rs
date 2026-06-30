@@ -133,6 +133,11 @@ impl<P: ParameterSet> DecryptionKey<P> {
 
     /// Serializes to `ByteEncode_12(s_hat)`, the fixed-size
     /// `P::PKEDecryptionKeySerialization`, assembled on the stack.
+    ///
+    /// Symmetric with [`EncryptionKey::to_bytes`]. `EncryptionKey::to_bytes` is
+    /// exercised by the §7.2 modulus check; this one has no production caller
+    /// outside the K-PKE round-trip test, hence the `allow(dead_code)`.
+    #[allow(dead_code)]
     pub fn to_bytes(&self) -> P::PKEDecryptionKeySerialization {
         let mut bytes = self.bytes();
         P::pke_decryption_key_from_fn(|_| bytes.next().unwrap_or(0))
