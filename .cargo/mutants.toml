@@ -19,12 +19,10 @@ profile = "mutants"
 # Run mutants with the internals exposed so the white-box property and unit
 # tests (algebraic_properties, field/NTT/encoding) can kill arithmetic mutants,
 # under the release-checked profile (debug-assertions + overflow-checks).
-additional_cargo_test_args = [
-    "--features",
-    "expose-internals",
-    "--cargo-profile",
-    "mutants",
-]
+# Do not repeat `--cargo-profile` here — `profile = "mutants"` above already
+# forwards it; passing it again makes nextest reject the build with
+# `'--cargo-profile <NAME>' cannot be used multiple times`.
+additional_cargo_test_args = ["--features", "expose-internals"]
 
 # Timeout: 2x baseline with a 60s floor. The NTT rejection-sampling and DRBG
 # loops can spin on a mutated bound; the build/test timeouts cap those rather

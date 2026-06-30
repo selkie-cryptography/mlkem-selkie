@@ -60,10 +60,17 @@ jobs:
           viable=$((caught + missed))
           score=0
           [ "$viable" -gt 0 ] && score=$((100 * caught / viable))
-          echo "summary=caught $caught/$viable ($score%)" >> "$GITHUB_OUTPUT"
-          if [ "$missed" -gt 0 ]; then
+          # `viable == 0` means the baseline build/test failed (or no mutants
+          # were emitted) — `cargo mutants || true` swallows the exit code, so
+          # without this arm a broken baseline would publish as `ok`.
+          if [ "$viable" -eq 0 ]; then
+            echo "summary=no mutants tested (baseline failed?)" >> "$GITHUB_OUTPUT"
+            echo "status=warn" >> "$GITHUB_OUTPUT"
+          elif [ "$missed" -gt 0 ]; then
+            echo "summary=caught $caught/$viable ($score%)" >> "$GITHUB_OUTPUT"
             echo "status=warn" >> "$GITHUB_OUTPUT"
           else
+            echo "summary=caught $caught/$viable ($score%)" >> "$GITHUB_OUTPUT"
             echo "status=ok" >> "$GITHUB_OUTPUT"
           fi
       - name: Publish to dashboard
