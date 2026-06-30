@@ -31,6 +31,12 @@ const BARRETT_V: i32 = ((1 << 26) + (Q as i32) / 2) / (Q as i32);
 /// scales a value by `R` (used to undo the `R^-1` left by base multiplication).
 const MONT_R_SQUARED: i16 = 1353;
 
+/// `ceil(2^33 / q) = 2580335`, the Barrett multiplier for division by `q`.
+/// Verified to give `floor(n / q)` via `(n * BARRETT_DIV_Q) >> 33` for every
+/// `n` in `[0, (q - 1) << 12 + q/2]` (max ~1.36e7, at `compress`'s `d = 12`),
+/// which contains the full `u16` range used by [`FieldElement::new`].
+const BARRETT_DIV_Q: u64 = 2_580_335;
+
 /// An element of `Z` mod q, in signed Montgomery representation.
 ///
 /// The stored value is a representative of the residue class, not necessarily
@@ -48,9 +54,17 @@ impl FieldElement {
     pub const ZERO: Self = Self(0);
 
     /// Instantiates a canonical `FieldElement` from an integer, reduced mod q.
+    ///
+    /// Division-free: the reduction is the explicit Barrett mul-shift
+    /// `(value * BARRETT_DIV_Q) >> 33`, exact for every `u16` input, then
+    /// `value - quotient * q` gives the canonical representative in `[0, q)`.
+    /// This keeps `new` constant-time on the secret-derived `ByteDecode_12`
+    /// inputs (the recovered ciphertext coefficients in `K-PKE.Decrypt`).
     #[inline]
     pub const fn new(value: u16) -> Self {
-        Self((value % parameters::Q) as i16)
+        let v = value as u64;
+        let quotient = (v * BARRETT_DIV_Q) >> 33;
+        Self((v - quotient * Q as u64) as i16)
     }
 
     /// Returns the canonical representative in `0 <= value < Q`.
@@ -125,13 +139,16 @@ impl FieldElement {
     /// `Compress_d`: maps this element to a `d`-bit value in `{0, ..., 2^d -
     /// 1}` via `round((2^d / q) * x) mod 2^d`.
     ///
-    /// Defined by [equation 4.7] of FIPS 203.
+    /// Defined by [equation 4.7] of FIPS 203. Division by `q` is computed via
+    /// the explicit Barrett mul-shift `(num * BARRETT_DIV_Q) >> 33`, which is
+    /// constant-time on secret-derived inputs (the recovered message bits in
+    /// `K-PKE.Decrypt`'s `compress_message`).
     ///
     /// [equation 4.7]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.2.1
     #[inline]
     pub fn compress(self, d: usize) -> u16 {
         let numerator = (u32::from(self.value()) << d) + u32::from(parameters::Q / 2);
-        let quotient = numerator / u32::from(parameters::Q);
+        let quotient = ((u64::from(numerator) * BARRETT_DIV_Q) >> 33) as u32;
 
         (quotient & ((1 << d) - 1)) as u16
     }
