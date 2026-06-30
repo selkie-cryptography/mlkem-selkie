@@ -266,14 +266,15 @@ impl<P: ParameterSet> EncapsulationKey<P> {
     }
 
     /// `ML-KEM.Encaps_internal`: the derandomized core of
-    /// [`Self::encapsulate`], taking the message `m` explicitly.
+    /// [`Self::encapsulate`], taking the 32 bytes of encapsulation
+    /// randomness `m` explicitly.
     ///
-    /// Exposed for known-answer and Wycheproof testing, where the encapsulation
-    /// message is fixed by the vector.
-    ///
-    /// Implements [Algorithm 17] of FIPS 203.
+    /// Specified by [Algorithm 17] of FIPS 203 §6. `pub` only under the
+    /// `expose-internals` feature (for KAT replay); `pub(crate)` otherwise,
+    /// since [`Self::encapsulate`] calls it.
     ///
     /// [Algorithm 17]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.17
+    #[cfg(feature = "expose-internals")]
     #[must_use]
     pub fn encapsulate_derand(&self, m: &[u8; 32]) -> (SharedSecret, Ciphertext<P>) {
         // (K, r) <- G(m || H(ek)); preimage assembled in a 64-byte stack buffer.
@@ -291,6 +292,30 @@ impl<P: ParameterSet> EncapsulationKey<P> {
         r.zeroize();
 
         (SharedSecret(k), Ciphertext(ciphertext))
+    }
+
+    #[cfg(not(feature = "expose-internals"))]
+    #[must_use]
+    pub(crate) fn encapsulate_derand(&self, m: &[u8; 32]) -> (SharedSecret, Ciphertext<P>) {
+        let mut g_input = [0u8; 64];
+        let (m_part, h_part) = g_input.split_at_mut(32);
+        m_part.copy_from_slice(m);
+        h_part.copy_from_slice(&H(self.to_bytes().as_ref()));
+        let (k, mut r) = G(&g_input);
+
+        let ciphertext = self.ek_pke.encrypt(m, &r);
+
+        g_input.zeroize();
+        r.zeroize();
+
+        (SharedSecret(k), Ciphertext(ciphertext))
+    }
+}
+
+impl<P: ParameterSet> From<&DecapsulationKey<P>> for EncapsulationKey<P> {
+    /// Clones the encapsulation key embedded in `dk`.
+    fn from(dk: &DecapsulationKey<P>) -> Self {
+        dk.ek.clone()
     }
 }
 
@@ -352,12 +377,6 @@ pub struct DecapsulationKey<P: ParameterSet> {
 }
 
 impl<P: ParameterSet> DecapsulationKey<P> {
-    /// Returns the corresponding encapsulation key.
-    #[must_use]
-    pub fn encapsulation_key(&self) -> &EncapsulationKey<P> {
-        &self.ek
-    }
-
     /// Serializes the decapsulation key to its `768 * K + 96` bytes
     /// (`P::DecapsKeySerialization`), as `dk_PKE ‖ ek ‖ H(ek) ‖ z`, assembled
     /// on the stack with no heap allocation.
@@ -385,17 +404,18 @@ impl<P: ParameterSet> DecapsulationKey<P> {
     /// Implements [Algorithm 18] of FIPS 203 (the internal core of
     /// [Algorithm 21]). On a ciphertext that does not re-encrypt to itself, the
     /// returned secret is derived from the rejection seal `z` rather than from
-    /// the decrypted message.
+    /// the recovered encapsulation randomness `m'`.
     ///
     /// # Constant-time
     ///
-    /// The decrypted message `m'` and the re-encryption `c'` are secret-derived
+    /// The recovered randomness `m'` and the re-encryption `c'` are
+    /// secret-derived
     /// ([Algorithm 18] lines 5, 8). The ciphertext comparison and the
     /// `K'`/`K_bar` selection use `subtle` (`ct_eq` /
     /// `conditional_select`), so neither the equality result nor which
     /// secret is returned leaks through a branch or an early exit. The
     /// field arithmetic feeding `m'` is itself constant-time (Montgomery/
-    /// Barrett; see [`crate::algebraic`]).
+    /// Barrett; see the `algebraic` module).
     ///
     /// [Algorithm 18]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.18
     /// [Algorithm 21]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.21
@@ -544,14 +564,16 @@ impl<P: ParameterSet> KeyPair<P> {
     /// `ML-KEM.KeyGen_internal`: the derandomized core of [`Self::generate`],
     /// taking the 64-byte seed `d ‖ z` explicitly.
     ///
-    /// The seed concatenates the K-PKE key-generation seed `d` (first 32 bytes)
-    /// and the implicit-rejection seed `z` (last 32 bytes), following the
-    /// known-answer-test encoding convention. Exposed for KAT and Wycheproof
-    /// replay.
-    ///
-    /// Implements [Algorithm 16] of FIPS 203.
+    /// Specified by [Algorithm 16] of FIPS 203 §6. The seed concatenates the
+    /// K-PKE key-generation seed `d` (first 32 bytes) and the
+    /// implicit-rejection seed `z` (last 32 bytes). Exposed for KAT replay
+    /// **and** for hybrid-KEM constructions like [X-Wing] that derive
+    /// `d ‖ z` deterministically from a combined seed and call this
+    /// directly; both halves must come from an SP 800-90A/B/C RBG of the
+    /// parameter set's security strength (FIPS 203 §3.3).
     ///
     /// [Algorithm 16]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.16
+    /// [X-Wing]: https://datatracker.ietf.org/doc/draft-connolly-cfrg-xwing-kem/
     #[must_use]
     pub fn generate_derand(seed: &[u8; 64]) -> Self {
         let (d, z) = seed.split_at(32);
