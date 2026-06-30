@@ -5,13 +5,18 @@
 
 use core::ops::{Add, Index, Mul};
 
+use zeroize::{Zeroize, ZeroizeOnDrop};
+
 use crate::{
     algebraic::poly::{PolynomialRingElement, RqElement, TqElement},
     parameters::ParameterSet,
 };
 
 /// A vector of `K` polynomial ring elements in Rq.
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// `ZeroizeOnDrop` covers the CBD-sampled secrets `s`/`e`/`y`/`e_1` and any
+/// transient vector that goes out of scope.
+#[derive(Clone, Debug, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct RqVector<P: ParameterSet> {
     /// The `P::K` component polynomials.
     polys: P::KArray<RqElement>,
@@ -55,7 +60,9 @@ impl<P: ParameterSet> Add for RqVector<P> {
 }
 
 /// A vector of `K` polynomial ring elements in Tq (NTT representation).
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// `ZeroizeOnDrop` for the same reason as `RqVector`.
+#[derive(Clone, Debug, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct TqVector<P: ParameterSet> {
     /// The `P::K` component polynomials in NTT form.
     polys: P::KArray<TqElement>,

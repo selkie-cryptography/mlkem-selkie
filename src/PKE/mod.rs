@@ -9,6 +9,8 @@
 //!
 //! [section 5]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#section.5
 
+use zeroize::{Zeroize, ZeroizeOnDrop};
+
 use crate::{
     algebraic::{RqElement, RqVector, TqElement, TqMatrix, TqVector},
     functions::{G, PRF, XOF},
@@ -21,7 +23,11 @@ mod tests;
 /// K-PKE key generation randomness seed `d` (Algorithm 13 input).
 ///
 /// Should never be exposed outside ML-KEM.
-pub struct KeyGenRandomnessSeed<P: ParameterSet>([u8; 32], core::marker::PhantomData<P>);
+#[derive(Zeroize, ZeroizeOnDrop)]
+pub struct KeyGenRandomnessSeed<P: ParameterSet>(
+    [u8; 32],
+    #[zeroize(skip)] core::marker::PhantomData<P>,
+);
 
 impl<P: ParameterSet> KeyGenRandomnessSeed<P> {
     /// Constructs the seed from 32 random bytes.
@@ -32,7 +38,9 @@ impl<P: ParameterSet> KeyGenRandomnessSeed<P> {
 
 /// A K-PKE encryption key: the NTT-domain vector `t_hat` and the matrix seed
 /// `rho` (section 5 of FIPS 203).
-#[derive(Clone)]
+///
+/// Public material; `Zeroize` only so embedding containers can zeroize it.
+#[derive(Clone, Zeroize)]
 pub struct EncryptionKey<P: ParameterSet> {
     /// `t_hat = A . s_hat + e_hat`, the public vector in Tq.
     t_hat: TqVector<P>,
@@ -110,6 +118,7 @@ impl<P: ParameterSet> EncryptionKey<P> {
 /// A K-PKE decryption key: the NTT-domain secret vector `s_hat` (section 5 of
 /// FIPS 203).
 // No `PartialEq`/`Eq`: this is secret key material.
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct DecryptionKey<P: ParameterSet> {
     /// `s_hat = NTT(s)`, the secret vector in Tq.
     s_hat: TqVector<P>,
@@ -216,13 +225,17 @@ impl<P: ParameterSet> KeyPair<P> {
         let (d_part, k_part) = g_input.split_at_mut(32);
         d_part.copy_from_slice(&seed.0);
         k_part.copy_from_slice(&[P::K as u8]);
-        let (rho, sigma) = G(&g_input);
+        let (rho, mut sigma) = G(&g_input);
+        // g_input held the secret seed `d`; zeroize now that G has consumed it.
+        g_input.zeroize();
 
         let a_hat = TqMatrix::<P>::expand(&rho);
 
         let mut n = 0u8;
         let s = RqVector::<P>::sample_cbd(P::ETA_1, &sigma, &mut n);
         let e = RqVector::<P>::sample_cbd(P::ETA_1, &sigma, &mut n);
+        // sigma is no longer needed after CBD sampling.
+        sigma.zeroize();
 
         let s_hat = s.ntt();
         let e_hat = e.ntt();

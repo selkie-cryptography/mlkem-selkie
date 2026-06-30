@@ -42,8 +42,8 @@ sha3 = "0.10.8"
 # Constant-time equality and selection for the `ML-KEM.Decaps` implicit-rejection
 # check, which compares and selects over secret-derived bytes (src/lib.rs).
 subtle = "2"
-# Zeroizing secret key material. TODO: apply ZeroizeOnDrop to DecapsulationKey.
-zeroize = "1.7.0"
+# Zeroizing secret key material on drop and the decaps/keygen stack transients.
+zeroize = { version = "1.7.0", features = ["derive"] }
 
 [dev-dependencies]
 # A self dev-dependency that turns on `expose-internals` whenever the

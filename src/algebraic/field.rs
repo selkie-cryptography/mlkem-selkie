@@ -11,6 +11,8 @@
 
 use core::ops::{Add, Mul, Neg, Sub};
 
+use zeroize::Zeroize;
+
 use crate::parameters;
 
 #[cfg(test)]
@@ -35,8 +37,9 @@ const MONT_R_SQUARED: i16 = 1353;
 /// in `0..q`; [`Self::value`] returns the canonical representative.
 // `repr(transparent)` guarantees the same layout as `i16`, so the SIMD backends
 // (`crate::algebraic::poly::arch`) can reinterpret a `[FieldElement; N]` as
-// `[i16; N]` for vector loads/stores.
-#[derive(Debug, Clone, Copy)]
+// `[i16; N]` for vector loads/stores. `derive(Zeroize)` only adds a method, so
+// the transparent layout stands.
+#[derive(Debug, Clone, Copy, Zeroize)]
 #[repr(transparent)]
 pub struct FieldElement(i16);
 

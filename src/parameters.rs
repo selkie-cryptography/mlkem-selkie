@@ -4,12 +4,14 @@
 
 use core::fmt::Debug;
 
+use zeroize::Zeroize;
+
 /// The bounds an element type must satisfy to live in a
 /// [`ParameterSet::KArray`]: enough for the vector and matrix newtypes to derive
-/// `Clone`/`Debug`/`PartialEq`/`Eq` and remain `Send + Sync`.
-pub trait KElement: Clone + Debug + PartialEq + Eq + Send + Sync {}
+/// `Clone`/`Debug`/`PartialEq`/`Eq`, remain `Send + Sync`, and `Zeroize`.
+pub trait KElement: Clone + Debug + PartialEq + Eq + Send + Sync + Zeroize {}
 
-impl<T: Clone + Debug + PartialEq + Eq + Send + Sync> KElement for T {}
+impl<T: Clone + Debug + PartialEq + Eq + Send + Sync + Zeroize> KElement for T {}
 
 /// "n is set to 256 because the goal is to encapsulate keys with 256 bits of
 /// entropy (i.e., use a plaintext size of 256 bits in Kyber.CPAPKE.Enc).
@@ -93,7 +95,7 @@ pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
     /// Concrete in each parameter set (`[T; 2]`, `[T; 3]`, `[T; 4]`), which
     /// sidesteps the unstable `generic_const_exprs` that a generic `[T;
     /// Self::K]` would otherwise require.
-    type KArray<T>: AsRef<[T]> + Clone + Debug + PartialEq + Eq + Send + Sync
+    type KArray<T>: AsRef<[T]> + Clone + Debug + PartialEq + Eq + Send + Sync + Zeroize
     where
         T: KElement;
 

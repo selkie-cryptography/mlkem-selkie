@@ -30,6 +30,16 @@ assert_eq!(sender_secret.as_bytes(), receiver_secret.as_bytes());
 Keys and ciphertexts serialize with `to_bytes` / `as_bytes` and parse back with
 `from_bytes`, which applies the FIPS 203 §7 input validation.
 
+### Zeroization
+
+`DecapsulationKey`, `DecryptionKey`, `RejectionSeed`, `KeyGenRandomnessSeed`,
+`SharedSecret`, `Aes256CtrDrbg`, and the `RqVector`/`TqVector` secret-noise
+containers derive `ZeroizeOnDrop`; the named decaps/keygen stack transients
+(`m'`, `r'`, `K'`, `K_bar`, `g_input`, `sigma`, the seeds) are zeroized
+explicitly. Best-effort: the compiler may spill bytes to slots we cannot
+reach, and a copy of `*SharedSecret::as_bytes()` into a plain `[u8; 32]`
+does not inherit the zeroization.
+
 ### About
 
 <img width="27%" align="right" src="https://user-images.githubusercontent.com/552961/197638905-f5144be3-a2f2-48c2-9ecb-26e4e34d8d8a.svg#gh-light-mode-only"/>

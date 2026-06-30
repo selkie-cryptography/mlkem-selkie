@@ -27,6 +27,7 @@ use aes::{
     cipher::{Block, BlockCipherEncrypt, KeyInit},
 };
 use rand_core::{CryptoRng, Error, RngCore};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 #[cfg(test)]
 mod tests;
@@ -42,6 +43,10 @@ const BLOCKLEN: usize = 16;
 pub const SEEDLEN: usize = KEYLEN + BLOCKLEN;
 
 /// AES256-CTR-DRBG state: 32-byte Key + 16-byte V counter.
+///
+/// `ZeroizeOnDrop`: both fields are entropy-derived material whose disclosure
+/// would let an attacker replay or predict the DRBG stream.
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Aes256CtrDrbg {
     /// 32-byte AES-256 key (`Key` in SP 800-90A §10.2.1).
     key: [u8; KEYLEN],

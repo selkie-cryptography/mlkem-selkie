@@ -15,6 +15,8 @@
 
 use core::ops::{Add, AddAssign, Index, Mul, Sub};
 
+use zeroize::Zeroize;
+
 use crate::{algebraic::field::FieldElement, parameters};
 
 mod arch;
@@ -61,8 +63,10 @@ pub trait PolynomialRingElement: Copy + Index<usize, Output = FieldElement> {
 /// Elements of the polynomial ring Rq over Zq.
 ///
 /// This is the standard domain of ML-KEM values, as opposed to the NTT
-/// representation [`TqElement`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// representation [`TqElement`]. `Copy` is load-bearing for the NTT/poly
+/// arithmetic, so no `ZeroizeOnDrop` (mutually exclusive); secret bare-element
+/// locals live inside a `ZeroizeOnDrop` `RqVector`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Zeroize)]
 pub struct RqElement([FieldElement; parameters::N]);
 
 impl RqElement {
@@ -145,7 +149,7 @@ impl From<TqElement> for RqElement {
 /// [section 4.3] of FIPS 203.
 ///
 /// [section 4.3]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.3
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Zeroize)]
 pub struct TqElement([FieldElement; parameters::N]);
 
 impl TqElement {

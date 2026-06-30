@@ -10,6 +10,7 @@
 
 use rand_core::{CryptoRng, RngCore};
 use subtle::{ConditionallySelectable, ConstantTimeEq};
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 // The internal building blocks (field/ring arithmetic, K-PKE, the samplers, the
 // serialization layer, and the symmetric primitives) are private by default and
@@ -88,7 +89,9 @@ pub enum Error {
 ///
 /// The output of both [`EncapsulationKey::encapsulate`] and
 /// [`DecapsulationKey::decapsulate`]. Carries no `PartialEq`: callers that must
-/// compare shared secrets should do so in constant time.
+/// compare shared secrets should do so in constant time. A copy of
+/// `*as_bytes()` into a plain `[u8; 32]` does not inherit the zeroization.
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct SharedSecret([u8; 32]);
 
 impl SharedSecret {
@@ -148,7 +151,7 @@ impl<P: ParameterSet> TryFrom<&[u8]> for Ciphertext<P> {
 /// Bound into the shared-secret derivation of `ML-KEM.Encaps` and `Decaps`, and
 /// stored inside the decapsulation key so the binding can be re-checked when
 /// the key is parsed.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Zeroize)]
 struct EncapsulationKeyHash([u8; 32]);
 
 impl EncapsulationKeyHash {
@@ -161,6 +164,7 @@ impl EncapsulationKeyHash {
 /// The Fujisaki–Okamoto implicit-rejection seed `z`: 32 random bytes that
 /// derive the rejection shared secret in `ML-KEM.Decaps`.
 // No `PartialEq`/`Eq`: this is secret key material.
+#[derive(Zeroize, ZeroizeOnDrop)]
 struct RejectionSeed([u8; 32]);
 
 impl RejectionSeed {
@@ -182,7 +186,9 @@ impl From<[u8; 32]> for RejectionSeed {
 /// 6.1].
 ///
 /// [FIPS 203 section 6.1]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.6.1
-#[derive(Clone)]
+///
+/// Public material; `Zeroize` only so embedding containers can zeroize it.
+#[derive(Clone, Zeroize)]
 pub struct EncapsulationKey<P: ParameterSet> {
     /// The K-PKE encryption key.
     ek_pke: PKE::EncryptionKey<P>,
@@ -225,7 +231,10 @@ impl<P: ParameterSet> EncapsulationKey<P> {
         let mut m = [0u8; 32];
         rng.fill_bytes(&mut m);
 
-        self.encapsulate_derand(&m)
+        let result = self.encapsulate_derand(&m);
+        m.zeroize();
+
+        result
     }
 
     /// `ML-KEM.Encaps_internal`: the derandomized core of
@@ -244,9 +253,14 @@ impl<P: ParameterSet> EncapsulationKey<P> {
         let (m_part, h_part) = g_input.split_at_mut(32);
         m_part.copy_from_slice(m);
         h_part.copy_from_slice(&H(self.to_bytes().as_ref()));
-        let (k, r) = G(&g_input);
+        let (k, mut r) = G(&g_input);
 
         let ciphertext = self.ek_pke.encrypt(m, &r);
+
+        // `m` is borrowed (caller's responsibility); `g_input` and `r` are
+        // ours to zeroize.
+        g_input.zeroize();
+        r.zeroize();
 
         (SharedSecret(k), Ciphertext(ciphertext))
     }
@@ -297,6 +311,7 @@ impl<P: ParameterSet> TryFrom<&[u8]> for EncapsulationKey<P> {
 ///
 /// [FIPS 203 section 6.1]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.6.1
 // No `PartialEq`/`Eq`/`Hash`: this is secret key material.
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct DecapsulationKey<P: ParameterSet> {
     /// The K-PKE decryption key.
     dk_pke: PKE::DecryptionKey<P>,
@@ -359,17 +374,18 @@ impl<P: ParameterSet> DecapsulationKey<P> {
     #[must_use]
     pub fn decapsulate(&self, ciphertext: &Ciphertext<P>) -> SharedSecret {
         // m' <- K-PKE.Decrypt(dk_PKE, c)
-        let m_prime = self.dk_pke.decrypt(&ciphertext.0);
+        let mut m_prime = self.dk_pke.decrypt(&ciphertext.0);
 
         // (K', r') <- G(m' || h); preimage assembled in a 64-byte stack buffer.
         let mut g_input = [0u8; 64];
         let (m_part, h_part) = g_input.split_at_mut(32);
         m_part.copy_from_slice(&m_prime);
         h_part.copy_from_slice(self.h_ek.as_bytes());
-        let (k_prime, r_prime) = G(&g_input);
+        let (mut k_prime, mut r_prime) = G(&g_input);
+        g_input.zeroize();
 
         // K_bar <- J(z || c); absorbed in two parts, no joined buffer.
-        let k_bar = J(self.z.as_bytes(), ciphertext.as_bytes());
+        let mut k_bar = J(self.z.as_bytes(), ciphertext.as_bytes());
 
         // c' <- K-PKE.Encrypt(ek_PKE, m', r')
         let c_prime = self.ek.ek_pke.encrypt(&m_prime, &r_prime);
@@ -380,15 +396,17 @@ impl<P: ParameterSet> DecapsulationKey<P> {
         // short-circuits.
         let matches = ciphertext.as_bytes().ct_eq(c_prime.as_bytes());
 
-        let mut k_prime = k_prime.into_iter();
-        let mut k_bar = k_bar.into_iter();
-        let secret = core::array::from_fn(|_| {
-            u8::conditional_select(
-                &k_bar.next().unwrap_or(0),
-                &k_prime.next().unwrap_or(0),
-                matches,
-            )
-        });
+        let mut secret = [0u8; 32];
+        for (out, (kp, kb)) in secret.iter_mut().zip(k_prime.iter().zip(k_bar.iter())) {
+            *out = u8::conditional_select(kb, kp, matches);
+        }
+
+        // Zeroize the secret-derived FO transients (`c_prime` is not on this
+        // list — it equals the public ciphertext on the success path).
+        m_prime.zeroize();
+        r_prime.zeroize();
+        k_prime.zeroize();
+        k_bar.zeroize();
 
         SharedSecret(secret)
     }
@@ -476,7 +494,10 @@ impl<P: ParameterSet> KeyPair<P> {
         let mut seed = [0u8; 64];
         rng.fill_bytes(&mut seed);
 
-        Self::generate_derand(&seed)
+        let keypair = Self::generate_derand(&seed);
+        seed.zeroize();
+
+        keypair
     }
 
     /// `ML-KEM.KeyGen_internal`: the derandomized core of [`Self::generate`],
