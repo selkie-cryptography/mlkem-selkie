@@ -56,7 +56,12 @@ fn fe(bytes: &[u8]) -> FieldElement {
 /// Returns `true` if the caller should skip — slow top-level tests run minutes
 /// under Valgrind, so they are opt-in via `CTGRIND_SLOW`.
 fn skip_unless_slow(name: &str) -> bool {
-    if std::env::var_os("CTGRIND_SLOW").is_none() {
+    // Treat unset *and* empty as off: the CI workflow's `env:` mapping has no
+    // way to skip setting a variable on conditional `false`, so it passes
+    // `CTGRIND_SLOW=''` instead. `var_os().is_none()` only catches the unset
+    // case and would let the empty string run the slow tests.
+    let enabled = std::env::var_os("CTGRIND_SLOW").is_some_and(|v| !v.is_empty());
+    if !enabled {
         eprintln!("[ctgrind] skipping {name}; set CTGRIND_SLOW=1 to enable");
         return true;
     }

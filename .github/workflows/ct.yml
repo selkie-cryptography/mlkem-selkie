@@ -36,11 +36,16 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Build dudect bench
+        run: cargo bench --bench dudect --features expose-internals --no-run
       - name: dudect t-test
         run: |
+          # Run the bench binary directly: `cargo bench --bench` passes
+          # `--bench` to the harness, which dudect-bencher rejects.
           set -o pipefail
           mkdir -p ct
-          cargo bench --bench dudect --features expose-internals | tee ct/dudect.txt
+          bin=$(find target/release/deps -maxdepth 1 -type f -name 'dudect-*' ! -name '*.d' -perm -u+x | head -1)
+          "$bin" 2>&1 | tee ct/dudect.txt
       - name: Enforce dudect |t| < 4.5
         run: |
           # dudect-bencher prints `max t = <signed float>` per bench but always
@@ -56,10 +61,13 @@ jobs:
             }
             END { exit bad ? 1 : 0 }
           ' ct/dudect.txt
+      - name: Build tacet bench
+        run: cargo bench --bench tacet --features expose-internals --no-run
       - name: tacet attacker-model analysis
         run: |
           set -o pipefail
-          cargo bench --bench tacet --features expose-internals | tee ct/tacet.txt
+          bin=$(find target/release/deps -maxdepth 1 -type f -name 'tacet-*' ! -name '*.d' -perm -u+x | head -1)
+          "$bin" 2>&1 | tee ct/tacet.txt
       - name: Publish to dashboard
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         uses: ./.github/actions/ci-publish
@@ -95,11 +103,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes valgrind
       - name: Build ctgrind test
-        run: cargo test --test ctgrind --features ctgrind --no-run
+        # Release: debug-mode overflow checks insert conditional jumps that
+        # Valgrind flags as secret-dependent (e.g. `v * BARRETT_DIV_Q` in
+        # `FieldElement::new`). Release matches production and tests the
+        # actual generated code.
+        run: cargo test --test ctgrind --features ctgrind --release --no-run
       - name: Run under memcheck
         run: |
           set -o pipefail
-          bin=$(find target/debug/deps -maxdepth 1 -type f -name 'ctgrind-*' ! -name '*.d' -perm -u+x | head -1)
+          bin=$(find target/release/deps -maxdepth 1 -type f -name 'ctgrind-*' ! -name '*.d' -perm -u+x | head -1)
           echo "running $bin under valgrind"
           valgrind --tool=memcheck --error-exitcode=1 "$bin" --test-threads=1 2>&1 | tee ctgrind.txt
       - name: Publish to dashboard
