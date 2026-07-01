@@ -56,13 +56,6 @@ impl<P: ParameterSet> EncryptionKey<P> {
         self.t_hat.byte_encode().chain(self.rho)
     }
 
-    /// Serializes to `ByteEncode_12(t_hat) ‖ rho`, the fixed-size
-    /// `P::PKEEncryptionKeySerialization`, assembled on the stack.
-    pub fn to_bytes(&self) -> P::PKEEncryptionKeySerialization {
-        let mut bytes = self.bytes();
-        P::pke_encryption_key_from_fn(|_| bytes.next().unwrap_or(0))
-    }
-
     /// Parses an encryption key from `384 * K + 32` bytes.
     ///
     /// # Panics
@@ -129,18 +122,6 @@ impl<P: ParameterSet> DecryptionKey<P> {
     /// `ByteEncode_12(s_hat)`, yielded lazily.
     pub(crate) fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
         self.s_hat.byte_encode()
-    }
-
-    /// Serializes to `ByteEncode_12(s_hat)`, the fixed-size
-    /// `P::PKEDecryptionKeySerialization`, assembled on the stack.
-    ///
-    /// Symmetric with [`EncryptionKey::to_bytes`]. `EncryptionKey::to_bytes` is
-    /// exercised by the §7.2 modulus check; this one has no production caller
-    /// outside the K-PKE round-trip test, hence the `allow(dead_code)`.
-    #[allow(dead_code)]
-    pub fn to_bytes(&self) -> P::PKEDecryptionKeySerialization {
-        let mut bytes = self.bytes();
-        P::pke_decryption_key_from_fn(|_| bytes.next().unwrap_or(0))
     }
 
     /// Parses a decryption key from `384 * K` bytes.

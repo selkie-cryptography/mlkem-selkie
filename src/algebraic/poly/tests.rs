@@ -2,6 +2,23 @@
 
 use super::*;
 
+/// Reverses the low 7 bits of an integer in `{0, ..., 127}`. Test-only oracle
+/// used to spot-check the precomputed zeta table's `BitRev7` indexing (see
+/// [FIPS 203 section 4.3]); the zetas themselves are compile-time literals, so
+/// this helper never runs outside these tests.
+///
+/// [FIPS 203 section 4.3]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.3
+fn bit_rev_7(i: u8) -> u8 {
+    let mut reversed: u8 = 0;
+
+    for bit in 0..7 {
+        reversed <<= 1;
+        reversed |= (i >> bit) & 1;
+    }
+
+    reversed
+}
+
 /// `bit_rev_7` reverses the low 7 bits of its input.
 #[test]
 fn bit_rev_7_known_values() {

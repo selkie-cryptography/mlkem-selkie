@@ -69,6 +69,32 @@ fn compress_matches_textbook_division() {
     }
 }
 
+/// `PartialEq` distinguishes non-congruent field elements. Guards against the
+/// impl collapsing to `true` (or `false`) — the existing `assert_eq!`s only
+/// cover the equal-case, so a constant-`true` `eq` would slip through.
+#[test]
+fn partial_eq_distinguishes_and_agrees() {
+    let zero = FieldElement::ZERO;
+    let one = FieldElement::from(1u8);
+
+    assert_ne!(zero, one);
+    assert_eq!(zero, FieldElement::ZERO);
+    assert_eq!(one, FieldElement::from(1u8));
+
+    // Two representatives of the same class (`0` and `q`) compare equal.
+    assert_eq!(FieldElement::new(0), FieldElement::new(parameters::Q));
+
+    // Every canonical residue in `[0, q)` is `Eq` to itself and distinct from
+    // its successor mod q.
+    for v in 0..parameters::Q {
+        let a = FieldElement::new(v);
+        let b = FieldElement::new((v + 1) % parameters::Q);
+
+        assert_eq!(a, a);
+        assert_ne!(a, b);
+    }
+}
+
 /// `From<u8>` and `From<FieldElement> for u16` agree with the canonical
 /// `FieldElement::new` / `value` reductions.
 #[test]

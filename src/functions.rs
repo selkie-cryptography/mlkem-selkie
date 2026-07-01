@@ -79,12 +79,6 @@ impl Deref for PrfOutput {
     }
 }
 
-impl AsRef<[u8]> for PrfOutput {
-    fn as_ref(&self) -> &[u8] {
-        self
-    }
-}
-
 /// `PRF` from [FIPS 203 section 4.1][FIPS 203] takes the distribution parameter
 /// [`Eta`], a 32-byte input `s`, and a 1-byte domain separator `b`, and returns
 /// its `64 * eta`-byte output as a [`PrfOutput`].

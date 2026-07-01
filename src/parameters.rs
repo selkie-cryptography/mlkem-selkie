@@ -143,32 +143,23 @@ pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
     const D_V: usize;
 
     /// The derived K-PKE decryption key size in bytes.
+    ///
+    /// Load-bearing at the KEM boundary — [`DecapsulationKey::from_bytes`]
+    /// splits its input at this offset ([`crate::lib`]); there is no
+    /// standalone `PKEDecryptionKeySerialization` because `DecryptionKey`
+    /// serializes only through [`DecapsulationKey::to_bytes`], which chains
+    /// [`crate::PKE::DecryptionKey::bytes`] into `Self::decaps_key_from_fn`.
     const PKE_DECRYPTION_KEY_SIZE: usize = 384 * Self::K;
 
-    /// Decryption key byte serialization, a byte array of fixed length
-    /// [`Self::PKE_DECRYPTION_KEY_SIZE`].
-    type PKEDecryptionKeySerialization: AsRef<[u8]>;
-
-    /// Builds a [`Self::PKEDecryptionKeySerialization`] on the stack by
-    /// applying `f` to each byte index. Concrete per parameter set, like
-    /// [`Self::ciphertext_from_fn`].
-    fn pke_decryption_key_from_fn(
-        f: impl FnMut(usize) -> u8,
-    ) -> Self::PKEDecryptionKeySerialization;
-
     /// The derived K-PKE encryption key size in bytes.
+    ///
+    /// Load-bearing at the K-PKE boundary —
+    /// [`crate::PKE::EncryptionKey::from_bytes`] debug-asserts against it.
+    /// No matching `PKEEncryptionKeySerialization` type: `EncryptionKey`
+    /// serializes only through its streaming
+    /// [`crate::PKE::EncryptionKey::bytes`] iterator, chained into
+    /// `Self::encaps_key_from_fn` at the KEM boundary.
     const PKE_ENCRYPTION_KEY_SIZE: usize = (384 * Self::K) + 32;
-
-    /// Encryption key byte serialization, a byte array of fixed length
-    /// [`Self::PKE_ENCRYPTION_KEY_SIZE`].
-    type PKEEncryptionKeySerialization: AsRef<[u8]>;
-
-    /// Builds a [`Self::PKEEncryptionKeySerialization`] on the stack by
-    /// applying `f` to each byte index. Concrete per parameter set, like
-    /// [`Self::ciphertext_from_fn`].
-    fn pke_encryption_key_from_fn(
-        f: impl FnMut(usize) -> u8,
-    ) -> Self::PKEEncryptionKeySerialization;
 
     /// The derived secret decapsulation key size in bytes.
     const DECAPS_KEY_SIZE: usize = (768 * Self::K) + 96;
@@ -257,24 +248,9 @@ impl ParameterSet for MLKEM512 {
         core::array::from_fn(f)
     }
 
-    fn pke_encryption_key_from_fn(
-        f: impl FnMut(usize) -> u8,
-    ) -> [u8; Self::PKE_ENCRYPTION_KEY_SIZE] {
-        core::array::from_fn(f)
-    }
-
-    fn pke_decryption_key_from_fn(
-        f: impl FnMut(usize) -> u8,
-    ) -> [u8; Self::PKE_DECRYPTION_KEY_SIZE] {
-        core::array::from_fn(f)
-    }
-
     fn decaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::DECAPS_KEY_SIZE] {
         core::array::from_fn(f)
     }
-
-    type PKEDecryptionKeySerialization = [u8; Self::PKE_DECRYPTION_KEY_SIZE];
-    type PKEEncryptionKeySerialization = [u8; Self::PKE_ENCRYPTION_KEY_SIZE];
 
     type EncapsKeySerialization = [u8; Self::ENCAPS_KEY_SIZE];
     type DecapsKeySerialization = [u8; Self::DECAPS_KEY_SIZE];
@@ -316,24 +292,9 @@ impl ParameterSet for MLKEM768 {
         core::array::from_fn(f)
     }
 
-    fn pke_encryption_key_from_fn(
-        f: impl FnMut(usize) -> u8,
-    ) -> [u8; Self::PKE_ENCRYPTION_KEY_SIZE] {
-        core::array::from_fn(f)
-    }
-
-    fn pke_decryption_key_from_fn(
-        f: impl FnMut(usize) -> u8,
-    ) -> [u8; Self::PKE_DECRYPTION_KEY_SIZE] {
-        core::array::from_fn(f)
-    }
-
     fn decaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::DECAPS_KEY_SIZE] {
         core::array::from_fn(f)
     }
-
-    type PKEDecryptionKeySerialization = [u8; Self::PKE_DECRYPTION_KEY_SIZE];
-    type PKEEncryptionKeySerialization = [u8; Self::PKE_ENCRYPTION_KEY_SIZE];
 
     type EncapsKeySerialization = [u8; Self::ENCAPS_KEY_SIZE];
     type DecapsKeySerialization = [u8; Self::DECAPS_KEY_SIZE];
@@ -375,24 +336,9 @@ impl ParameterSet for MLKEM1024 {
         core::array::from_fn(f)
     }
 
-    fn pke_encryption_key_from_fn(
-        f: impl FnMut(usize) -> u8,
-    ) -> [u8; Self::PKE_ENCRYPTION_KEY_SIZE] {
-        core::array::from_fn(f)
-    }
-
-    fn pke_decryption_key_from_fn(
-        f: impl FnMut(usize) -> u8,
-    ) -> [u8; Self::PKE_DECRYPTION_KEY_SIZE] {
-        core::array::from_fn(f)
-    }
-
     fn decaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::DECAPS_KEY_SIZE] {
         core::array::from_fn(f)
     }
-
-    type PKEDecryptionKeySerialization = [u8; Self::PKE_DECRYPTION_KEY_SIZE];
-    type PKEEncryptionKeySerialization = [u8; Self::PKE_ENCRYPTION_KEY_SIZE];
 
     type EncapsKeySerialization = [u8; Self::ENCAPS_KEY_SIZE];
     type DecapsKeySerialization = [u8; Self::DECAPS_KEY_SIZE];

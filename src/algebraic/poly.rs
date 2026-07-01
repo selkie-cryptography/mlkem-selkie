@@ -24,26 +24,6 @@ mod arch;
 #[cfg(test)]
 mod tests;
 
-/// Returns the integer represented by bit-reversing the unsigned 7-bit value
-/// that corresponds to the input integer `i` in `{0, ..., 127}`.
-///
-/// If `r = r_0 + 2 r_1 + ... + 64 r_6` with `r_i` in `{0, 1}`, then
-/// `BitRev7(r) = r_6 + 2 r_5 + ... + 64 r_0`. Described in [section 4.3] of
-/// FIPS 203.
-///
-/// [section 4.3]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.3
-#[allow(dead_code)] // used only by the unit tests; the zeta tables are precomputed.
-fn bit_rev_7(i: u8) -> u8 {
-    let mut reversed: u8 = 0;
-
-    for bit in 0..7 {
-        reversed <<= 1;
-        reversed |= (i >> bit) & 1;
-    }
-
-    reversed
-}
-
 /// A polynomial of the ring Rq or Tq: 256 coefficients in Zq.
 ///
 /// Both rings have n = 256 coefficients over Zq, so the standard-domain

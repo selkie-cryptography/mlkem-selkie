@@ -347,8 +347,10 @@ impl<P: ParameterSet> TryFrom<&[u8]> for EncapsulationKey<P> {
         // Modulus check (FIPS 203 section 7.2, encapsulation key check 2,
         // equation 7.1): ByteEncode_12(ByteDecode_12(ek)) must equal ek. The
         // round-trip differs iff a coefficient decoded from a value >= q, so a
-        // mismatch yields `EncapsulationKeyModulusCheckFailed`.
-        if ek_pke.to_bytes().as_ref() != bytes {
+        // mismatch yields `EncapsulationKeyModulusCheckFailed`. Streamed rather
+        // than materialized: the input `bytes` is public and this comparison
+        // short-circuits on the first mismatch either way.
+        if !ek_pke.bytes().eq(bytes.iter().copied()) {
             return Err(Error::EncapsulationKeyModulusCheckFailed);
         }
 

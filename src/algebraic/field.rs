@@ -27,6 +27,10 @@ const QINV: i16 = -3327;
 /// `((2^26 + q/2) / q)`, the Barrett multiplier for reduction by q.
 const BARRETT_V: i32 = ((1 << 26) + (Q as i32) / 2) / (Q as i32);
 
+// Pin the const-eval value so any mutation to the [`BARRETT_V`] expression
+// (operator swap, sign flip) is a compile error rather than a silent drift.
+const _: () = assert!(BARRETT_V == 20_159);
+
 /// `R^2 mod q` with `R = 2^16`; multiplying by this via Montgomery reduction
 /// scales a value by `R` (used to undo the `R^-1` left by base multiplication).
 const MONT_R_SQUARED: i16 = 1353;
