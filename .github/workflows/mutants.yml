@@ -36,9 +36,23 @@ jobs:
           path: mutants.out
 
   full:
-    name: cargo-mutants (full tree)
+    name: cargo-mutants (full tree, ${{ matrix.arch }})
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # x86_64: covers the AVX2 backend and the scalar core.
+          - arch: x86_64
+            runner: ubuntu-latest
+            dest: mutants
+          # aarch64 (Apple Silicon): covers `src/algebraic/poly/arch/neon.rs`,
+          # which is `cfg(target_arch = "aarch64")` and never compiles on the
+          # ubuntu runner.
+          - arch: aarch64
+            runner: macos-latest
+            dest: mutants-aarch64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
@@ -77,7 +91,7 @@ jobs:
         uses: ./.github/actions/ci-publish
         with:
           path: mutants.out
-          dest: mutants
+          dest: ${{ matrix.dest }}
           status: ${{ steps.summary.outputs.status }}
           summary: ${{ steps.summary.outputs.summary }}
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}
