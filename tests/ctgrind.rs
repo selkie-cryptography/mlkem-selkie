@@ -125,6 +125,37 @@ fn keygen_secret_independent() {
 }
 
 #[test]
+fn encapsulate_secret_independent() {
+    if skip_unless_slow("encapsulate_secret_independent") {
+        return;
+    }
+
+    // Public encapsulation key.
+    let keypair = KeyPair::<MLKEM512>::generate_derand(&[0x42; 64]);
+    let encapsulation_key = keypair.encapsulation_key;
+
+    // The 32-byte encapsulation randomness `m` is secret: the shared secret
+    // and the ciphertext are both derived from it, so a branch anywhere in
+    // `K-PKE.Encrypt` or the `G(m || H(ek))` split lights up.
+    let mut m = [0x55u8; 32];
+    mark_secret(&m);
+
+    let (shared, ciphertext) = encapsulation_key.encapsulate_derand(&m);
+
+    // The ciphertext is public output; the shared secret would flow into a
+    // caller's KDF. Declassify both here so their tainted bytes don't leak
+    // into unrelated test cleanup code.
+    let ciphertext_bytes = ciphertext.as_bytes().to_vec();
+    mark_public(&ciphertext_bytes);
+
+    let shared_bytes = *shared.as_bytes();
+    mark_public(&shared_bytes);
+
+    m.fill(0);
+    mark_public(&m);
+}
+
+#[test]
 fn decapsulate_secret_independent() {
     if skip_unless_slow("decapsulate_secret_independent") {
         return;
