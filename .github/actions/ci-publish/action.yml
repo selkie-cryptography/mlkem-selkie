@@ -86,14 +86,40 @@ runs:
 
         tar czf /tmp/_payload.tgz -C "$stage" .
 
+        # Wake / wait for the Fly app before SSH. `auto_start_machines = true`
+        # boots a stopped machine on HTTP; SSH does not trigger auto-start and
+        # errors out with "no started VMs" during a `dashboard.yml` redeploy
+        # window if the publish job happens to land inside it. `curl` retries
+        # cover cold-start (~30-60s) and connection resets during the deploy.
+        curl -sSf --max-time 20 \
+          --retry 8 --retry-delay 10 --retry-connrefused \
+          "https://$APP.fly.dev/" > /dev/null
+
+        # `flyctl ssh` can still miss the window between the HTTP 200 above and
+        # the SSH attempt (the machine may briefly churn during a redeploy).
+        # Retry each ssh/sftp call with backoff before failing the step.
+        fly_retry() {
+          local attempt
+          for attempt in 1 2 3 4 5; do
+            if "$@"; then return 0; fi
+            echo "::warning::ci-publish: ${1} attempt ${attempt} failed; retrying in 15s"
+            sleep 15
+          done
+          echo "::error::ci-publish: giving up on ${1} after 5 attempts"
+          return 1
+        }
+
         # Ensure the destination directory exists: the site entrypoint.sh only
         # pre-creates the long-standing categories, so a new `dest` (e.g. a
         # per-backend `bench-neon`) has no directory for SFTP to put into.
-        flyctl ssh console -a "$APP" -C "/bin/sh -c 'mkdir -p /data/$DEST'"
+        fly_retry flyctl ssh console -a "$APP" -C "/bin/sh -c 'mkdir -p /data/$DEST'"
         # Push the tarball over SFTP, then extract it on the machine.
-        printf 'put /tmp/_payload.tgz /data/%s/_payload.tgz\n' "$DEST" \
-          | flyctl ssh sftp shell -a "$APP"
-        flyctl ssh console -a "$APP" -C \
+        sftp_put() {
+          printf 'put /tmp/_payload.tgz /data/%s/_payload.tgz\n' "$DEST" \
+            | flyctl ssh sftp shell -a "$APP"
+        }
+        fly_retry sftp_put
+        fly_retry flyctl ssh console -a "$APP" -C \
           "/bin/sh -c 'cd /data/$DEST && tar xzf _payload.tgz && rm -f _payload.tgz'"
 
         echo "published $SRC ($STATUS) -> https://$APP.fly.dev/$DEST/"
