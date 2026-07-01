@@ -104,10 +104,10 @@ fn field_sub_secret_independent() {
 
 #[test]
 fn keygen_secret_independent() {
-    if skip_unless_slow("keygen_secret_independent") {
-        return;
-    }
-
+    // Always runs (no `skip_unless_slow`): keygen is the primary
+    // secret-derivation surface, and Valgrind on `KeyPair::generate_derand`
+    // for ML-KEM-512 is fast enough to gate every push.
+    //
     // The keygen seed `d ‖ z` is secret; the resulting `s`, `e`, and `s_hat`
     // are all derived from it, so a branch on any of them lights up.
     let mut seed = [0x42u8; 64];

@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       slow:
-        description: "Run the slow ctgrind keygen/decaps tests (CTGRIND_SLOW)"
+        description: "Run the slow ctgrind encaps/decaps tests (CTGRIND_SLOW)"
         type: boolean
         default: false
 
