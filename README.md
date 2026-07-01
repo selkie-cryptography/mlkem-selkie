@@ -35,10 +35,25 @@ Keys and ciphertexts serialize with `to_bytes` / `as_bytes` and parse back with
 `DecapsulationKey`, `DecryptionKey`, `RejectionSeed`, `KeyGenRandomnessSeed`,
 `SharedSecret`, `Aes256CtrDrbg`, and the `RqVector`/`TqVector` secret-noise
 containers derive `ZeroizeOnDrop`; the named decaps/keygen stack transients
-(`m'`, `r'`, `K'`, `K_bar`, `g_input`, `sigma`, the seeds) are zeroized
-explicitly. Best-effort: the compiler may spill bytes to slots we cannot
-reach, and a copy of `*SharedSecret::as_bytes()` into a plain `[u8; 32]`
-does not inherit the zeroization.
+are zeroized explicitly. Best-effort: the compiler may spill bytes to
+slots we cannot reach, and a copy of `*SharedSecret::as_bytes()` into a
+plain `[u8; 32]` does not inherit the zeroization.
+
+### Constant-time
+
+Every operation on secret-derived data runs in constant time. Field
+arithmetic uses a branchless Barrett mul-shift for reduction and a
+branch-free conditional add for canonicalization; `ML-KEM.Decaps`'s
+implicit-rejection compare and shared-secret selection use `subtle`'s
+`ct_eq` and `conditional_select` over the full ciphertext bytes rather
+than a plain `==`, so neither the equality result nor which secret is
+returned leaks through a branch or an early exit.
+
+Three CT harnesses — **dudect**, **tacet**, and **ctgrind** — run in
+CI on every push to `main` and fail the build on regression.
+`SampleNTT`'s rejection-sampling loop is variable-time by construction,
+but its iteration count depends only on the public matrix seed `rho`,
+not on any secret.
 
 ### About
 
