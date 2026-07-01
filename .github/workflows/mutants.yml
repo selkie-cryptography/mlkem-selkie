@@ -94,4 +94,7 @@ jobs:
           dest: ${{ matrix.dest }}
           status: ${{ steps.summary.outputs.status }}
           summary: ${{ steps.summary.outputs.summary }}
+          # cargo-mutants writes no `index.html`, so land on the survivor list
+          # rather than the (403) bare directory URL.
+          landing-path: missed.txt
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}

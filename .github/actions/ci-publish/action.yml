@@ -21,6 +21,14 @@ inputs:
     description: One-line summary shown on the dashboard card.
     required: false
     default: ""
+  landing-path:
+    description: >-
+      Relative path (under `dest`) to link the dashboard card at. Use when the
+      published report has no `index.html`, so nginx's `autoindex off` would
+      return 403 for the bare directory URL. Example: `missed.txt` for
+      cargo-mutants. Leave empty when the report contains its own `index.html`.
+    required: false
+    default: ""
   fly-app:
     description: Fly app hosting the CI site.
     required: false
@@ -42,6 +50,7 @@ runs:
         DEST: ${{ inputs.dest }}
         STATUS: ${{ inputs.status }}
         SUMMARY: ${{ inputs.summary }}
+        LANDING: ${{ inputs.landing-path }}
         SHA: ${{ github.sha }}
       run: |
         set -euo pipefail
@@ -58,12 +67,20 @@ runs:
         else
           cp -a "$SRC" "$stage/"
         fi
+        # Nginx serves this via `autoindex off`, so the dashboard's card must
+        # point at a real file when no `index.html` was uploaded — otherwise
+        # the bare `/$DEST/` URL 403s. `LANDING` gives each publish job that
+        # choice; empty means the payload has its own `index.html`.
+        url="/$DEST/"
+        if [ -n "$LANDING" ]; then
+          url="/$DEST/$LANDING"
+        fi
         jq -n \
           --arg status "$STATUS" \
           --arg summary "$SUMMARY" \
           --arg sha "$SHA" \
           --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-          --arg url "/$DEST/" \
+          --arg url "$url" \
           '{status: $status, summary: $summary, sha: $sha, timestamp: $ts, url: $url}' \
           > "$stage/status.json"
 

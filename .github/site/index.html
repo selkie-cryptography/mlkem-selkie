@@ -151,9 +151,12 @@
         const pill = data ? state : "no data";
         const sha = data?.sha ? data.sha.slice(0, 7) : "";
         const meta = [sha, ago(data?.timestamp)].filter(Boolean).join(" · ");
+        // Land on the file the publish step chose (e.g. `mutants/missed.txt`
+        // for cargo-mutants, which writes no `index.html`). `data.url` falls
+        // back to `/${key}/` when the payload has its own index page.
         const a = document.createElement("a");
         a.className = "card";
-        a.href = `/${key}/`;
+        a.href = data?.url ?? `/${key}/`;
         a.innerHTML = `
           <div class="top"><span class="label">${label}</span><span class="pill ${state}">${pill}</span></div>
           <p class="summary">${data?.summary ?? "no report published yet"}</p>
