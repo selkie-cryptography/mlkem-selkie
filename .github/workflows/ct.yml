@@ -107,7 +107,10 @@ jobs:
         # Valgrind flags as secret-dependent (e.g. `v * BARRETT_DIV_Q` in
         # `FieldElement::new`). Release matches production and tests the
         # actual generated code.
-        run: cargo test --test ctgrind --features ctgrind --release --no-run
+        # `crabgrind` (the Valgrind client-request wrapper) is a Linux-only
+        # optional regular dep; enable it alongside `ctgrind` here so
+        # `K-PKE.KeyGen` can declassify `rho` under memcheck.
+        run: cargo test --test ctgrind --features ctgrind,crabgrind --release --no-run
       - name: Run under memcheck
         run: |
           set -o pipefail

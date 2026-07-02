@@ -215,6 +215,11 @@ impl<P: ParameterSet> KeyPair<P> {
         // g_input held the secret seed `d`; zeroize now that G has consumed it.
         g_input.zeroize();
 
+        // `rho` is public per FIPS 203 (part of `ek_pke` below), but memcheck
+        // taints it through `G(d ‖ k)` — see [`crate::ctgrind`].
+        #[cfg(feature = "ctgrind")]
+        crate::ctgrind::declassify(&rho);
+
         let a_hat = TqMatrix::<P>::expand(&rho);
 
         let mut n = 0u8;
