@@ -54,6 +54,11 @@ pub mod parameters;
 #[cfg(test)]
 mod tests;
 
+// Valgrind declassification hooks for the constant-time test harness. Only
+// compiled under `--features ctgrind`; call sites cfg-gate too.
+#[cfg(feature = "ctgrind")]
+mod ctgrind;
+
 // `Aes256CtrDrbg` and `Eta` are intentionally not part of the public API:
 // the DRBG is the internal SP 800-90A §10.2.1 engine that `KeyPair::generate`
 // and `EncapsulationKey::encapsulate` seed from the caller's RNG to perform
