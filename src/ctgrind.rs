@@ -12,6 +12,11 @@
 
 /// Marks `bytes` as "defined" for Valgrind memcheck. A no-op unless built
 /// under `--features ctgrind,crabgrind` on Linux.
+//
+// Skipped by cargo-mutants: the function is only observable through Valgrind
+// under `--features ctgrind,crabgrind`, which the `cargo test` baseline does
+// not enable, so mutants can freely replace its body without any test noticing.
+#[cfg_attr(test, mutants::skip)]
 #[inline]
 pub(crate) fn declassify(_bytes: &[u8]) {
     #[cfg(all(feature = "crabgrind", target_os = "linux"))]
