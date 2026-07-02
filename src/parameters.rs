@@ -144,21 +144,20 @@ pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
 
     /// The derived K-PKE decryption key size in bytes.
     ///
-    /// Load-bearing at the KEM boundary — [`DecapsulationKey::from_bytes`]
-    /// splits its input at this offset ([`crate::lib`]); there is no
-    /// standalone `PKEDecryptionKeySerialization` because `DecryptionKey`
-    /// serializes only through [`DecapsulationKey::to_bytes`], which chains
-    /// [`crate::PKE::DecryptionKey::bytes`] into `Self::decaps_key_from_fn`.
+    /// Load-bearing at the KEM boundary: `DecapsulationKey::from_bytes`
+    /// splits its input at this offset. There is no standalone
+    /// `PKEDecryptionKeySerialization` because the K-PKE decryption key
+    /// reaches the wire only through `DecapsulationKey::to_bytes`, which
+    /// chains its byte-encoding iterator into [`Self::decaps_key_from_fn`].
     const PKE_DECRYPTION_KEY_SIZE: usize = 384 * Self::K;
 
     /// The derived K-PKE encryption key size in bytes.
     ///
-    /// Load-bearing at the K-PKE boundary —
-    /// [`crate::PKE::EncryptionKey::from_bytes`] debug-asserts against it.
-    /// No matching `PKEEncryptionKeySerialization` type: `EncryptionKey`
-    /// serializes only through its streaming
-    /// [`crate::PKE::EncryptionKey::bytes`] iterator, chained into
-    /// `Self::encaps_key_from_fn` at the KEM boundary.
+    /// Load-bearing at the K-PKE boundary: `EncryptionKey::from_bytes`
+    /// debug-asserts against it. No matching `PKEEncryptionKeySerialization`
+    /// type — the K-PKE encryption key reaches the wire only through its
+    /// streaming byte-encoding iterator, chained into
+    /// [`Self::encaps_key_from_fn`] at the KEM boundary.
     const PKE_ENCRYPTION_KEY_SIZE: usize = (384 * Self::K) + 32;
 
     /// The derived secret decapsulation key size in bytes.
