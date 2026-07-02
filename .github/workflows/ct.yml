@@ -14,11 +14,6 @@ on:
     # Weekly, to track the CT signal over time on the dashboard.
     - cron: "0 7 * * 1"
   workflow_dispatch:
-    inputs:
-      slow:
-        description: "Run the slow ctgrind encaps/decaps tests (CTGRIND_SLOW)"
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -90,8 +85,6 @@ jobs:
   ctgrind:
     name: ctgrind (Valgrind taint tracking)
     runs-on: ubuntu-latest
-    env:
-      CTGRIND_SLOW: ${{ inputs.slow && '1' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
