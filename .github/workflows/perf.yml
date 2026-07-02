@@ -37,6 +37,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Signal running
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          rustc -O --edition 2021 .github/scripts/ci-signal.rs -o /tmp/ci-signal
+          /tmp/ci-signal "bench-${{ matrix.backend }}" running "${{ github.sha }}"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Public API (keygen / encaps / decaps)
@@ -48,14 +57,50 @@ jobs:
         run: |
           set -o pipefail
           cargo bench --bench algebraic --features expose-internals | tee bench/algebraic.txt
-      - name: Publish to dashboard
+      - name: Build dashboard JSON
+        run: |
+          rustc -O --edition 2021 .github/scripts/divan-to-json.rs -o /tmp/divan-to-json
+          cat bench/mlkem.txt bench/algebraic.txt | /tmp/divan-to-json > bench-flat.json
+          # Group `mlkem::keygen::MLKEM768`-style names into the payload the
+          # dashboard's bench panel reads; summary carries the ML-KEM-768
+          # medians the trend charts key on.
+          jq -n --arg sha "${{ github.sha }}" --argjson benches "$(cat bench-flat.json)" '{
+            sha: $sha,
+            updated_at: (now | todate),
+            groups: (
+              $benches
+              | group_by(.name | split("::")[0])
+              | map({
+                  name: (.[0].name | split("::")[0]),
+                  benchmarks: map({
+                    name: (.name | split("::")[1:] | join("::")),
+                    time_ns: .median_ns,
+                    median_ns, fastest_ns, slowest_ns, mean_ns, samples, iters
+                  })
+                })
+            ),
+            summary: {
+              keygen_ns: ([$benches[] | select(.name == "mlkem::keygen::MLKEM768") | .median_ns] | first),
+              encaps_ns: ([$benches[] | select(.name == "mlkem::encaps::MLKEM768") | .median_ns] | first),
+              decaps_ns: ([$benches[] | select(.name == "mlkem::decaps::MLKEM768") | .median_ns] | first)
+            }
+          }' > bench.json
+      - name: Verify bench payload has data
+        run: |
+          groups=$(jq '.groups | length' bench.json)
+          benches=$(jq '[.groups[].benchmarks[]] | length' bench.json)
+          echo "bench.json: $groups groups, $benches benchmarks."
+          if [ "$groups" -eq 0 ] || [ "$benches" -eq 0 ]; then
+            echo "::error::bench.json has no benchmark data."
+            cat bench.json >&2 || true
+            exit 1
+          fi
+      - name: Upload to dashboard
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: ./.github/actions/ci-publish
+        uses: ./.github/actions/ci-upload
         with:
-          path: bench
-          dest: bench-${{ matrix.backend }}
-          status: ok
-          summary: divan wall-clock medians (${{ matrix.backend }})
+          kind: bench-${{ matrix.backend }}
+          payload: bench.json
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}
 
   instructions:
@@ -82,17 +127,23 @@ jobs:
           sudo apt-get install --yes valgrind
           cargo install gungraun-runner --version 0.19.2 --locked
       - name: Run instruction counts
+        # --save-summary writes per-bench summary.json trees under
+        # target/gungraun, which instructions-report parses for the dashboard.
         run: |
           set -o pipefail
-          cargo bench --bench instructions --features expose-internals | tee instructions.txt
-      - name: Publish to dashboard
+          cargo bench --bench instructions --features expose-internals -- --save-summary=json | tee instructions.txt
+      - name: Build dashboard JSON
+        run: |
+          rustc -O --edition 2021 .github/scripts/instructions-report.rs -o /tmp/instructions-report
+          /tmp/instructions-report target/gungraun "${{ github.sha }}" > instructions.json
+      - name: Verify instructions payload has data
+        run: jq -e '.total > 0 and (.results | length > 0)' instructions.json > /dev/null || { echo "::error::instructions.json has no benchmark results"; cat instructions.json >&2; exit 1; }
+      - name: Upload to dashboard
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: ./.github/actions/ci-publish
+        uses: ./.github/actions/ci-upload
         with:
-          path: instructions.txt
-          dest: instructions-${{ matrix.backend }}
-          status: ok
-          summary: gungraun instruction counts (${{ matrix.backend }})
+          kind: instructions-${{ matrix.backend }}
+          payload: instructions.json
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}
 
   cycles:
@@ -117,12 +168,16 @@ jobs:
         run: |
           set -o pipefail
           cargo bench --bench cycles --features expose-internals | tee cycles.txt
-      - name: Publish to dashboard
+      - name: Build dashboard JSON
+        run: |
+          rustc -O --edition 2021 .github/scripts/cycles-to-json.rs -o /tmp/cycles-to-json
+          /tmp/cycles-to-json target/criterion "${{ github.sha }}" > cycles.json
+      - name: Verify cycles payload has data
+        run: jq -e '.results | length > 0' cycles.json > /dev/null || { echo "::error::cycles.json has no benchmark results"; cat cycles.json >&2; exit 1; }
+      - name: Upload to dashboard
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: ./.github/actions/ci-publish
+        uses: ./.github/actions/ci-upload
         with:
-          path: cycles.txt
-          dest: cycles-${{ matrix.backend }}
-          status: ok
-          summary: rdtsc megacycles (${{ matrix.backend }})
+          kind: cycles-${{ matrix.backend }}
+          payload: cycles.json
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}

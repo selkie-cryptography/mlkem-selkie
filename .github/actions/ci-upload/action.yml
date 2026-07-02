@@ -1,0 +1,56 @@
+name: Upload CI data
+description: >-
+  Compile ci-upload and push to the Fly CI site. Two modes: JSON-payload
+  (set `kind` + `payload`, stored under /<kind>/) or asset upload (set
+  `assets` + `remote-subdir`, hosts SVGs under /<remote-subdir>/). Gate the
+  calling step via its `if:`. In JSON mode ci-upload validates the
+  payload's per-kind floor internally and fails the step on empty data.
+  Set `pr-only: true` from PR runs to write the per-sha file only (no
+  latest/index/manifest update — those stay main-only).
+
+inputs:
+  kind:
+    description: Data kind (the /<kind>/ path on the CI site). JSON mode.
+    required: false
+    default: ""
+  payload:
+    description: Path to the payload JSON to upload. JSON mode.
+    required: false
+    default: ""
+  assets:
+    description: Local root to scan for SVGs. Asset mode.
+    required: false
+    default: ""
+  remote-subdir:
+    description: Remote subdir under /data for assets (e.g. instructions/flamegraphs/<sha>).
+    required: false
+    default: ""
+  sha:
+    description: Commit SHA the data belongs to (JSON mode).
+    required: false
+    default: ${{ github.sha }}
+  pr-only:
+    description: Write only the per-sha file; skip latest/index/manifest. JSON mode.
+    required: false
+    default: "false"
+  fly-api-token:
+    description: Fly API token with access to the CI-site app.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: superfly/flyctl-actions/setup-flyctl@master
+    - name: Upload to CI site
+      shell: bash
+      env:
+        FLY_API_TOKEN: ${{ inputs.fly-api-token }}
+      run: |
+        rustc -O --edition 2021 .github/scripts/ci-upload.rs -o /tmp/ci-upload
+        if [ -n "${{ inputs.assets }}" ]; then
+          /tmp/ci-upload --assets "${{ inputs.assets }}" "${{ inputs.remote-subdir }}"
+        else
+          args=()
+          [ "${{ inputs.pr-only }}" = "true" ] && args+=(--pr-only)
+          /tmp/ci-upload "${args[@]}" "${{ inputs.kind }}" "${{ inputs.payload }}" "${{ inputs.sha }}"
+        fi

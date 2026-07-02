@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - "scripts/**"
+      - ".github/scripts/**"
       - ".github/workflows/scripts-compile.yml"
   pull_request:
     paths:
       - "scripts/**"
+      - ".github/scripts/**"
       - ".github/workflows/scripts-compile.yml"
   workflow_dispatch:
 
@@ -26,7 +28,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Compile standalone scripts
         run: |
-          for script in scripts/*.rs; do
+          for script in scripts/*.rs .github/scripts/*.rs; do
             echo "compiling $script"
             rustc -O --edition 2021 "$script" -o "/tmp/$(basename "$script" .rs)"
           done
+      - name: Run kat-report self-test
+        run: |
+          rustc --test -O --edition 2021 .github/scripts/kat-report.rs -o /tmp/kat-report-test
+          /tmp/kat-report-test

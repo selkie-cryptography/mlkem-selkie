@@ -63,23 +63,29 @@ jobs:
           set -o pipefail
           bin=$(find target/release/deps -maxdepth 1 -type f -name 'tacet-*' ! -name '*.d' -perm -u+x | head -1)
           "$bin" 2>&1 | tee ct/tacet.txt
-      - name: Publish to dashboard
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        uses: ./.github/actions/ci-publish
+      - name: Build dashboard JSON
+        run: |
+          rustc -O --edition 2021 .github/scripts/dudect-to-json.rs -o /tmp/dudect-to-json
+          rustc -O --edition 2021 .github/scripts/tacet-to-json.rs -o /tmp/tacet-to-json
+          /tmp/dudect-to-json ct/dudect.txt "${{ github.sha }}" > dudect.json
+          /tmp/tacet-to-json ct/tacet.txt "${{ github.sha }}" > tacet.json
+      - name: Verify CT payloads have data
+        run: |
+          jq -e '.total > 0' dudect.json > /dev/null || { echo "::error::dudect.json has no t-test results"; cat dudect.json >&2; exit 1; }
+          jq -e '.total > 0' tacet.json > /dev/null || { echo "::error::tacet.json has no leak-model results"; cat tacet.json >&2; exit 1; }
+      - name: Upload dudect to dashboard
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        uses: ./.github/actions/ci-upload
         with:
-          path: ct/dudect.txt
-          dest: dudect
-          status: ok
-          summary: encaps + decaps |t| < 4.5
+          kind: dudect
+          payload: dudect.json
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}
-      - name: Publish tacet to dashboard
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        uses: ./.github/actions/ci-publish
+      - name: Upload tacet to dashboard
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        uses: ./.github/actions/ci-upload
         with:
-          path: ct/tacet.txt
-          dest: tacet
-          status: ok
-          summary: attacker-model leak analysis
+          kind: tacet
+          payload: tacet.json
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}
 
   ctgrind:
@@ -95,28 +101,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes valgrind
-      - name: Build ctgrind test
-        # Release: debug-mode overflow checks insert conditional jumps that
-        # Valgrind flags as secret-dependent (e.g. `v * BARRETT_DIV_Q` in
-        # `FieldElement::new`). Release matches production and tests the
-        # actual generated code.
-        # `crabgrind` (the Valgrind client-request wrapper) is a Linux-only
-        # optional regular dep; enable it alongside `ctgrind` here so
-        # `K-PKE.KeyGen` can declassify `rho` under memcheck.
-        run: cargo test --test ctgrind --features ctgrind,crabgrind --release --no-run
-      - name: Run under memcheck
+      - name: Run per-test memcheck report
+        # ctgrind-report builds tests/ctgrind.rs (release: debug-mode
+        # overflow checks insert conditional jumps that Valgrind flags as
+        # secret-dependent), runs each test individually under memcheck
+        # with XML output so errors map to specific functions, writes the
+        # dashboard JSON, and exits nonzero on any leak or broken harness.
         run: |
-          set -o pipefail
-          bin=$(find target/release/deps -maxdepth 1 -type f -name 'ctgrind-*' ! -name '*.d' -perm -u+x | head -1)
-          echo "running $bin under valgrind"
-          valgrind --tool=memcheck --error-exitcode=1 "$bin" --test-threads=1 2>&1 | tee ctgrind.txt
-      - name: Publish to dashboard
-        if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
-        uses: ./.github/actions/ci-publish
+          rustc -O --edition 2021 .github/scripts/ctgrind-report.rs -o /tmp/ctgrind-report
+          /tmp/ctgrind-report "${{ github.sha }}" > ctgrind.json
+      - name: Verify ctgrind payload has data
+        if: always()
+        run: jq -e '.tests > 0' ctgrind.json > /dev/null || { echo "::error::ctgrind.json has no test results"; cat ctgrind.json >&2; exit 1; }
+      - name: Upload to dashboard
+        if: always() && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: ./.github/actions/ci-upload
         with:
-          path: ctgrind.txt
-          dest: ctgrind
-          status: ok
-          summary: no secret-dependent branches under Valgrind
+          kind: ctgrind
+          payload: ctgrind.json
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}
 

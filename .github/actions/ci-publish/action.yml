@@ -1,10 +1,11 @@
 name: Publish CI report to Fly
 description: >-
   Ships a file or directory to the Fly CI-site volume under /data/<dest>/, where
-  nginx serves it at https://<app>.fly.dev/<dest>/. Also writes a per-category
-  status.json the dashboard reads to render live state. Tarballs the payload,
-  uploads it over `flyctl ssh sftp`, and extracts it on the machine. Gate the
-  calling step with `if:` (publish from main pushes / schedules only).
+  nginx serves it at https://<app>.fly.dev/<dest>/. Used for whole-tree payloads
+  like rustdoc; the dashboard's JSON kinds go through .github/actions/ci-upload
+  instead. Tarballs the payload, uploads it over `flyctl ssh sftp`, and extracts
+  it on the machine. Gate the calling step with `if:` (publish from main pushes
+  / schedules only).
 
 inputs:
   path:

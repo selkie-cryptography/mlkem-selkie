@@ -1,0 +1,7 @@
+# Nextest profiles.
+#
+# `vectors` is used by ci.yml's `vectors` job: it emits JUnit XML
+# (target/nextest/vectors/junit.xml) that .github/scripts/kat-report.rs
+# shapes into the dashboard's Conformance panel payload.
+[profile.vectors.junit]
+path = "junit.xml"
