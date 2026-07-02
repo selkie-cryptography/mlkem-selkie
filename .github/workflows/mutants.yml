@@ -67,7 +67,6 @@ jobs:
         # Don't fail the job on surviving mutants — summarize and publish them.
         run: cargo mutants --no-shuffle -j 2 || true
       - name: Summarize
-        id: summary
         run: |
           caught=$(wc -l < mutants.out/caught.txt 2>/dev/null || echo 0)
           missed=$(wc -l < mutants.out/missed.txt 2>/dev/null || echo 0)
@@ -76,25 +75,22 @@ jobs:
           [ "$viable" -gt 0 ] && score=$((100 * caught / viable))
           # `viable == 0` means the baseline build/test failed (or no mutants
           # were emitted) — `cargo mutants || true` swallows the exit code, so
-          # without this arm a broken baseline would publish as `ok`.
+          # without this arm a broken baseline would pass silently (the
+          # ci-upload floor also rejects an empty payload).
           if [ "$viable" -eq 0 ]; then
-            echo "summary=no mutants tested (baseline failed?)" >> "$GITHUB_OUTPUT"
-            echo "status=warn" >> "$GITHUB_OUTPUT"
-          elif [ "$missed" -gt 0 ]; then
-            echo "summary=caught $caught/$viable ($score%)" >> "$GITHUB_OUTPUT"
-            echo "status=warn" >> "$GITHUB_OUTPUT"
-          else
-            echo "summary=caught $caught/$viable ($score%)" >> "$GITHUB_OUTPUT"
-            echo "status=ok" >> "$GITHUB_OUTPUT"
+            echo "no mutants tested (baseline failed?)" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
-      - name: Publish to dashboard
-        uses: ./.github/actions/ci-publish
+          echo "caught $caught/$viable ($score%)" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Build dashboard JSON
+        if: always()
+        run: |
+          rustc -O --edition 2021 .github/scripts/mutants-to-json.rs -o /tmp/mutants-to-json
+          /tmp/mutants-to-json mutants.out/outcomes.json "${{ github.sha }}" > mutants.json
+      - name: Upload to dashboard
+        if: always()
+        uses: ./.github/actions/ci-upload
         with:
-          path: mutants.out
-          dest: ${{ matrix.dest }}
-          status: ${{ steps.summary.outputs.status }}
-          summary: ${{ steps.summary.outputs.summary }}
-          # cargo-mutants writes no `index.html`, so land on the survivor list
-          # rather than the (403) bare directory URL.
-          landing-path: missed.txt
+          kind: ${{ matrix.dest }}
+          payload: mutants.json
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}

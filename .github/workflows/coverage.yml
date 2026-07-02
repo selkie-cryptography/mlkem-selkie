@@ -17,15 +17,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - name: Signal running
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          rustc -O --edition 2021 .github/scripts/ci-signal.rs -o /tmp/ci-signal
+          /tmp/ci-signal coverage running "${{ github.sha }}"
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: Swatinem/rust-cache@v2
       - name: Collect coverage (lib + integration tests, internals exposed)
-        run: |
-          cargo llvm-cov --features expose-internals --lcov --output-path lcov.info
-          cargo llvm-cov report --html
+        run: cargo llvm-cov --features expose-internals --lcov --output-path lcov.info
       - name: Gate on coverage floor
         run: |
           cargo llvm-cov report \
@@ -36,12 +43,16 @@ jobs:
         with:
           name: coverage-lcov
           path: lcov.info
-      - name: Publish HTML report to dashboard
+      - name: Generate dashboard JSON
+        run: |
+          rustc -O --edition 2021 .github/scripts/lcov-to-json.rs -o /tmp/lcov-to-json
+          /tmp/lcov-to-json lcov.info "${{ github.sha }}" > coverage.json
+      - name: Verify coverage payload has data
+        run: jq -e '(.total.total // 0) > 0 and (.modules | length > 0)' coverage.json > /dev/null || { echo "::error::coverage.json has no module data"; head -c 2000 coverage.json >&2; exit 1; }
+      - name: Upload to dashboard
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: ./.github/actions/ci-publish
+        uses: ./.github/actions/ci-upload
         with:
-          path: target/llvm-cov/html
-          dest: coverage
-          status: ok
-          summary: llvm-cov HTML report
+          kind: coverage
+          payload: coverage.json
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}

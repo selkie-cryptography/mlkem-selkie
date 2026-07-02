@@ -1,177 +1,3697 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>mlkem-selkie · CI dashboard</title>
-    <style>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="CI dashboard for mlkem-selkie: coverage, benchmarks, mutation testing, constant-time analysis, conformance suites, and more.">
+  <title>mlkem-selkie &middot; CI</title>
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" media="(prefers-color-scheme: light)" id="favicon-light">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" media="(prefers-color-scheme: light)">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32-dark.png" media="(prefers-color-scheme: dark)" id="favicon-dark">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16-dark.png" media="(prefers-color-scheme: dark)">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0a0a0b;
+      --bg-raised: #111112;
+      --fg: #ccc;
+      --fg-muted: #777;
+      --fg-dim: #3a3a3a;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-faint: rgba(255, 255, 255, 0.03);
+      --bar-bg: rgba(255, 255, 255, 0.04);
+      --green: #3fb950;
+      --green-bg: rgba(63, 185, 80, 0.08);
+      --yellow: #d29922;
+      --red: #f85149;
+      --red-bg: rgba(248, 81, 73, 0.08);
+      --shadow-tooltip: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+
+    @media (prefers-color-scheme: light) {
       :root {
-        --bg: #0d1117;
-        --panel: #161b22;
-        --border: #30363d;
-        --text: #e6edf3;
-        --muted: #8b949e;
-        --accent: #58a6ff;
-        --ok: #3fb950;
-        --warn: #d29922;
-        --fail: #f85149;
-        --none: #6e7681;
-        --radius: 10px;
+        --bg: #f2f1ec;
+        --bg-raised: #e8e7e1;
+        --fg: #222;
+        --fg-muted: #777;
+        --fg-dim: #c0bdb5;
+        --border: rgba(0, 0, 0, 0.08);
+        --border-faint: rgba(0, 0, 0, 0.04);
+        --bar-bg: rgba(0, 0, 0, 0.04);
+        --green: #1a7f37;
+        --green-bg: rgba(26, 127, 55, 0.08);
+        --yellow: #9a6700;
+        --red: #cf222e;
+        --red-bg: rgba(207, 34, 46, 0.08);
+        --shadow-tooltip: 0 2px 8px rgba(0, 0, 0, 0.15);
       }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        background: var(--bg);
-        color: var(--text);
-        font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, sans-serif;
+    }
+
+    *, *::after, *::before { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 18px;
+      line-height: 1.5;
+      color: var(--fg);
+      background-color: var(--bg);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    a {
+      text-decoration: none;
+      color: var(--fg);
+      transition: color 0.2s;
+    }
+
+    a:hover { color: var(--fg-muted); }
+
+    .container {
+      width: 100%;
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 0 32px;
+    }
+
+    .header {
+      padding: 40px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .header__inner {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .header__left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .logo {
+      height: 38px;
+      width: auto;
+      transition: filter 0.2s;
+    }
+
+    .logo:hover {
+      filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.12));
+    }
+
+    .logo--dark { display: block; }
+    .logo--light { display: none; }
+
+    @media (prefers-color-scheme: light) {
+      .logo--dark { display: none; }
+      .logo--light { display: block; }
+    }
+
+    .logo.building {
+      animation: logo-breathe 2s ease-in-out infinite;
+    }
+
+    @keyframes logo-breathe {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    .header__title {
+      font-size: 18px;
+      font-weight: 900;
+      letter-spacing: -0.5px;
+    }
+
+    .header__subtitle {
+      font-size: 14px;
+      color: var(--fg-muted);
+    }
+
+    .header__links {
+      display: flex;
+      gap: 8px;
+    }
+
+    .header__org {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--fg-muted);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 12px;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .header__org:hover {
+      color: var(--fg);
+      border-color: var(--fg-muted);
+    }
+
+    .sections { padding: 40px 0; }
+    .section {
+      margin-top: 40px;
+      padding-top: 40px;
+      border-top: 1px solid var(--border);
+    }
+    .section:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+    .section:last-child { margin-bottom: 0; }
+
+    .section__header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 20px;
+    }
+
+    .section__title {
+      position: relative;
+      font-size: 24px;
+      font-weight: 900;
+      letter-spacing: -1px;
+      line-height: 1.3;
+      padding-left: 8px;
+    }
+
+    .section__title::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 50%;
+      z-index: -1;
+      transform: translateY(-50%);
+      display: block;
+      width: 80px;
+      height: 32px;
+      border-radius: 4px 0 0 4px;
+      background: linear-gradient(90deg, var(--border) 0%, transparent 100%);
+    }
+
+    /* Sub-panel divider inside a multi-panel section (Profile groups
+       Instructions + Footprint, each with its own data source and
+       independent staleness). */
+    .subpanel { margin-top: 32px; }
+    .subpanel:first-of-type { margin-top: 0; }
+
+    .subpanel__header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border-faint);
+    }
+
+    .subpanel__title {
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      color: var(--fg-muted);
+    }
+
+    .meta {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--fg-dim);
+    }
+
+    .meta a { color: var(--fg-dim); }
+    .meta a:hover { color: var(--fg-muted); }
+
+    /* Backend / arch picker for the matrixed kinds (bench-*, cycles-*,
+       instructions-*, mutants vs mutants-aarch64). One segmented control
+       per section header; the selection persists in localStorage. */
+    .variant-toggle {
+      display: inline-flex;
+      gap: 2px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 2px;
+      vertical-align: middle;
+    }
+
+    .variant-toggle button {
+      font: inherit;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      color: var(--fg-muted);
+      background: none;
+      border: none;
+      border-radius: 3px;
+      padding: 2px 8px;
+      cursor: pointer;
+    }
+
+    .variant-toggle button:hover { color: var(--fg); }
+
+    .variant-toggle button.active {
+      color: var(--fg);
+      background: var(--bar-bg);
+    }
+
+    .stale-pill {
+      display: inline-block;
+      margin-left: 8px;
+      padding: 1px 7px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.4px;
+      color: var(--yellow);
+      background: rgba(210, 153, 34, 0.12);
+      border: 1px solid rgba(210, 153, 34, 0.35);
+      vertical-align: 1px;
+    }
+
+    /* The SHA inside the pill is the only clickable target — keeps the
+       click affordance narrow (open commit on GitHub) rather than
+       triggering a whole-page commit-context switch. */
+    .stale-pill a {
+      color: inherit;
+      text-decoration: underline;
+      text-decoration-color: currentColor;
+      text-decoration-style: dotted;
+      text-underline-offset: 2px;
+    }
+    .stale-pill a:hover {
+      text-decoration-style: solid;
+    }
+
+    /* Pairs with the .stale-pill: pill stays prominent in the section
+       header, body dims so the staleness reads at a glance. Hover
+       restores the body in case you need to actually use the data. */
+    .is-stale {
+      opacity: 0.55;
+      filter: saturate(0.55);
+      transition: opacity 0.2s ease, filter 0.2s ease;
+    }
+    .is-stale:hover {
+      opacity: 0.9;
+      filter: saturate(0.85);
+    }
+
+    /* Coverage table */
+    .cov-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    .cov-table th {
+      text-align: left;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+      padding: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .cov-table > tbody > tr > td {
+      padding: 8px;
+      border-bottom: 1px solid var(--border-faint);
+      font-weight: 500;
+    }
+
+    .cov-table > tbody > tr:hover { background: var(--bar-bg); }
+
+    .cov-table > thead > tr > th:nth-child(2),
+    .cov-table > thead > tr > th:nth-child(3),
+    .cov-table > tbody > tr > td:nth-child(2),
+    .cov-table > tbody > tr > td:nth-child(3) {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .cov-table .module-name,
+    .cov-table .file-name {
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      font-size: 13px;
+    }
+
+    .expandable {
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .expandable:hover {
+      background: var(--bar-bg);
+    }
+
+    .cov-table .chevron {
+      display: inline-block;
+      width: 1em;
+      font-size: 10px;
+      color: var(--fg-dim);
+      transition: transform 0.2s;
+    }
+
+    .cov-table .chevron.open {
+      transform: rotate(90deg);
+    }
+
+    .cov-table .file-row td {
+      padding-left: 24px;
+      font-size: 13px;
+    }
+
+    .cov-table .file-row td:first-child {
+      padding-left: 32px;
+    }
+
+    .line-grid-cell {
+      padding: 0 !important;
+    }
+
+    .line-grid {
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      font-size: 11px;
+      line-height: 1.6;
+      max-height: 500px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .line-grid table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+
+    .line-grid td {
+      vertical-align: top;
+      text-align: left;
+      padding: 0 4px;
+    }
+
+    .line-grid .ln {
+      color: var(--fg-dim);
+      text-align: right;
+      user-select: none;
+      white-space: nowrap;
+      border-right: 1px solid var(--border);
+      padding: 0 6px;
+      width: 1px;
+    }
+
+    .line-grid .ct {
+      text-align: right;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+      border-right: 1px solid var(--border);
+      padding: 0 6px;
+      width: 1px;
+    }
+
+    .line-grid .src {
+      white-space: pre;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .line-grid .src code {
+      background: none;
+      padding: 0;
+    }
+
+    /* Coverage heat map: more hits = more green */
+    .line-grid tr.miss .ln,
+    .line-grid tr.miss .ct { color: var(--red); }
+    .line-grid tr.miss { background: rgba(248, 81, 73, 0.08); }
+
+    .line-grid tr.hit-fragile .ln,
+    .line-grid tr.hit-fragile .ct { color: var(--yellow); }
+    .line-grid tr.hit-fragile { background: rgba(210, 153, 34, 0.06); }
+
+    .line-grid tr.hit-cold .ln,
+    .line-grid tr.hit-cold .ct { color: var(--green); }
+    .line-grid tr.hit-cold { background: rgba(63, 185, 80, 0.04); }
+
+    .line-grid tr.hit-warm .ln,
+    .line-grid tr.hit-warm .ct { color: var(--green); }
+    .line-grid tr.hit-warm { background: rgba(63, 185, 80, 0.10); }
+
+    .line-grid tr.hit-hot .ln,
+    .line-grid tr.hit-hot .ct { color: var(--green); }
+    .line-grid tr.hit-hot { background: rgba(63, 185, 80, 0.18); }
+
+    .line-grid tr.hit-blazing .ln,
+    .line-grid tr.hit-blazing .ct { color: var(--green); }
+    .line-grid tr.hit-blazing { background: rgba(63, 185, 80, 0.28); }
+
+    /* GitHub-style Rust syntax highlighting (dark) */
+    .syn-kw { color: #ff7b72; }
+    .syn-type { color: #79c0ff; }
+    .syn-fn { color: #d2a8ff; }
+    .syn-macro { color: #79c0ff; }
+    .syn-str { color: #a5d6ff; }
+    .syn-num { color: #79c0ff; }
+    .syn-comment { color: #8b949e; font-style: italic; }
+    .syn-attr { color: #d2a8ff; }
+    .syn-lifetime { color: #ffa657; }
+    .syn-self { color: #ff7b72; }
+    .syn-const { color: #79c0ff; }
+    .syn-op { color: #ff7b72; }
+    .syn-punct { color: var(--fg-dim); }
+
+    @media (prefers-color-scheme: light) {
+      .syn-kw { color: #cf222e; }
+      .syn-type { color: #0550ae; }
+      .syn-fn { color: #8250df; }
+      .syn-macro { color: #0550ae; }
+      .syn-str { color: #0a3069; }
+      .syn-num { color: #0550ae; }
+      .syn-comment { color: #6e7781; font-style: italic; }
+      .syn-attr { color: #8250df; }
+      .syn-lifetime { color: #953800; }
+      .syn-self { color: #cf222e; }
+      .syn-const { color: #0550ae; }
+      .syn-op { color: #cf222e; }
+      .syn-punct { color: var(--fg-dim); }
+    }
+
+    .cov-bar-cell { width: 40%; }
+
+    .cov-bar {
+      height: 6px;
+      border-radius: 3px;
+      background: var(--bar-bg);
+      overflow: hidden;
+    }
+
+    .cov-bar__fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.4s ease;
+    }
+
+    /* Benchmark table */
+    .bench-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    .bench-table th {
+      text-align: left;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+      padding: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .bench-table th:nth-child(n+2) { text-align: right; }
+
+    .bench-table td {
+      padding: 8px;
+      border-bottom: 1px solid var(--border-faint);
+      font-weight: 500;
+    }
+
+    .bench-table tbody tr:hover { background: var(--bar-bg); }
+
+    .bench-table td:nth-child(n+2) {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .bench-table .bench-name {
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      font-size: 13px;
+    }
+
+    .bench-group {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+      padding: 12px 8px 4px;
+    }
+
+    /* Collapsible per-group benchmark sections.
+       The summary row carries the group name + bench count + min/max
+       time so the user can scan all 7 groups without expanding any. */
+    .bench-controls {
+      padding: 6px 0 12px;
+      border-bottom: 1px solid var(--border-faint);
+      margin-bottom: 8px;
+    }
+
+    .bench-group-details {
+      border-bottom: 1px solid var(--border-faint);
+    }
+    .bench-group-details:last-child { border-bottom: none; }
+
+    .bench-group-summary {
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 8px;
+      user-select: none;
+    }
+    .bench-group-summary::-webkit-details-marker { display: none; }
+    .bench-group-summary::before {
+      content: "▶";
+      display: inline-block;
+      width: 12px;
+      font-size: 9px;
+      color: var(--fg-dim);
+      transition: transform 0.15s ease;
+    }
+    .bench-group-details[open] > .bench-group-summary::before {
+      transform: rotate(90deg);
+    }
+    .bench-group-summary:hover { background: var(--bar-bg); }
+
+    .bench-group-name {
+      flex: 1;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+    }
+    .bench-group-stats {
+      font-size: 12px;
+      color: var(--fg-dim);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .bench-group-details > .bench-table {
+      margin: 0 0 8px 24px;
+    }
+
+    /* Mutants */
+
+    /* ─────────────────────────────────────────────────────────────────
+       `.section-headline` — compact mono summary strip used at the top
+       of Coverage, Mutants, Constant-Time, and Conformance. Each
+       `.stat` is a `<num>` paired with a small uppercase `<label>`;
+       figures use tabular numerics so columns line up across sections.
+       The `.stat--lead` modifier promotes one figure per section to the
+       glance-level read (Coverage's percentage, CT's PASS/FAIL,
+       Mutants' kill rate). Conformance deliberately has no lead — all
+       family fractions are peers.
+       ───────────────────────────────────────────────────────────────── */
+    .section-headline {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 8px 20px;
+      margin-bottom: 16px;
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      font-feature-settings: 'tnum' on, 'lnum' on;
+      font-size: 13px;
+    }
+    .section-headline .stat {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 6px;
+    }
+    .section-headline .num { font-weight: 700; }
+    .section-headline .label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+    }
+    .section-headline .stat--lead .num {
+      font-size: 22px;
+      font-weight: 900;
+      letter-spacing: -0.5px;
+      line-height: 1;
+    }
+    .section-headline .stat--lead .label {
+      font-size: 11px;
+    }
+    .section-headline .stat--lead svg {
+      vertical-align: baseline;
+    }
+
+    .mutants-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .mutants-table th {
+      text-align: left;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .mutants-table td {
+      padding: 4px 8px;
+      border-bottom: 1px solid var(--border-faint);
+    }
+
+    .mutants-table tbody tr:hover { background: var(--bar-bg); }
+
+    .mutants-table .mutant-name {
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      font-size: 12px;
+      color: var(--red);
+    }
+
+    .mutants-table .mutant-loc-suffix {
+      margin-left: 10px;
+      font-size: 11px;
+      color: var(--fg-muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .mutants-table .mutant-loc-suffix:hover {
+      color: var(--fg);
+      border-color: var(--fg-dim);
+    }
+
+    /* Mutant insights */
+    .mutants-insights {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .mutants-insights .cov-insight {
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .mutants-insights .cov-insight-list .bar-wrap {
+      flex: 1;
+      max-width: 80px;
+      height: 6px;
+      border-radius: 3px;
+      background: var(--bar-bg);
+      overflow: hidden;
+      align-self: center;
+    }
+
+    .mutants-insights .cov-insight-list .bar-fill {
+      height: 100%;
+      border-radius: 3px;
+    }
+
+    .mutant-detail-list {
+      list-style: none;
+      padding: 4px 8px 8px 24px;
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      font-size: 12px;
+      color: var(--fg-muted);
+    }
+
+    .mutant-detail-list li {
+      padding: 2px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .mutant-detail-list li:last-child {
+      border-bottom: none;
+    }
+
+    /* Coverage insights */
+    .cov-insights {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .cov-insight {
+      flex: 1;
+      min-width: 250px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+    }
+
+    .cov-insight h4 {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+      margin-bottom: 8px;
+    }
+
+    .cov-insight-list {
+      list-style: none;
+      font-size: 12px;
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    }
+
+    .cov-insight-list li {
+      padding: 3px 0;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .cov-insight-list .tag {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      padding: 1px 5px;
+      border-radius: 3px;
+      white-space: nowrap;
+    }
+
+    .tag-hot { color: #f0b030; border: 1px solid rgba(240, 176, 48, 0.3); }
+    .tag-cold { color: var(--yellow); border: 1px solid rgba(210, 153, 34, 0.3); }
+    .tag-ct { color: var(--red); border: 1px solid rgba(248, 81, 73, 0.3); }
+
+    /* Help tooltip */
+    .help-icon {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      line-height: 16px;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--fg-dim);
+      border: 1px solid var(--fg-dim);
+      border-radius: 50%;
+      cursor: help;
+      position: relative;
+      vertical-align: middle;
+      margin-left: 6px;
+    }
+
+    .help-icon:hover { color: var(--fg-muted); border-color: var(--fg-muted); }
+
+    .help-icon .tooltip {
+      display: none;
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 0;
+      width: 320px;
+      max-width: calc(100vw - 64px);
+      padding: 12px;
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 400;
+      line-height: 1.5;
+      color: var(--fg-muted);
+      text-align: left;
+      text-transform: none;
+      letter-spacing: 0;
+      white-space: normal;
+      z-index: 10;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+
+    .help-icon:hover .tooltip { display: block; }
+
+    .tooltip dt {
+      color: var(--fg);
+      font-weight: 600;
+      margin-top: 6px;
+    }
+
+    .tooltip dt:first-child { margin-top: 0; }
+
+    .tooltip dd {
+      margin: 0 0 2px 0;
+    }
+
+    /* DudeCT table */
+    .dudect-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    .dudect-table th {
+      text-align: left;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+      padding: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .dudect-table th:nth-child(n+2) { text-align: right; }
+
+    .dudect-table td {
+      padding: 8px;
+      border-bottom: 1px solid var(--border-faint);
+      font-weight: 500;
+    }
+
+    .dudect-table tbody tr:hover { background: var(--bar-bg); }
+
+    .dudect-table td:nth-child(n+2) {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .dudect-table .fn-name {
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      font-size: 13px;
+    }
+
+    .dudect-pass { color: var(--green); }
+    .dudect-fail { color: var(--red); font-weight: 700; }
+
+    /* ─────────────────────────────────────────────────────────────────
+       Conformance panel — per-suite family cards (wycheproof / acvp /
+       interop). Typography matches the rest of the page (Inter + system
+       mono).
+       ───────────────────────────────────────────────────────────────── */
+
+    #kat-section {
+      --plate-pass: var(--green);
+      --plate-fail: var(--red);
+    }
+
+    /* ── Family cards (matches `.cov-insight` / `.audit-badge` frame) ── */
+
+    .plate-families {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .plate-family {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+    }
+
+    .plate-family-header {
+      display: grid;
+      grid-template-columns: 1fr max-content;
+      align-items: baseline;
+      gap: 12px;
+      cursor: pointer;
+      user-select: none;
+      transition: opacity 0.15s;
+    }
+    .plate-family-header:hover { opacity: 0.78; }
+
+    /* Small-label voice, matching `.cov-insight h4`. */
+    .plate-family-name {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+      line-height: 1.3;
+    }
+    .plate-family-desc {
+      font-size: 12px;
+      color: var(--fg-muted);
+      margin-top: 4px;
+    }
+    .plate-family-badge {
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      font-feature-settings: 'tnum' on, 'lnum' on;
+      font-size: 12px;
+    }
+    .plate-family-chev {
+      font-size: 10px;
+      color: var(--fg-muted);
+      transition: transform 0.2s;
+      display: inline-block;
+      margin-left: 6px;
+    }
+    .plate-family[data-open="true"] .plate-family-chev { transform: rotate(180deg); }
+
+    .plate-family-body {
+      display: none;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border-faint);
+    }
+    .plate-family[data-open="true"] .plate-family-body { display: block; }
+
+    /* ── Test list (compact, for expanded family) ── */
+
+    .plate-test-list {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    }
+    .plate-test-list th,
+    .plate-test-list td {
+      padding: 4px 8px;
+      text-align: left;
+    }
+    .plate-test-list th { border-bottom: 1px solid var(--border); }
+    .plate-test-list td { border-bottom: 1px solid var(--border-faint); }
+    .plate-test-list th {
+      font-family: 'Inter', sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+    }
+    .plate-test-list td:last-child { width: 70px; text-align: right; font-feature-settings: 'tnum' on; }
+    .plate-test-list .pass { color: var(--plate-pass); }
+    .plate-test-list .fail { color: var(--plate-fail); font-weight: 700; }
+    .plate-test-list .ignored { color: var(--fg-dim); }
+
+    /* ── Wycheproof card (per-file detail block) ── */
+
+    .plate-wycheproof {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+    }
+    .plate-wycheproof-header {
+      display: grid;
+      grid-template-columns: 1fr max-content;
+      align-items: baseline;
+      gap: 12px;
+    }
+    /* Small-label voice, matching `.plate-family-name`. */
+    .plate-wycheproof h4 {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+    }
+    .plate-wycheproof-vectors {
+      color: var(--fg-muted);
+      font-weight: 400;
+      letter-spacing: 0;
+      text-transform: none;
+      font-size: 11px;
+    }
+    .plate-wycheproof-badge {
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      font-feature-settings: 'tnum' on, 'lnum' on;
+      font-size: 12px;
+    }
+    #kat-section .accent { font-weight: 700; }
+
+    .plate-wycheproof-intro {
+      font-size: 12px;
+      color: var(--fg-muted);
+      margin-top: 6px;
+      margin-bottom: 10px;
+    }
+
+    .plate-wycheproof-file {
+      cursor: pointer;
+      font-size: 12px;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border-faint);
+      display: grid;
+      grid-template-columns: max-content 1fr max-content;
+      gap: 12px;
+      align-items: baseline;
+    }
+    .plate-wycheproof-file:last-of-type { border-bottom: none; }
+    .plate-wycheproof-file .label {
+      color: var(--fg);
+      font-weight: 600;
+    }
+    .plate-wycheproof-file .stats {
+      color: var(--fg-muted);
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      font-feature-settings: 'tnum' on;
+      font-size: 11px;
+    }
+    .plate-wycheproof-file .leader {
+      border-bottom: 1px dotted var(--fg-dim);
+      align-self: end;
+      transform: translateY(-3px);
+    }
+
+    /* Audit badges */
+    .audit-grid {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+
+    .audit-badge {
+      flex: 1;
+      min-width: 140px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      text-align: center;
+      transition: border-color 0.15s;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+    }
+
+    .audit-badge:hover {
+      border-color: var(--fg-muted);
+    }
+
+    .audit-badge .badge-status {
+      font-size: 20px;
+      font-weight: 900;
+      margin-bottom: 4px;
+    }
+
+    .audit-badge .badge-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+    }
+
+    .audit-badge .badge-detail {
+      font-size: 11px;
+      color: var(--fg-muted);
+      margin-top: 4px;
+    }
+
+    .audit-bloat {
+      margin-top: 16px;
+    }
+
+    .audit-bloat table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .audit-bloat th {
+      text-align: left;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .audit-bloat th:nth-child(2) { text-align: right; }
+
+    .audit-bloat td {
+      padding: 4px 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .audit-bloat td:nth-child(2) {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .audit-bloat .fn-name {
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      font-size: 12px;
+    }
+
+    /* Risks section */
+    .analysis-grid {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .analysis-grid .cov-insight {
+      flex: 1;
+      min-width: 250px;
+    }
+
+    .health-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .health-table th {
+      text-align: left;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+      padding: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .health-table th:nth-child(n+2) { text-align: right; }
+
+    .health-table td {
+      padding: 8px;
+      border-bottom: 1px solid var(--border-faint);
+      font-weight: 500;
+    }
+
+    .health-table tbody tr:hover { background: var(--bar-bg); }
+
+    .health-table td:nth-child(n+2) {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .health-table .module-name {
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      font-size: 13px;
+    }
+
+    .health-bar {
+      display: inline-block;
+      width: 40px;
+      height: 8px;
+      border-radius: 4px;
+      background: var(--bar-bg);
+      overflow: hidden;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+
+    .health-bar span {
+      display: block;
+      height: 100%;
+      border-radius: 4px;
+    }
+
+    /* Status banner */
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* Commit nav */
+    .commit-nav {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 0;
+    }
+
+    .commit-nav label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--fg-muted);
+    }
+
+    .commit-nav select {
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      font-size: 13px;
+      font-weight: 500;
+      min-width: 320px;
+      padding: 6px 28px 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg-raised);
+      color: var(--fg);
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+      transition: border-color 0.15s;
+    }
+
+    .commit-nav select:focus {
+      outline: none;
+      border-color: var(--fg-muted);
+    }
+
+    .commit-nav .commit-time {
+      font-size: 11px;
+      color: var(--fg-dim);
+    }
+
+    .sticky-nav {
+      position: sticky;
+      top: 0;
+      z-index: 5;
+      background: color-mix(in srgb, var(--bg) 85%, transparent);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    .section-nav {
+      display: flex;
+      gap: 6px;
+      padding: 10px 0;
+    }
+
+    .section-nav a {
+      font-size: 12px;
+      font-weight: 600;
+      padding: 5px 10px;
+      border-radius: 4px;
+      color: var(--fg-muted);
+      white-space: nowrap;
+    }
+
+    .section-nav a:hover {
+      color: var(--fg);
+      background: var(--bar-bg);
+    }
+
+    .section-nav a.active {
+      color: var(--fg);
+      background: var(--bar-bg);
+      border-bottom: 2px solid var(--fg);
+    }
+
+    .status-ok {
+      padding: 10px 16px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      background: var(--green-bg);
+      color: var(--green);
+    }
+    .status-warn {
+      padding: 10px 16px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      background: var(--red-bg);
+      color: var(--red);
+      border: 1px solid color-mix(in srgb, var(--red) 18%, transparent);
+    }
+
+    .empty {
+      padding: 24px 0;
+      font-size: 13px;
+      color: var(--fg-dim);
+      font-style: italic;
+    }
+
+    .footer {
+      padding: 24px 0;
+      border-top: 1px solid var(--border);
+    }
+
+    .footer__inner {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      color: var(--fg-muted);
+    }
+
+    .footer a { font-weight: 500; color: var(--fg); }
+    .footer a:hover { color: var(--fg-muted); }
+
+    @media only screen and (max-width: 640px) {
+      body { font-size: 16px; }
+      .container { padding: 0 12px; }
+      .header { padding: 16px 0; }
+      .header__title { font-size: 18px; }
+      .header__links { display: none; }
+      .sections { padding: 20px 0; }
+      .section { margin-bottom: 28px; }
+      .cov-bar-cell { display: none; }
+      .section-headline .stat--lead .num { font-size: 18px; }
+
+      /* Nav: horizontal scroll instead of wrapping */
+      .section-nav {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        padding: 8px 0;
       }
-      main { max-width: 64rem; margin: 0 auto; padding: 2.5rem 1.25rem; }
-      h1 { margin: 0; font-size: 2rem; letter-spacing: -0.02em; }
-      .tagline { color: var(--muted); margin: 0.25rem 0 1.25rem; }
-      .badges { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 2rem; }
-      .badges img { height: 20px; }
-      h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 1.75rem 0 0.75rem; }
-      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 0.85rem; }
-      .card {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        padding: 0.95rem 1.1rem;
-        text-decoration: none;
-        color: inherit;
-        display: block;
-      }
-      .card:hover { border-color: var(--accent); }
-      .card .top { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
-      .card .label { font-weight: 600; }
-      .pill {
-        font-size: 0.72rem;
-        font-weight: 600;
-        padding: 0.1rem 0.55rem;
-        border-radius: 999px;
-        color: #0d1117;
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-      }
-      .pill.ok { background: var(--ok); }
-      .pill.warn { background: var(--warn); }
-      .pill.fail { background: var(--fail); }
-      .pill.none { background: var(--none); color: var(--text); }
-      .summary { color: var(--muted); font-size: 0.9rem; margin: 0.45rem 0 0; }
-      .meta { color: var(--none); font-size: 0.78rem; margin-top: 0.4rem; font-variant-numeric: tabular-nums; }
-      .static ul { margin: 0; padding-left: 1.1rem; color: var(--muted); }
-      footer { margin-top: 2.5rem; color: var(--muted); font-size: 0.85rem; }
-      a { color: var(--accent); }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>mlkem-selkie</h1>
-      <p class="tagline">Rust ML-KEM (FIPS 203) — beautiful, secure code.</p>
-      <div class="badges">
-        <a href="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/ci.yml"
-          ><img alt="CI" src="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/ci.yml/badge.svg?branch=main"
-        /></a>
-        <a href="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/perf.yml"
-          ><img alt="Perf" src="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/perf.yml/badge.svg?branch=main"
-        /></a>
-        <a href="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/mutants.yml"
-          ><img alt="Mutants" src="https://github.com/selkie-cryptography/mlkem-selkie/actions/workflows/mutants.yml/badge.svg?branch=main"
-        /></a>
-      </div>
+      .section-nav::-webkit-scrollbar { display: none; }
+      .section-nav a { font-size: 11px; padding: 4px 8px; }
 
-      <h2>Quality</h2>
-      <div class="grid" data-section="quality"></div>
+      /* Commit nav: stack vertically */
+      .commit-nav { flex-direction: column; gap: 6px; }
 
-      <h2>Performance</h2>
-      <div class="grid" data-section="performance"></div>
+      /* Tables: horizontal scroll */
+      .bench-table, .dudect-table, .cov-table { display: block; overflow-x: auto; }
+      .bench-table th, .bench-table td,
+      .dudect-table th, .dudect-table td { font-size: 12px; padding: 4px 6px; }
 
-      <h2>Constant-time</h2>
-      <div class="grid" data-section="constant-time"></div>
+      /* Audit badges: 2 per row */
+      .audit-grid { gap: 8px; }
+      .audit-badge { min-width: calc(50% - 8px); padding: 10px; }
+      .badge-status { font-size: 18px; }
+      .badge-detail { font-size: 10px; }
 
-      <h2>Conformance</h2>
-      <div class="grid static">
-        <div class="card">
-          <div class="top"><span class="label">Test vectors</span><span class="pill ok">ci</span></div>
-          <ul>
-            <li>Wycheproof (C2SP) — all 12 ML-KEM files</li>
-            <li>NIST ACVP FIPS 203 KATs</li>
-            <li>libcrux interop — 512 / 768 / 1024</li>
-          </ul>
+      /* Tooltips: full-width on mobile */
+      .help-icon .tooltip { left: -120px; width: 280px; }
+
+      .footer__inner { flex-direction: column; gap: 12px; }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="header">
+    <div class="container">
+      <div class="header__inner">
+        <div class="header__left">
+          <a href="/" title="Dashboard home (latest commit, default view)">
+            <img src="/selkie-solid-white-on-transparent.svg" alt="Selkie" class="logo logo--dark">
+            <img src="/selkie-solid-black-on-transparent.svg" alt="Selkie" class="logo logo--light">
+          </a>
+          <div>
+            <div class="header__title">mlkem-selkie</div>
+            <div class="header__subtitle">CI</div>
+          </div>
+        </div>
+        <div class="header__links">
+          <a class="header__org" href="https://github.com/selkie-cryptography/mlkem-selkie">GitHub</a>
         </div>
       </div>
+    </div>
+  </header>
 
-      <footer>
-        <p>
-          “In very ancient times some of the Clan Coneely … were changed by ‘art
-          magick’ into seals.” — Connemara Folk-Lore.
-          <a href="https://github.com/selkie-cryptography/mlkem-selkie">Source on GitHub</a>.
-        </p>
-      </footer>
-    </main>
 
-    <script>
-      const CATEGORIES = {
-        quality: [
-          { key: "coverage", label: "Coverage" },
-          { key: "deny", label: "Audit (cargo-deny)" },
-          { key: "mutants", label: "Mutation testing" },
-        ],
-        performance: [
-          { key: "bench", label: "Wall-clock (divan)" },
-          { key: "instructions", label: "Instructions (gungraun)" },
-          { key: "cycles", label: "Cycles (rdtsc)" },
-        ],
-        "constant-time": [
-          { key: "dudect", label: "dudect" },
-          { key: "tacet", label: "tacet" },
-          { key: "ctgrind", label: "ctgrind" },
-        ],
-      };
+  <div class="container">
+    <div class="sticky-nav">
+      <div class="commit-nav">
+        <label for="commit-select" title="Step with [ and ] (or arrow keys)">Commit</label>
+        <select id="commit-select" onchange="onCommitChange(this.value)" title="Step with [ and ] (or arrow keys)">
+          <option value="">&hellip;</option>
+        </select>
+        <span class="commit-time" id="commit-time"></span>
+      </div>
 
-      const ago = (iso) => {
-        if (!iso) return "";
-        const secs = (Date.now() - Date.parse(iso)) / 1000;
-        const units = [["d", 86400], ["h", 3600], ["m", 60]];
-        for (const [u, s] of units) if (secs >= s) return `${Math.floor(secs / s)}${u} ago`;
-        return "just now";
-      };
+      <nav class="section-nav" id="section-nav">
+        <a href="/rustdoc/" target="_blank" rel="noopener">Docs</a>
+        <a href="#analysis-section">Risks</a>
+        <a href="#coverage-section">Coverage</a>
+        <a href="#profile-section">Profile</a>
+        <a href="#bench-section">Benchmarks</a>
+        <a href="#kat-section">Conformance</a>
+        <a href="#mutants-section">Mutants</a>
+        <a href="#dudect-section">Constant-Time</a>
+        <a href="#platform-section">Platforms</a>
+        <a href="#audits-section">Audits</a>
+      </nav>
+    </div>
 
-      async function status(key) {
-        try {
-          const r = await fetch(`/${key}/status.json`, { cache: "no-store" });
-          return r.ok ? await r.json() : null;
-        } catch {
-          return null;
+    <div id="status-summary" style="padding:12px 0;display:none"></div>
+
+    <div class="sections">
+
+      <section class="section" id="analysis-section">
+        <div class="section__header">
+          <h2 class="section__title">Risks<span class="help-icon">?<span class="tooltip">
+            <p style="margin-bottom:8px">Cross-references all data sources to surface actionable security and correctness risks.</p>
+            <dl>
+            <dt>Untested hot paths</dt><dd>Functions with high hit counts but surviving mutants — code that runs a lot but isn't verified.</dd>
+            <dt>CT failures</dt><dd>DudeCT or Tacet tests detecting timing leaks on secret-derived data.</dd>
+            <dt>Unsafe blocks</dt><dd>Unsafe code count per module (the SIMD backends need intrinsics). Should stay minimal.</dd>
+            <dt>CT + mutant overlap</dt><dd>Files containing both a TODO(ct) marker and one or more surviving mutants. The TODO(ct) line and survivor lines may differ — the signal is that any CT fix landing in this file would touch code where some mutation already escapes the test suite.</dd>
+            <dt>Benchmark blind spots</dt><dd>Hot functions without benchmarks, or benchmarked functions that aren't hot.</dd>
+            <dt>Module health</dt><dd>Combined score from coverage, kill rate, CT status, and hot path density.</dd>
+            </dl></span></span></h2>
+        </div>
+        <div id="analysis-content">
+          <p class="empty">Awaiting first run.</p>
+        </div>
+      </section>
+
+
+      <section class="section" id="coverage-section">
+        <div class="section__header">
+          <h2 class="section__title">Coverage<span class="help-icon">?<span class="tooltip">
+            <p style="margin-bottom:8px">Line coverage from the test suite, collected with <code>cargo-llvm-cov</code>. Click a module to see per-file breakdowns, click a file to see source with per-line hit counts.</p>
+            <dl>
+            <dt>Heat map</dt><dd>Color intensity shows how hot each line is relative to the file's peak. Amber = inner loops.</dd>
+            <dt>Hottest files</dt><dd>Files with the highest peak hit counts — performance-critical code.</dd>
+            <dt>CT audit</dt><dd>Hot lines marked TODO(ct) — code on secret data that needs constant-time hardening.</dd>
+            <dt>Fragile coverage</dt><dd>Files where every covered line is hit at most twice — thin test coverage.</dd>
+            </dl></span></span></h2>
+          <span class="meta" id="coverage-meta"></span>
+        </div>
+        <div id="coverage-content">
+          <p class="empty">Awaiting first run.</p>
+        </div>
+      </section>
+
+      <section class="section" id="profile-section">
+        <div class="section__header">
+          <h2 class="section__title">Profile<span class="help-icon">?<span class="tooltip">
+            <p style="margin-bottom:8px">Deterministic and low-noise resource-cost metrics that move when source moves: <a href="https://github.com/gungraun/gungraun" style="color:var(--fg)">gungraun</a> (callgrind) instruction counts, and rdtsc cycle counts via criterion-cycles-per-byte.</p>
+            <dl>
+            <dt>Instructions</dt><dd>Total executed instructions per benchmark. Deterministic across runs and machines.</dd>
+            <dt>L1/L2 misses</dt><dd>Simulated cache misses. High L1 misses on secret data may indicate a cache side-channel.</dd>
+            <dt>Branch misses</dt><dd>Mispredicted branches. Data-dependent branches on secrets leak via branch prediction.</dd>
+            <dt>Cycles</dt><dd>Median rdtsc cycle counts for ML-KEM-768 keygen / encaps / decaps (x86_64 only).</dd>
+            </dl></span></span></h2>
+        </div>
+
+        <div class="subpanel">
+          <div class="subpanel__header">
+            <h3 class="subpanel__title">Instructions <span class="variant-toggle" data-family="instructions"></span></h3>
+            <span class="meta" id="instructions-meta"></span>
+          </div>
+          <div id="instructions-content">
+            <p class="empty">Awaiting first run.</p>
+          </div>
+        </div>
+
+        <div class="subpanel">
+          <div class="subpanel__header">
+            <h3 class="subpanel__title">Cycles <span class="variant-toggle" data-family="cycles"></span></h3>
+            <span class="meta" id="cycles-meta"></span>
+          </div>
+          <div id="cycles-content">
+            <p class="empty">Awaiting first run.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="bench-section">
+        <div class="section__header">
+          <h2 class="section__title">Benchmarks<span class="help-icon">?<span class="tooltip">
+            <p style="margin-bottom:8px">Wall-clock benchmarks via <a href="https://github.com/nvzqz/divan" style="color:var(--fg)">divan</a>, per polynomial backend (generic / AVX2 / NEON). Each operation runs many iterations to measure median time.</p>
+            <dl>
+            <dt>Groups</dt><dd>mlkem (keygen / encaps / decaps and key + ciphertext parsing, per parameter set) and algebraic (NTT, sampling, encoding hot paths).</dd>
+            <dt>Units</dt><dd>Toggle between ns/&mu;s/ms. Sort by name or time.</dd>
+            <dt>Trend</dt><dd>Historical chart when multiple commits are available.</dd>
+            </dl></span></span></h2>
+          <span style="display:inline-flex;align-items:center;gap:12px"><span class="variant-toggle" data-family="bench"></span><span class="meta" id="bench-meta"></span></span>
+        </div>
+        <div id="bench-content">
+          <p class="empty">Awaiting first run.</p>
+        </div>
+      </section>
+
+      <section class="section" id="kat-section">
+        <div class="section__header">
+          <h2 class="section__title">Conformance<span class="help-icon">?<span class="tooltip">
+            <p style="margin-bottom:8px">Compliance with known-answer test vectors, negative/robustness vectors, and cross-implementation agreement.</p>
+            <dl>
+            <dt>Wycheproof</dt><dd>Negative and robustness vectors from <a href="https://github.com/C2SP/wycheproof" style="color:var(--fg)">C2SP/wycheproof</a> — all 12 ML-KEM files (keygen, encaps, decaps, semi-expanded decaps per parameter set). (<a href="https://github.com/selkie-cryptography/mlkem-selkie/tree/main/tests/vectors" style="color:var(--fg)">vectors</a>, <a href="https://github.com/selkie-cryptography/mlkem-selkie/blob/main/tests/wycheproof.rs" style="color:var(--fg)">runner</a>)</dd>
+            <dt>ACVP</dt><dd>NIST ACVP FIPS 203 known-answer tests: keyGen and encapDecap across all three parameter sets. (<a href="https://github.com/selkie-cryptography/mlkem-selkie/blob/main/tests/kats.rs" style="color:var(--fg)">runner</a>)</dd>
+            <dt>Interop</dt><dd>Randomized cross-implementation tests against <a href="https://github.com/cryspen/libcrux" style="color:var(--fg)">libcrux</a> (formally verified) and a BoringSSL oracle. (<a href="https://github.com/selkie-cryptography/mlkem-selkie/blob/main/tests/libcrux_xtest.rs" style="color:var(--fg)">libcrux</a>, <a href="https://github.com/selkie-cryptography/mlkem-selkie/blob/main/tests/boringssl_xtest.rs" style="color:var(--fg)">boringssl</a>)</dd>
+            </dl></span></span></h2>
+          <span class="meta" id="kat-meta"></span>
+        </div>
+        <div id="kat-content">
+          <p class="empty">Awaiting first run.</p>
+        </div>
+      </section>
+
+      <section class="section" id="mutants-section">
+        <div class="section__header">
+          <h2 class="section__title">Mutants<span class="help-icon">?<span class="tooltip">
+            <p style="margin-bottom:8px">Mutation testing introduces small changes (mutants) to the source and checks if the test suite catches them. Survivors indicate code where tests execute the lines but don't verify correctness.</p>
+            <dl>
+            <dt>Kill rate</dt><dd>Percentage of mutants detected. Higher is better.</dd>
+            <dt>Caught</dt><dd>Mutants that caused a test failure.</dd>
+            <dt>Missed</dt><dd>Mutants that passed all tests — gaps in test quality.</dd>
+            <dt>Survivor patterns</dt><dd>Groups survivors by mutation type to reveal categories of untested behavior.</dd>
+            <dt>High coverage, low kill rate</dt><dd>Modules where tests execute code but don't verify it — the most misleading coverage.</dd>
+            <dt>Arch</dt><dd>x86_64 covers the AVX2 backend and the scalar core; aarch64 covers the NEON backend (weekly full-tree runs).</dd>
+            </dl></span></span></h2>
+          <span style="display:inline-flex;align-items:center;gap:12px"><span class="variant-toggle" data-family="mutants"></span><span class="meta" id="mutants-meta"></span></span>
+        </div>
+        <div id="mutants-content">
+          <p class="empty">Awaiting first run.</p>
+        </div>
+      </section>
+
+      <section class="section" id="dudect-section">
+        <div class="section__header">
+          <h2 class="section__title">Constant-Time<span class="help-icon">?<span class="tooltip">
+            <p style="margin-bottom:8px">Two complementary constant-time analysis tools:</p>
+            <dl>
+            <dt>DudeCT</dt><dd><a href="https://eprint.iacr.org/2016/1123.pdf" style="color:var(--fg)">Statistical t-test</a>. |t| &lt; 4.5 = pass, |t| &ge; 4.5 = timing leak detected.</dd>
+            <dt>Tacet</dt><dd><a href="https://crates.io/crates/tacet" style="color:var(--fg)">Bayesian attacker-model-aware</a> analysis. Tests against specific adversary capabilities (online, cache, physical) and reports leak probability.</dd>
+            <dt>Samples</dt><dd>Number of measurements. More samples = higher confidence for both tools.</dd>
+            </dl></span></span></h2>
+          <span class="meta" id="dudect-meta"></span>
+        </div>
+        <div id="dudect-content">
+          <p class="empty">Awaiting first run.</p>
+        </div>
+      </section>
+
+      <section class="section" id="platform-section">
+        <div class="section__header">
+          <h2 class="section__title">Platforms<span class="help-icon">?<span class="tooltip">
+            <p style="margin-bottom:8px">Test results across the polynomial backends build.rs can select: portable and AVX2 on x86_64 Linux, NEON on aarch64 macOS. The backend is a target-CPU cfg, not a cargo feature, so each needs its own native run.</p>
+            </span></span></h2>
+          <span class="meta" id="platform-meta"></span>
+        </div>
+        <div id="platform-content">
+          <p class="empty">Awaiting first run.</p>
+        </div>
+      </section>
+
+      <section class="section" id="audits-section">
+        <div class="section__header">
+          <h2 class="section__title">Audits<span class="help-icon">?<span class="tooltip">
+            <p style="margin-bottom:8px">Automated code health and security checks.</p>
+            <dl>
+            <dt>cargo deny</dt><dd>Dependency advisories, bans, licenses, and sources.</dd>
+            <dt>Unsafe</dt><dd>Count of <code>unsafe</code> lines per module. The AVX2 / NEON kernels need intrinsics; everything else should stay at zero.</dd>
+            </dl></span></span></h2>
+          <span class="meta" id="audits-meta"></span>
+        </div>
+        <div id="audits-content">
+          <p class="empty">Awaiting first run.</p>
+        </div>
+      </section>
+
+
+    </div>
+  </div>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="footer__inner">
+        <span><a href="https://selkiecryptography.com">Selkie Cryptography</a></span>
+        <span id="footer-build" style="font-size:11px;color:var(--fg-dim)"></span>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    const REPO = 'selkie-cryptography/mlkem-selkie';
+    const POLL_INTERVAL = 15000;
+
+    // Backend / arch variants for the matrixed kinds. perf.yml uploads one
+    // kind per polynomial backend (bench-generic / bench-avx2 / bench-neon,
+    // instructions + cycles are x86_64-only so generic / avx2), and
+    // mutants.yml splits by arch (x86_64 → `mutants`, aarch64 →
+    // `mutants-aarch64`). Each family renders one variant at a time,
+    // picked by the section's toggle and persisted in localStorage.
+    const KIND_VARIANTS = {
+      bench: ['generic', 'avx2', 'neon'],
+      instructions: ['generic', 'avx2'],
+      cycles: ['generic', 'avx2'],
+      mutants: ['x86_64', 'aarch64'],
+    };
+
+    function selectedVariant(family) {
+      const stored = localStorage.getItem(`variant:${family}`);
+      const variants = KIND_VARIANTS[family];
+      return variants.includes(stored) ? stored : variants[0];
+    }
+
+    // The data kind (URL path component) for a family's selected variant.
+    function kindOf(family) {
+      if (!KIND_VARIANTS[family]) return family;
+      const variant = selectedVariant(family);
+      if (family === 'mutants') {
+        return variant === 'x86_64' ? 'mutants' : 'mutants-aarch64';
+      }
+      return `${family}-${variant}`;
+    }
+
+    function setVariant(family, variant) {
+      localStorage.setItem(`variant:${family}`, variant);
+      renderVariantToggles();
+      refreshIndices().then(() => {
+        renderCommitSelect(buildCommitList());
+        if (selectedSha) loadCommitData(selectedSha, true);
+      });
+    }
+
+    function renderVariantToggles() {
+      document.querySelectorAll('.variant-toggle').forEach(el => {
+        const family = el.dataset.family;
+        const selected = selectedVariant(family);
+        el.innerHTML = KIND_VARIANTS[family].map(v =>
+          `<button class="${v === selected ? 'active' : ''}" onclick="setVariant('${family}','${v}')">${v}</button>`
+        ).join('');
+      });
+    }
+
+    // State.
+    let covIndex = [];          // [{sha, percent, updated_at}, ...]
+    let benchIndex = [];        // [{sha, updated_at}, ...]
+    let mutantsIndex = [];      // [{sha, updated_at}, ...]
+    let instructionsIndex = []; // [{sha, results:{name:instructions}, updated_at}, ...]
+    let cyclesIndex = [];       // [{sha, results:{name:cycles}, updated_at}, ...]
+    // Currently viewed commit. A `?sha=` query param deep-links a
+    // specific commit (CI job summaries and PR comments link here).
+    let selectedSha = new URLSearchParams(location.search).get('sha') || null;
+    let covData = null;     // Current coverage data for drill-down.
+    let lastManifest = {};  // {kind: sha} from last poll — skip refetches when unchanged.
+
+    // Track what's currently rendered to avoid clobbering state
+    // (expanded modules, scroll position) on no-op poll cycles.
+    let renderedCov = null;   // SHA of rendered coverage data
+    let renderedBench = null; // SHA of rendered bench data
+    let renderedMut = null;   // SHA of rendered mutants data
+    let renderedDudect = null; // SHA of rendered dudect data
+    let renderedTacet = null;  // SHA of rendered tacet data
+    let renderedForSha = null; // The selectedSha we last rendered for
+
+    // Link a source path (e.g. "src/fields/fp.rs:42") to GitHub.
+    // If sha is available, links to the specific commit; otherwise HEAD.
+    function srcLink(path, sha) {
+      if (!path) return esc(path);
+      const ref = sha || 'main';
+      // Split "file:line" if present.
+      const parts = path.match(/^(.+?):(\d+)$/);
+      const file = parts ? parts[1] : path;
+      const line = parts ? parts[2] : null;
+      const url = `https://github.com/${REPO}/blob/${ref}/${file}${line ? '#L' + line : ''}`;
+      const display = path.replace(/^src\//, '');
+      return `<a href="${url}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:2px">${esc(display)}</a>`;
+    }
+
+    function runLink(data) {
+      if (!data || !data.run_id) return '';
+      const url = `https://github.com/${REPO}/actions/runs/${data.run_id}`;
+      return ` <a href="${url}" target="_blank" rel="noopener" style="font-size:11px;color:var(--fg-dim);text-decoration:none;margin-left:6px">\u2197</a>`;
+    }
+
+    // Counts data-upload entries between two SHAs, not git rev-list
+    // distance — that's the right granularity for the dashboard and
+    // sidesteps needing GitHub API auth in the browser.
+    function commitsBehind(panelSha, refSha) {
+      if (!panelSha || !refSha || panelSha === refSha) return null;
+      const list = buildCommitList();
+      const panelIdx = list.findIndex(c => c.sha === panelSha);
+      const refIdx = list.findIndex(c => c.sha === refSha);
+      if (panelIdx < 0 || refIdx < 0) return null;
+      return panelIdx - refIdx;
+    }
+
+    // Pill is deliberately prominent: a stale panel looks identical to
+    // a fresh one at a glance, and "the dashboard agrees with HEAD" is
+    // a thing people read off this page. The SHA links out to the
+    // commit on GitHub for diagnosis; viewing this panel *as of* that
+    // SHA is one click away in the commit picker.
+    function staleTag(data) {
+      if (!data || !data._stale || !data.sha) return '';
+      const sha = data.sha.slice(0, 7);
+      const n = commitsBehind(data.sha, selectedSha);
+      let behind = '';
+      if (n != null && n > 0) {
+        behind = `${n} run${n === 1 ? '' : 's'} behind &middot; `;
+      } else if (n != null && n < 0) {
+        behind = `${-n} run${n === -1 ? '' : 's'} ahead &middot; `;
+      }
+      const commitUrl = `https://github.com/${REPO}/commit/${esc(data.sha)}`;
+      return `<span class="stale-pill">STALE &middot; ${behind}from <a href="${commitUrl}" target="_blank" rel="noopener" title="Open ${sha} on GitHub">${sha}</a></span>`;
+    }
+
+    function applyStale(el, data) {
+      if (!el) return;
+      el.classList.toggle('is-stale', !!(data && data._stale));
+    }
+
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = String(s);
+      return d.innerHTML;
+    }
+
+    // Render a sparkline from an array of numbers using Unicode block chars.
+    // Inline SVG mini-chart. vals = array of numbers (oldest first).
+    // opts: { width, height, color, labels, suffix, decimals }
+    // labels = parallel array of strings (e.g. commit SHAs) for tooltips.
+    function minichart(vals, opts) {
+      if (!vals || vals.length < 2) return '';
+      const w = (opts && opts.width) || 80;
+      const h = (opts && opts.height) || 24;
+      const color = (opts && opts.color) || 'var(--fg-muted)';
+      const labels = (opts && opts.labels) || null;
+      const suffix = (opts && opts.suffix) || '';
+      const dec = (opts && opts.decimals != null) ? opts.decimals : 1;
+      const min = Math.min(...vals);
+      const max = Math.max(...vals);
+      const range = max - min || 1;
+      const coords = vals.map((v, i) => ({
+        x: (i / (vals.length - 1)) * w,
+        y: h - 2 - ((v - min) / range) * (h - 4),
+        v,
+      }));
+      const points = coords.map(c => `${c.x.toFixed(1)},${c.y.toFixed(1)}`);
+      const area = `M0,${h} L${points.join(' L')} L${w},${h} Z`;
+      const line = `M${points.join(' L')}`;
+      const last = coords[coords.length - 1];
+      // Hover targets with JS-driven tooltip.
+      let hovers = '';
+      for (let i = 0; i < coords.length; i++) {
+        const c = coords[i];
+        const val = c.v.toFixed(dec) + suffix;
+        const lbl = labels ? labels[i] : `#${i + 1}`;
+        const tip = `${lbl}: ${val}`.replace(/"/g, '&quot;');
+        hovers += `<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="6" fill="transparent" style="cursor:crosshair" onmouseenter="showChartTip(event,'${tip}')" onmouseleave="hideChartTip()"/>`;
+      }
+      return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="vertical-align:middle;margin-left:6px"><path d="${area}" fill="${color}" opacity="0.1"/><path d="${line}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="${last.x.toFixed(1)}" cy="${last.y.toFixed(1)}" r="2" fill="${color}"/>${hovers}</svg>`;
+    }
+
+    // Delta indicator: shows ↑N or ↓N with color.
+    function delta(current, previous, opts) {
+      if (previous == null || current == null) return '';
+      const diff = current - previous;
+      if (diff === 0) return '';
+      const invert = opts && opts.invert; // true = lower is better (panic count)
+      const isGood = invert ? diff < 0 : diff > 0;
+      const color = isGood ? 'var(--green)' : 'var(--red)';
+      const arrow = diff > 0 ? '\u2191' : '\u2193';
+      const abs = Math.abs(diff);
+      const decimals = (opts && opts.decimals != null) ? opts.decimals : (abs < 10 ? 1 : 0);
+      const num = Number.isInteger(abs) ? String(abs) : abs.toFixed(decimals);
+      const label = (opts && opts.suffix) ? `${num}${opts.suffix}` : num;
+      return ` <span style="font-size:11px;color:${color}">${arrow}${label}</span>`;
+    }
+
+    function covColor(pct) {
+      if (pct >= 80) return 'var(--green)';
+      if (pct >= 50) return 'var(--yellow)';
+      return 'var(--red)';
+    }
+
+    function timeAgo(iso) {
+      const d = new Date(iso);
+      const ms = Date.now() - d.getTime();
+      const mins = Math.floor(ms / 60000);
+      if (mins < 60) return `${mins}m ago`;
+      const hours = Math.floor(mins / 60);
+      if (hours < 24) return `${hours}h ago`;
+      // After 24h, show the date.
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+
+    function commitLink(sha) {
+      return `<a href="https://github.com/${REPO}/commit/${esc(sha)}">${esc(sha.slice(0, 7))}</a>`;
+    }
+
+    async function fetchJson(url) {
+      try {
+        const r = await fetch(url);
+        if (!r.ok) return null;
+        return await r.json();
+      } catch {
+        return null;
+      }
+    }
+
+    // Short display name: basename, but for mod.rs and tests.rs
+    // include the parent directory to disambiguate
+    // (e.g. "algebra/mod.rs" instead of "mod.rs").
+    function shortName(path) {
+      const parts = path.split('/');
+      const base = parts[parts.length - 1];
+      if ((base === 'mod.rs' || base === 'tests.rs') && parts.length >= 2) {
+        return parts[parts.length - 2] + '/' + base;
+      }
+      return base;
+    }
+
+    // Shorten a fully-qualified Rust function path to "module::Type::fn".
+    // Strips the leading crate name and intermediate modules deeper than
+    // two segments — full path stays in the title attribute.
+    function shortFn(qual) {
+      const stripped = qual.replace(/^mlkem_selkie::/, '');
+      const segs = stripped.split('::');
+      if (segs.length <= 3) return stripped;
+      return segs[0] + '::…::' + segs.slice(-2).join('::');
+    }
+
+    function renderCoverageData(data) {
+      covData = data;
+      const total = data.total || {};
+      const totalPct = total.percent != null ? total.percent.toFixed(1) : '—';
+      const modules = data.modules || [];
+
+      // Coverage trend sparkline from index history.
+      let covChart = '';
+      if (covIndex.length >= 2) {
+        const slice = covIndex.slice(0, 15).reverse();
+        const vals = slice.map(e => e.percent || 0);
+        const labels = slice.map(e => e.sha ? e.sha.slice(0, 7) : '?');
+        covChart = minichart(vals, { color: covColor(total.percent), width: 80, height: 22, labels, suffix: '%' });
+      }
+
+      const moduleCount = modules.length;
+      const fileCount = modules.reduce((acc, m) => acc + (m.files ? m.files.length : 0), 0);
+      let html = '<div class="section-headline">';
+      html += `<span class="stat stat--lead"><span class="num" style="color:${covColor(total.percent)}">${totalPct}%${covChart}</span><span class="label">covered</span></span>`;
+      html += `<span class="stat"><span class="num">${moduleCount}</span><span class="label">modules</span></span>`;
+      html += `<span class="stat"><span class="num">${fileCount}</span><span class="label">files</span></span>`;
+      html += '</div>';
+
+      // Analyze all files for insights.
+      if (modules.length > 0) {
+        const allFiles = modules.flatMap(m => (m.files || []).map(f => ({...f, module: m.name})));
+
+        // Hot functions: files with highest max hit count.
+        const hotFiles = allFiles
+          .map(f => {
+            const counts = (f.lines || []).filter(l => l[1] > 0).map(l => l[1]);
+            return { name: f.name, maxHit: Math.max(0, ...counts), totalHits: counts.reduce((a, b) => a + b, 0) };
+          })
+          .filter(f => f.maxHit > 0)
+          .sort((a, b) => b.maxHit - a.maxHit)
+          .slice(0, 5);
+
+        // Cold coverage: files where covered lines are all hit <= 2 times.
+        const coldFiles = allFiles
+          .filter(f => {
+            const hits = (f.lines || []).filter(l => l[1] > 0);
+            return hits.length > 0 && hits.every(l => l[1] <= 2);
+          })
+          .map(f => ({ name: f.name, covered: f.covered, total: f.total }))
+          .slice(0, 5);
+
+        // CT concerns: files with TODO(ct) in source on hot lines.
+        const ctConcerns = [];
+        for (const f of allFiles) {
+          for (const l of (f.lines || [])) {
+            if (l.length > 2 && l[1] > 100 && /TODO\(ct\)/.test(l[2])) {
+              ctConcerns.push({ file: f.name, line: l[0], count: l[1], src: l[2].trim() });
+            }
+          }
+        }
+
+        const sha = data.sha;
+        if (hotFiles.length > 0 || coldFiles.length > 0 || ctConcerns.length > 0) {
+          html += '<div class="cov-insights">';
+
+          if (hotFiles.length > 0) {
+            html += '<div class="cov-insight"><h4>Hottest files</h4><ul class="cov-insight-list">';
+            for (const f of hotFiles) {
+              const fname = shortName(f.name);
+              const link = sha ? `https://github.com/${REPO}/blob/${esc(sha)}/src/${esc(f.name)}` : '#';
+              html += `<li><a href="${link}">${esc(fname)}</a><span class="tag tag-hot">${esc(String(f.maxHit))}\u00d7 peak</span></li>`;
+            }
+            html += '</ul></div>';
+          }
+
+          if (ctConcerns.length > 0) {
+            html += '<div class="cov-insight"><h4>CT audit</h4><ul class="cov-insight-list">';
+            for (const c of ctConcerns.slice(0, 5)) {
+              const fname = shortName(c.file);
+              const link = sha ? `https://github.com/${REPO}/blob/${esc(sha)}/${esc(c.file)}#L${c.line}` : '#';
+              html += `<li><a href="${link}">${esc(fname)}:${c.line}</a><span class="tag tag-ct">${esc(String(c.count))}\u00d7 hot</span></li>`;
+            }
+            html += '</ul></div>';
+          }
+
+          if (coldFiles.length > 0) {
+            html += '<div class="cov-insight"><h4>Fragile coverage</h4><ul class="cov-insight-list">';
+            for (const f of coldFiles) {
+              const fname = shortName(f.name);
+              html += `<li><span>${esc(fname)}</span><span class="tag tag-cold">${esc(String(f.covered))} lines \u2264 2\u00d7</span></li>`;
+            }
+            html += '</ul></div>';
+          }
+
+          html += '</div>';
         }
       }
 
-      function card({ key, label }, data) {
-        const state = data?.status ?? "none";
-        const pill = data ? state : "no data";
-        const sha = data?.sha ? data.sha.slice(0, 7) : "";
-        const meta = [sha, ago(data?.timestamp)].filter(Boolean).join(" · ");
-        // Land on the file the publish step chose (e.g. `mutants/missed.txt`
-        // for cargo-mutants, which writes no `index.html`). `data.url` falls
-        // back to `/${key}/` when the payload has its own index page.
-        const a = document.createElement("a");
-        a.className = "card";
-        a.href = data?.url ?? `/${key}/`;
-        a.innerHTML = `
-          <div class="top"><span class="label">${label}</span><span class="pill ${state}">${pill}</span></div>
-          <p class="summary">${data?.summary ?? "no report published yet"}</p>
-          <div class="meta">${meta}</div>`;
-        return a;
+      if (modules.length > 0) {
+        html += `<table class="cov-table">
+          <thead><tr>
+            <th>Module</th>
+            <th>Lines</th>
+            <th>%</th>
+            <th class="cov-bar-cell"></th>
+          </tr></thead><tbody>`;
+
+        for (let mi = 0; mi < modules.length; mi++) {
+          const m = modules[mi];
+          const pct = m.percent.toFixed(1);
+          const color = covColor(m.percent);
+          const modId = `mod-${mi}`;
+          html += `<tr class="expandable" onclick="toggleModule(${mi})">
+            <td class="module-name"><span class="chevron" id="chev-${modId}">&#9654;</span> ${srcLink('src/' + m.name, data.sha)}</td>
+            <td>${esc(m.covered)}/${esc(m.total)}</td>
+            <td style="color:${color}">${pct}%</td>
+            <td class="cov-bar-cell">
+              <div class="cov-bar">
+                <div class="cov-bar__fill" style="width:${m.percent}%;background:${color}"></div>
+              </div>
+            </td>
+          </tr>`;
+
+          // File rows (hidden by default).
+          const files = m.files || [];
+          for (let fi = 0; fi < files.length; fi++) {
+            const f = files[fi];
+            const fpct = f.percent.toFixed(1);
+            const fcolor = covColor(f.percent);
+            const fileId = `file-${mi}-${fi}`;
+            // File name: strip module prefix for display.
+            const fname = f.name.includes('/') ? f.name.split('/').slice(1).join('/') : f.name;
+            html += `<tr class="file-row expandable" id="frow-${fileId}" style="display:none" onclick="toggleFile(${mi},${fi},event)">
+              <td class="file-name"><span class="chevron" id="chev-${fileId}">&#9654;</span> ${srcLink('src/' + f.name, data.sha)}</td>
+              <td>${esc(f.covered)}/${esc(f.total)}</td>
+              <td style="color:${fcolor}">${fpct}%</td>
+              <td class="cov-bar-cell">
+                <div class="cov-bar">
+                  <div class="cov-bar__fill" style="width:${f.percent}%;background:${fcolor}"></div>
+                </div>
+              </td>
+            </tr>`;
+            // Line coverage container (hidden).
+            html += `<tr id="lines-${fileId}" style="display:none">
+              <td colspan="4" class="line-grid-cell"></td>
+            </tr>`;
+          }
+        }
+        html += '</tbody></table>';
       }
 
-      for (const [section, items] of Object.entries(CATEGORIES)) {
-        const grid = document.querySelector(`[data-section="${section}"]`);
-        for (const item of items) {
-          const placeholder = card(item, null);
-          grid.appendChild(placeholder);
-          status(item.key).then((data) => placeholder.replaceWith(card(item, data)));
+      return html;
+    }
+
+    function toggleModule(mi) {
+      const modId = `mod-${mi}`;
+      const chev = document.getElementById(`chev-${modId}`);
+      const isOpen = chev.classList.toggle('open');
+      const files = covData.modules[mi].files || [];
+      for (let fi = 0; fi < files.length; fi++) {
+        const row = document.getElementById(`frow-file-${mi}-${fi}`);
+        const linesRow = document.getElementById(`lines-file-${mi}-${fi}`);
+        if (row) row.style.display = isOpen ? '' : 'none';
+        if (linesRow && !isOpen) linesRow.style.display = 'none';
+        // Close file chevrons when collapsing module.
+        if (!isOpen) {
+          const fc = document.getElementById(`chev-file-${mi}-${fi}`);
+          if (fc) fc.classList.remove('open');
         }
       }
-    </script>
-  </body>
+    }
+
+    // GitHub-style Rust syntax highlighter.
+    function synRust(text) {
+      let s = esc(text);
+
+      // Full-line comments (//! doc comments, // regular comments):
+      // wrap and return early — no keyword/type highlighting inside.
+      if (/^\s*\/\//.test(s)) {
+        return s.replace(/(\/\/.*)$/, '<span class="syn-comment">$1</span>');
+      }
+
+      // Trailing comments: split, highlight code part only, re-join.
+      const commentMatch = s.match(/^(.*?)(\/\/.*)$/);
+      if (commentMatch) {
+        const code = commentMatch[1];
+        const comment = `<span class="syn-comment">${commentMatch[2]}</span>`;
+        s = code;
+        // Fall through to highlight `s` (the code part), then append comment.
+        var trailingComment = comment;
+      }
+
+      // Attributes (#[...] and #![...])
+      s = s.replace(/(#!?\[.*?\])/g, '<span class="syn-attr">$1</span>');
+
+      // Strings ("..." and b"...")
+      s = s.replace(/(b?&quot;(?:[^&]|&(?!quot;))*?&quot;)/g, '<span class="syn-str">$1</span>');
+
+      // Char literals
+      s = s.replace(/(&#39;[^&#]*(?:&#39;)?)/g, '<span class="syn-str">$1</span>');
+
+      // Lifetimes ('a, 'static, etc.)
+      s = s.replace(/(&#39;[a-z_]\w*)/g, '<span class="syn-lifetime">$1</span>');
+
+      // Macros (name!)
+      s = s.replace(/\b([a-z_]\w*!)/g, '<span class="syn-macro">$1</span>');
+
+      // Numeric literals
+      s = s.replace(/\b(0x[0-9a-fA-F_]+|0b[01_]+|0o[0-7_]+|\d[\d_]*(?:\.\d[\d_]*)?(?:e[+-]?\d+)?)\b/g, '<span class="syn-num">$1</span>');
+
+      // Highlight in a single pass to avoid cascading replacements
+      // (e.g. `type` inside `syn-type">`).
+      s = s.replace(/\b([A-Za-z_]\w*)\b/g, (m, w) => {
+        const KW = /^(fn|let|mut|const|pub|use|mod|struct|enum|impl|trait|type|where|for|in|if|else|match|return|super|crate|as|ref|move|async|await|unsafe|extern|dyn|static|true|false|loop|while|break|continue)$/;
+        if (KW.test(w)) return `<span class="syn-kw">${w}</span>`;
+        if (w === 'self' || w === 'Self') return `<span class="syn-self">${w}</span>`;
+        if (/^[A-Z]/.test(w)) return `<span class="syn-type">${w}</span>`;
+        return m;
+      });
+
+      // Function definitions (fn name)
+      s = s.replace(/(<span class="syn-kw">fn<\/span>) (\w+)/g, '$1 <span class="syn-fn">$2</span>');
+
+      // Operators
+      s = s.replace(/(&amp;&amp;|&amp;|\|\||[=!<>]=|\.\.=?|-&gt;|=&gt;)/g, '<span class="syn-op">$1</span>');
+
+      if (typeof trailingComment !== 'undefined') s += trailingComment;
+      return s;
+    }
+
+    // Classify a hit count into a heat level relative to file max.
+    function heatClass(ct, maxCt) {
+      if (ct <= 0) return ct < 0 ? '' : 'miss';
+      if (ct <= 2) return 'hit-fragile';  // cold: possibly single test
+      const ratio = ct / maxCt;
+      if (ratio >= 0.5) return 'hit-blazing';
+      if (ratio >= 0.1) return 'hit-hot';
+      if (ratio >= 0.01) return 'hit-warm';
+      return 'hit-cold';
+    }
+
+    function toggleFile(mi, fi, ev) {
+      ev.stopPropagation();
+      const fileId = `file-${mi}-${fi}`;
+      const chev = document.getElementById(`chev-${fileId}`);
+      const linesRow = document.getElementById(`lines-${fileId}`);
+      const isOpen = chev.classList.toggle('open');
+
+      if (isOpen) {
+        const f = covData.modules[mi].files[fi];
+        const lines = f.lines || [];
+        const sha = covData.sha;
+        const ghBase = `https://github.com/${REPO}/blob/${esc(sha)}/src/${esc(f.name)}`;
+
+        // Find max hit count in this file for relative heat scaling.
+        const maxCt = Math.max(1, ...lines.map(e => e[1]));
+
+        let grid = '<div class="line-grid"><table>';
+        for (const entry of lines) {
+          const ln = entry[0];
+          const ct = entry[1];
+          const src = entry.length > 2 ? entry[2] : '';
+          const cls = heatClass(ct, maxCt);
+          const ctLabel = ct < 0 ? '' : ct > 0 ? esc(String(ct)) + '\u00d7' : '\u2014';
+          grid += `<tr class="${cls}">`;
+          grid += `<td class="ln"><a href="${ghBase}#L${ln}" style="color:inherit">${ln}</a></td>`;
+          grid += `<td class="ct">${ctLabel}</td>`;
+          grid += `<td class="src"><code>${synRust(src)}</code></td>`;
+          grid += `</tr>`;
+        }
+        grid += '</table></div>';
+        linesRow.querySelector('td').innerHTML = grid;
+        linesRow.style.display = '';
+      } else {
+        linesRow.style.display = 'none';
+      }
+    }
+
+    function renderMutantsData(data) {
+      const s = data.summary || {};
+      const survivors = data.survivors || [];
+      const tested = (s.caught || 0) + (s.missed || 0) + (s.timeout || 0);
+      const killPct = tested > 0 ? ((s.caught / tested) * 100).toFixed(1) : '—';
+      const killColor = tested > 0
+        ? (s.caught / tested >= 0.8 ? 'var(--green)' : s.caught / tested >= 0.5 ? 'var(--yellow)' : 'var(--red)')
+        : 'var(--fg-dim)';
+
+      // Kill rate trend from index history.
+      let trendHtml = '';
+      if (mutantsIndex.length > 1) {
+        const mutSlice = mutantsIndex.filter(e => e.caught != null).slice(0, 15);
+        const history = mutSlice.map(e => {
+            const t = (e.caught || 0) + (e.missed || 0) + (e.timeout || 0);
+            return t > 0 ? (e.caught / t * 100) : 0;
+          }).reverse();
+        const mutLabels = mutSlice.map(e => e.sha ? e.sha.slice(0, 7) : '?').reverse();
+
+        if (history.length >= 2) {
+          const latest = history[history.length - 1];
+          const prev = history[history.length - 2];
+          const d = latest - prev;
+          const dArrow = d > 0.5 ? '\u2191' : d < -0.5 ? '\u2193' : '';
+          const dColor = d > 0.5 ? 'var(--green)' : d < -0.5 ? 'var(--red)' : 'var(--fg-dim)';
+          const chart = minichart(history, { color: killColor, width: 80, height: 18, labels: mutLabels, suffix: '%' });
+          trendHtml = `<span class="stat"><span class="num" style="color:${dColor}">${dArrow}${d > 0 ? '+' : ''}${d.toFixed(1)}%</span><span class="label">trend</span>${chart}</span>`;
+        }
+      }
+
+      let html = '<div class="section-headline">';
+      html += `<span class="stat stat--lead"><span class="num" style="color:${killColor}">${killPct}%</span><span class="label">kill rate</span></span>`;
+      html += `<span class="stat"><span class="num" style="color:var(--green)">${esc(String(s.caught || 0))}</span><span class="label">caught</span></span>`;
+      html += `<span class="stat"><span class="num" style="color:var(--red)">${esc(String(s.missed || 0))}</span><span class="label">missed</span></span>`;
+      if (s.timeout) html += `<span class="stat"><span class="num" style="color:var(--yellow)">${esc(String(s.timeout))}</span><span class="label">timeout</span></span>`;
+      html += `<span class="stat"><span class="num">${esc(String(s.unviable || 0))}</span><span class="label">unviable</span></span>`;
+      if (trendHtml) html += trendHtml;
+      html += '</div>';
+
+      if (survivors.length > 0) {
+        const sha = data.sha;
+
+        // --- Survivor patterns (by mutation type) ---
+        const patternMap = new Map();
+        for (const m of survivors) {
+          const desc = m.name.includes(':') ? m.name.split(': ').slice(1).join(': ') : m.name;
+          // Extract the mutation pattern: "replace X with Y in fn" → "replace X with Y"
+          const pattern = desc.replace(/ in .+$/, '');
+          patternMap.set(pattern, (patternMap.get(pattern) || 0) + 1);
+        }
+        const patterns = [...patternMap.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 8);
+
+        // --- Survivors per module ---
+        // We need both caught and missed per module. Survivors give us missed;
+        // we approximate caught from the summary if available.
+        const modSurvivors = new Map();
+        for (const m of survivors) {
+          const mod = m.file.replace(/^src\//, '').split('/')[0];
+          modSurvivors.set(mod, (modSurvivors.get(mod) || 0) + 1);
+        }
+        const moduleStats = [...modSurvivors.entries()]
+          .map(([mod, missed]) => ({ mod, missed }))
+          .sort((a, b) => b.missed - a.missed);
+
+        // --- Coverage vs mutation cross-reference ---
+        // If coverage data is loaded, find modules with high coverage
+        // but many surviving mutants.
+        const crossRef = [];
+        if (covData && covData.modules) {
+          for (const cm of covData.modules) {
+            const missed = modSurvivors.get(cm.name) || 0;
+            if (missed > 0 && cm.percent >= 50) {
+              crossRef.push({ mod: cm.name, coverage: cm.percent, missed });
+            }
+          }
+          crossRef.sort((a, b) => b.missed - a.missed);
+        }
+
+        // --- Render insights ---
+        html += '<div class="mutants-insights">';
+
+        // Patterns
+        if (patterns.length > 0) {
+          const maxP = patterns[0][1];
+          html += '<div class="cov-insight"><h4>Survivor patterns</h4><ul class="cov-insight-list">';
+          for (const [pat, count] of patterns) {
+            const pct = (count / maxP * 100).toFixed(0);
+            html += `<li>
+              <span>${esc(pat)}</span>
+              <span style="display:flex;gap:6px;align-items:center">
+                <span class="bar-wrap"><span class="bar-fill" style="width:${pct}%;background:var(--red)"></span></span>
+                <span style="font-variant-numeric:tabular-nums;min-width:2em;text-align:right">${count}</span>
+              </span>
+            </li>`;
+          }
+          html += '</ul></div>';
+        }
+
+        // Module kill rates
+        if (moduleStats.length > 0) {
+          html += '<div class="cov-insight"><h4>Survivors by module</h4><ul class="cov-insight-list">';
+          const maxM = moduleStats[0].missed;
+          for (const ms of moduleStats.slice(0, 6)) {
+            const pct = (ms.missed / maxM * 100).toFixed(0);
+            html += `<li>
+              <span>${esc(ms.mod)}</span>
+              <span style="display:flex;gap:6px;align-items:center">
+                <span class="bar-wrap"><span class="bar-fill" style="width:${pct}%;background:var(--red)"></span></span>
+                <span style="font-variant-numeric:tabular-nums;min-width:2em;text-align:right">${ms.missed}</span>
+              </span>
+            </li>`;
+          }
+          html += '</ul></div>';
+        }
+
+        // Coverage cross-reference
+        if (crossRef.length > 0) {
+          html += '<div class="cov-insight"><h4>High coverage, low kill rate</h4><ul class="cov-insight-list">';
+          for (const cr of crossRef.slice(0, 5)) {
+            html += `<li>
+              <span>${esc(cr.mod)}</span>
+              <span><span class="tag tag-cold">${cr.coverage.toFixed(0)}% cov</span> <span class="tag tag-ct">${cr.missed} missed</span></span>
+            </li>`;
+          }
+          html += '</ul></div>';
+        }
+
+        html += '</div>';
+
+        // --- Group survivors by function (existing table) ---
+        const groups = new Map();
+        for (const m of survivors) {
+          const key = `${m.file}::${m.function || ''}`;
+          if (!groups.has(key)) {
+            groups.set(key, { file: m.file, function: m.function, line: m.line, mutants: [] });
+          }
+          const desc = m.name.includes(':') ? m.name.split(': ').slice(1).join(': ') : m.name;
+          groups.get(key).mutants.push(desc);
+        }
+
+        // Sort by count descending.
+        const sorted = [...groups.values()].sort((a, b) => b.mutants.length - a.mutants.length);
+
+        html += `<table class="mutants-table">
+          <thead><tr>
+            <th>Function</th>
+            <th>Survivors</th>
+          </tr></thead><tbody>`;
+
+        for (const g of sorted) {
+          const ghLink = sha
+            ? `https://github.com/${REPO}/blob/${esc(sha)}/${esc(g.file)}#L${g.line}`
+            : '#';
+          const fnName = g.function || g.file;
+          const fileLoc = `${g.file.replace(/^src\//, '')}:${g.line}`;
+          const details = g.mutants.map(d => `<li>${esc(d)}</li>`).join('');
+          html += `<tr class="expandable" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? '' : 'none'">
+            <td class="mutant-name"><span class="chevron">&#9654;</span> ${esc(fnName)}<a href="${ghLink}" class="mutant-loc-suffix" onclick="event.stopPropagation()">${esc(fileLoc)}</a></td>
+            <td style="text-align:right;font-variant-numeric:tabular-nums">${g.mutants.length}</td>
+          </tr>`;
+          html += `<tr style="display:none"><td colspan="2"><ul class="mutant-detail-list">${details}</ul></td></tr>`;
+        }
+        html += '</tbody></table>';
+      }
+
+      return html;
+    }
+
+    function renderCtData(dudect, tacetData, ctgrindData) {
+      const dResults = dudect ? (dudect.results || []) : [];
+      const tResults = tacetData ? (tacetData.results || []) : [];
+
+      let html = '';
+
+      if (dResults.length === 0 && tResults.length === 0) {
+        html += '<h4 style="margin:0 0 8px">DudeCT + Tacet (statistical)</h4>';
+        html += '<p class="empty" style="margin:0 0 24px">Awaiting first run.</p>';
+      }
+
+      // Merge: build a per-function row with dudect + tacet columns.
+      const funcs = new Map();
+      for (const r of dResults) {
+        funcs.set(r.name, { name: r.name, dudect: r, tacet: {} });
+      }
+      for (const r of tResults) {
+        const existing = funcs.get(r.name);
+        if (existing) {
+          existing.tacet[r.model] = r;
+        } else {
+          funcs.set(r.name, { name: r.name, dudect: null, tacet: { [r.model]: r } });
+        }
+      }
+
+      if (funcs.size > 0) {
+      const anyFail = dResults.some(r => r.status === 'fail') || tResults.some(r => r.status === 'fail');
+      const summaryColor = anyFail ? 'var(--red)' : 'var(--green)';
+      const failCount = dResults.filter(r => r.status === 'fail').length + tResults.filter(r => r.status === 'fail').length;
+      const summaryText = anyFail ? failCount + ' FAIL' : 'PASS';
+
+      html += '<div class="section-headline">';
+      html += `<span class="stat stat--lead"><span class="num" style="color:${summaryColor}">${summaryText}</span></span>`;
+      html += `<span class="stat"><span class="num">${funcs.size}</span><span class="label">functions</span></span>`;
+      if (dResults.length) html += `<span class="stat"><span class="num">${dResults.length}</span><span class="label">DudeCT</span></span>`;
+      if (tResults.length) html += `<span class="stat"><span class="num">${tResults.length}</span><span class="label">Tacet</span></span>`;
+      html += '</div>';
+      // Collect tacet model names from data.
+      const tacetModels = [...new Set(tResults.map(r => r.model))];
+      const modelLabels = {
+        shared_hw: 'Shared HW',
+        pq_sentinel: 'PQ sentinel',
+        adjacent: 'Adjacent',
+      };
+      const modelTips = {
+        shared_hw: 'Same CPU: cache + branch predictor',
+        pq_sentinel: 'Quantum-assisted side channel',
+        adjacent: 'Co-located, no shared microarch',
+      };
+
+      // Column headers: Function | DudeCT | Tacet models...
+      // Two header rows: top labels + bottom explainers.
+      // Always show both tool groups — "no data" when a tool hasn't run.
+
+      html += '<table class="dudect-table"><thead>';
+      // Top row: group headers.
+      html += '<tr>';
+      html += '<th rowspan="2" style="vertical-align:bottom">Function</th>';
+      html += `<th colspan="2" style="text-align:center;border-bottom:none">DudeCT</th>`;
+      if (tacetModels.length > 0) {
+        html += `<th colspan="${tacetModels.length}" style="text-align:center;border-bottom:none">Tacet</th>`;
+      }
+      html += '</tr>';
+      // Bottom row: column details — all right-aligned to match data.
+      html += '<tr>';
+      html += '<th style="text-align:right">|t| stat</th>';
+      html += '<th style="text-align:right">samples</th>';
+      for (let mi = 0; mi < tacetModels.length; mi++) {
+        const m = tacetModels[mi];
+        const label = modelLabels[m] || m;
+        html += `<th style="text-align:right">${esc(label)}</th>`;
+      }
+      html += '</tr></thead><tbody>';
+
+      // Sort: failures first, then by |t| descending.
+      const sorted = [...funcs.values()].sort((a, b) => {
+        const aFail = (a.dudect && a.dudect.status === 'fail') || Object.values(a.tacet).some(t => t.status === 'fail');
+        const bFail = (b.dudect && b.dudect.status === 'fail') || Object.values(b.tacet).some(t => t.status === 'fail');
+        if (aFail !== bFail) return aFail ? -1 : 1;
+        const aT = a.dudect ? Math.abs(a.dudect.max_t || 0) : 0;
+        const bT = b.dudect ? Math.abs(b.dudect.max_t || 0) : 0;
+        return bT - aT;
+      });
+
+      for (const fn of sorted) {
+        const searchUrl = `https://github.com/${REPO}/search?q=${encodeURIComponent(fn.name)}&type=code`;
+        html += `<tr><td class="fn-name"><a href="${searchUrl}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:2px">${esc(fn.name)}</a></td>`;
+
+        // DudeCT columns (always shown).
+        const d = fn.dudect;
+        if (d) {
+          const absT = Math.abs(d.max_t || 0);
+          const cls = d.status === 'fail' ? 'dudect-fail' : 'dudect-pass';
+          html += `<td class="${cls}">${absT.toFixed(2)}</td>`;
+          html += `<td>${d.samples ? d.samples.toLocaleString() : '\u2014'}</td>`;
+        } else {
+          html += '<td style="color:var(--fg-dim)">pending</td>';
+          html += '<td style="color:var(--fg-dim)">pending</td>';
+        }
+
+        // Tacet columns: show leak probability.
+        for (let mi = 0; mi < tacetModels.length; mi++) {
+          const m = tacetModels[mi];
+          const t = fn.tacet[m];
+          if (!t) {
+            html += '<td style="color:var(--fg-dim)">\u2014</td>';
+          } else if (t.status === 'skip' || t.leak_prob == null) {
+            html += '<td style="color:var(--fg-dim)">pending</td>';
+          } else {
+            const lp = (t.leak_prob * 100).toFixed(1) + '%';
+            const cls = t.status === 'fail' ? 'dudect-fail' : 'dudect-pass';
+            html += `<td class="${cls}">${lp}</td>`;
+          }
+        }
+
+        html += '</tr>';
+      }
+
+      html += '</tbody></table>';
+      } // end if (funcs.size > 0)
+
+      // ctgrind: Valgrind-based secret taint tracking.
+      if (ctgrindData) {
+        const cColor = ctgrindData.status === 'pass' ? 'var(--green)' : 'var(--red)';
+        const cIcon = ctgrindData.status === 'pass' ? '\u2714' : '\u2718';
+        html += `<h4 style="margin:24px 0 8px">ctgrind (Valgrind taint tracking)</h4>`;
+        html += `<p style="font-size:12px;color:var(--fg-dim);margin:0 0 8px">Marks secret data as undefined via crabgrind, runs under Valgrind. Detects any branch or memory access that depends on secret values.</p>`;
+        html += `<div style="font-size:14px;font-weight:700;color:${cColor};margin-bottom:8px">${cIcon} ${ctgrindData.tests || 0} tests, ${ctgrindData.errors || 0} errors</div>`;
+        const tests = ctgrindData.tests_detail || ctgrindData.results || [];
+        if (tests.length > 0) {
+          html += '<table class="dudect-table"><thead><tr><th>Test</th><th>Result</th></tr></thead><tbody>';
+          for (const t of tests) {
+            const icon = t.status === 'pass' ? '\u2714' : '\u2718';
+            const cls = t.status === 'pass' ? 'dudect-pass' : 'dudect-fail';
+            const ctgrindLink = `https://github.com/${REPO}/search?q=${encodeURIComponent(t.name)}&type=code`;
+            html += `<tr><td class="fn-name"><a href="${ctgrindLink}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;text-decoration-color:var(--border);text-underline-offset:2px">${esc(t.name)}</a></td><td class="${cls}">${icon}</td></tr>`;
+          }
+          html += '</tbody></table>';
+        }
+      }
+
+      return html;
+    }
+
+    let benchUnit = 'µs'; // default unit
+    let benchSortAsc = true; // sort by time ascending
+    const BENCH_UNITS = {
+      'ns':  { divisor: 1,             label: 'ns',  decimals: 0 },
+      'µs':  { divisor: 1_000,         label: '\u00b5s', decimals: 2 },
+      'ms':  { divisor: 1_000_000,     label: 'ms',  decimals: 3 },
+      's':   { divisor: 1_000_000_000, label: 's',   decimals: 4 },
+    };
+
+    let lastBenchData = null;
+
+    function cycleBenchUnit() {
+      const keys = Object.keys(BENCH_UNITS);
+      benchUnit = keys[(keys.indexOf(benchUnit) + 1) % keys.length];
+      if (lastBenchData) {
+        document.getElementById('bench-content').innerHTML = renderBenchmarkData(lastBenchData);
+      }
+    }
+
+    function toggleBenchSort() {
+      benchSortAsc = !benchSortAsc;
+      if (lastBenchData) {
+        document.getElementById('bench-content').innerHTML = renderBenchmarkData(lastBenchData);
+      }
+    }
+
+    function formatTime(ns) {
+      const u = BENCH_UNITS[benchUnit];
+      return `${(ns / u.divisor).toFixed(u.decimals)} ${u.label}`;
+    }
+
+    function renderPlatformData(data) {
+      const platforms = data.platforms || [];
+      if (platforms.length === 0) return '<p class="empty">No data for this commit.</p>';
+
+      let html = '<div class="audit-grid">';
+      for (const p of platforms) {
+        const color = p.status === 'pass' ? 'var(--green)' : p.status === 'fail' ? 'var(--red)' : 'var(--fg-dim)';
+        const icon = p.status === 'pass' ? '\u2714' : p.status === 'fail' ? '\u2718' : '\u2014';
+        html += `<div class="audit-badge">
+          <div class="badge-status" style="color:${color}">${icon}</div>
+          <div class="badge-label">${esc(p.backend || p.name)}</div>
+          <div class="badge-detail">${esc(p.target || '')}</div>
+        </div>`;
+      }
+      html += '</div>';
+      return html;
+    }
+
+    function renderInstructionsData(data, index) {
+      const results = data.results || [];
+      if (results.length === 0) return '<p class="empty">No data for this commit.</p>';
+
+      // Per-bench instruction-count trend from the index history \u2014 the
+      // {name: instructions} maps ci-upload stores per commit. Oldest-first,
+      // last 15 commits; self-normalized so each bench's own scale is fine.
+      const idx = index || [];
+      const trend = (name) => {
+        const pts = idx.filter(e => e.results && e.results[name] > 0).slice(0, 15);
+        if (pts.length < 2) return '\u2014';
+        const vals = pts.map(e => e.results[name]).reverse();
+        const labels = pts.map(e => (e.sha || '?').slice(0, 7)).reverse();
+        return minichart(vals, { color: 'var(--fg-muted)', labels, width: 80, height: 18, decimals: 0 });
+      };
+
+      let html = `<table class="dudect-table">
+        <thead><tr>
+          <th>Function</th>
+          <th>Instructions</th>
+          <th>Trend</th>
+          <th>Est. cycles</th>
+          <th>L1 misses</th>
+          <th>L2 misses</th>
+          <th>Branch misses</th>
+          <th>Flame</th>
+        </tr></thead><tbody>`;
+
+      for (const r of results) {
+        const fmt = (v) => v != null ? esc(String(v)) : '\u2014';
+        // Own-site SVG renders directly; opens full-size in a new tab.
+        const flame = r.flamegraph
+          ? `<a href="${esc(r.flamegraph)}" target="_blank" rel="noopener" title="sampled flamegraph">\u{1F525}</a>`
+          : '\u2014';
+        html += `<tr>
+          <td class="fn-name">${esc(r.name)}</td>
+          <td>${fmt(r.instructions)}</td>
+          <td>${trend(r.name)}</td>
+          <td>${fmt(r.estimated_cycles)}</td>
+          <td>${fmt(r.l1_misses)}</td>
+          <td>${fmt(r.l2_misses)}</td>
+          <td>${fmt(r.branch_misses)}</td>
+          <td>${flame}</td>
+        </tr>`;
+      }
+
+      html += '</tbody></table>';
+      return html;
+    }
+
+    function renderCyclesData(data, index) {
+      const results = data.results || [];
+      if (results.length === 0) return '<p class="empty">No data for this commit.</p>';
+
+      // Per-bench cycle-count trend from the index history \u2014 the
+      // {name: cycles} maps ci-upload stores per commit. Oldest-first,
+      // last 15 commits; self-normalized so each bench's own scale is fine.
+      const idx = index || [];
+      const trend = (name) => {
+        const pts = idx.filter(e => e.results && e.results[name] > 0).slice(0, 15);
+        if (pts.length < 2) return '\u2014';
+        const vals = pts.map(e => e.results[name]).reverse();
+        const labels = pts.map(e => (e.sha || '?').slice(0, 7)).reverse();
+        return minichart(vals, { color: 'var(--fg-muted)', labels, width: 80, height: 18, decimals: 0 });
+      };
+
+      let html = `<table class="dudect-table">
+        <thead><tr>
+          <th>Function</th>
+          <th>Cycles (median)</th>
+          <th>Trend</th>
+          <th>Mean</th>
+          <th>\u03c3</th>
+        </tr></thead><tbody>`;
+
+      for (const r of results) {
+        const fmt = (v) => v != null ? esc(v.toLocaleString()) : '\u2014';
+        html += `<tr>
+          <td class="fn-name">${esc(r.name)}</td>
+          <td>${fmt(r.cycles)}</td>
+          <td>${trend(r.name)}</td>
+          <td>${fmt(r.mean_cycles)}</td>
+          <td>${fmt(r.std_dev_cycles)}</td>
+        </tr>`;
+      }
+
+      html += '</tbody></table>';
+      return html;
+    }
+
+    // Test-vector suites in display order, matching the suite names
+    // kat-report.rs emits (one per integration-test binary).
+    const KAT_SUITES = [
+      { key: 'wycheproof', name: 'Wycheproof',
+        desc: 'C2SP negative and robustness vectors — all 12 ML-KEM files' },
+      { key: 'acvp', name: 'NIST ACVP',
+        desc: 'FIPS 203 known-answer tests (keyGen + encapDecap, all parameter sets)' },
+      { key: 'interop', name: 'Interop',
+        desc: 'Cross-implementation agreement: libcrux (formally verified) and the BoringSSL oracle' },
+    ];
+
+    // True when a test was annotated #[ignore] (or otherwise didn't run).
+    function katIsIgnored(t) {
+      return t.status === 'ignored' || t.status === 'skip';
+    }
+
+    // Compact pass/fail/ignored counts and a one-line badge for a family.
+    function katFamilyCounts(tests) {
+      let pass = 0, fail = 0, ign = 0;
+      for (const t of tests) {
+        if (t.status === 'pass') pass++;
+        else if (t.status === 'fail') fail++;
+        else if (katIsIgnored(t)) ign++;
+      }
+      return { pass, fail, ign, total: tests.length };
+    }
+
+    // Inline badge for headline ledger and family header. Returns
+    // { html, status } \u2014 `status` drives the line's color via CSS class.
+    function katBadge(c) {
+      if (c.total === 0) return { html: '\u2014', status: 'none' };
+      if (c.fail > 0) {
+        return { html: `<span class="accent">${c.pass}</span>/${c.pass + c.fail} \u2718${c.ign ? ` <span style="color:var(--fg-dim)">+${c.ign} ign</span>` : ''}`, status: 'fail' };
+      }
+      if (c.ign === c.total) return { html: `${c.total} ignored`, status: 'ignored' };
+      const ranTotal = c.pass + c.fail;
+      if (c.ign > 0) return {
+        html: `<span class="accent">${c.pass}</span>/${ranTotal} \u2714 <span style="color:var(--fg-dim)">+${c.ign} ign</span>`,
+        status: 'pass',
+      };
+      return { html: `<span class="accent">${c.pass}</span>/${c.total} \u2714`, status: 'pass' };
+    }
+
+    function katBadgeColor(status) {
+      if (status === 'pass') return 'var(--plate-pass)';
+      if (status === 'fail') return 'var(--plate-fail)';
+      return 'var(--fg-muted)';
+    }
+
+    // One suite card: heading, description, status badge, and a per-test
+    // list in the expandable body.
+    function renderKatFamily(fam, tests) {
+      const c = katFamilyCounts(tests);
+      const badge = katBadge(c);
+      const badgeColor = katBadgeColor(badge.status);
+
+      let html = `<article class="plate-family" data-open="false">`;
+      html += `<header class="plate-family-header" onclick="this.parentElement.dataset.open = this.parentElement.dataset.open === 'true' ? 'false' : 'true'">`;
+      html += `<div>`;
+      html += `<h3 class="plate-family-name">${esc(fam.name)}</h3>`;
+      html += `<p class="plate-family-desc">${esc(fam.desc)}</p>`;
+      html += `</div>`;
+      html += `<div class="plate-family-badge" style="color:${badgeColor}">${badge.html}<span class="plate-family-chev">\u25be</span></div>`;
+      html += `</header>`;
+
+      html += `<div class="plate-family-body">`;
+      html += `<table class="plate-test-list"><thead><tr><th>Test</th><th>Status</th></tr></thead><tbody>`;
+      for (const t of tests) {
+        let label, cls;
+        if (t.status === 'pass') { label = 'pass'; cls = 'pass'; }
+        else if (t.status === 'fail') { label = 'fail'; cls = 'fail'; }
+        else { label = 'ignored'; cls = 'ignored'; }
+        html += `<tr><td>${esc(t.name)}</td><td class="${cls}">${label}</td></tr>`;
+      }
+      html += `</tbody></table>`;
+      html += `</div></article>`;
+      return html;
+    }
+
+    function renderKatData(data) {
+      const suites = data.suites || [];
+      const suiteTests = Object.fromEntries(
+        KAT_SUITES.map(s => [s.key, (suites.find(x => x.name === s.key) || {}).tests || []])
+      );
+
+      const wycheSuite = suites.find(s => s.name === 'wycheproof');
+      const wycheTests = suiteTests.wycheproof;
+      const wycheC = katFamilyCounts(wycheTests);
+
+      // Headline: one stat per suite. No `.stat--lead` — suite fractions
+      // are peers, not subordinate to a glance figure.
+      const fmtFamilyStat = (label, c) => {
+        if (c.total === 0) return '';
+        let color;
+        if (c.fail > 0) {
+          color = 'var(--red)';
+        } else if (c.pass === 0) {
+          color = 'var(--fg-muted)';
+        } else {
+          color = 'var(--green)';
+        }
+        const dimHtml = c.ign > 0
+          ? `<span style="color:var(--fg-dim);font-weight:400"> +${c.ign} ign</span>`
+          : '';
+        return `<span class="stat"><span class="num"><span style="color:${color}">${c.pass}/${c.total}</span>${dimHtml}</span><span class="label">${esc(label)}</span></span>`;
+      };
+      const headlineParts = KAT_SUITES
+        .map(s => fmtFamilyStat(s.key, katFamilyCounts(suiteTests[s.key])))
+        .filter(Boolean);
+
+      let html = '';
+      if (headlineParts.length > 0) {
+        html += '<div class="section-headline">' + headlineParts.join('') + '</div>';
+      }
+
+      // ---- Per-suite cards (acvp + interop) + Wycheproof detail card ----
+      html += '<div class="plate-families">';
+      for (const fam of KAT_SUITES) {
+        if (fam.key === 'wycheproof') continue; // rendered as the detail card below
+        const tests = suiteTests[fam.key];
+        if (tests.length === 0) continue;
+        html += renderKatFamily(fam, tests);
+      }
+
+      const vectorFiles = wycheSuite ? (wycheSuite.vector_files || []) : [];
+      const allWychePassed = wycheTests.length > 0 && wycheTests.every(t => t.status === 'pass');
+
+      if (wycheSuite) {
+        const b = katBadge(wycheC);
+        const vectors = wycheSuite.vectors || 0;
+        html += '<div class="plate-wycheproof">';
+        html += `<div class="plate-wycheproof-header">`;
+        html += `<h4>Wycheproof${vectors ? ` <span class="plate-wycheproof-vectors">(${vectors} vectors)</span>` : ''}</h4>`;
+        html += `<span class="plate-wycheproof-badge" style="color:${katBadgeColor(b.status)}">${b.html}</span>`;
+        html += `</div>`;
+        html += `<p class="plate-wycheproof-intro">Negative and robustness vectors in C2SP/wycheproof JSON format. The runner asserts each vector matches its declared <code>result</code>.</p>`;
+
+        if (vectorFiles.length > 0) {
+          for (const vf of vectorFiles) {
+            const name = vf.file || '?';
+            const label = name.replace(/_test$/, '').replace(/_/g, ' ');
+            const total = (vf.vectors || []).length;
+            html += `<div class="plate-wycheproof-file" onclick="(function(t){const n=t.nextElementSibling;n.style.display=n.style.display==='none'?'':'none';})(this)">`;
+            html += `<span class="label">${esc(label)}</span>`;
+            html += `<span class="leader"></span>`;
+            html += `<span class="stats">${total} vectors \u00b7 ${vf.valid || 0} accept \u00b7 ${vf.invalid || 0} reject</span>`;
+            html += `</div>`;
+            html += '<table class="plate-test-list" style="display:none;margin-bottom:6px"><thead><tr><th>test</th><th>expects</th><th>result</th></tr></thead><tbody>';
+            for (const v of (vf.vectors || [])) {
+              const expects = v.result === 'valid' ? 'accept' : v.result === 'invalid' ? 'reject' : v.result;
+              const passed = allWychePassed;
+              const cls = passed ? 'pass' : 'fail';
+              const lbl = passed ? 'pass' : 'fail';
+              html += `<tr><td>${esc(v.comment)}</td><td>${esc(expects)}</td><td class="${cls}">${lbl}</td></tr>`;
+            }
+            html += '</tbody></table>';
+          }
+        }
+        html += '</div>';
+      }
+      html += '</div>'; // .plate-families
+
+      return html;
+    }
+
+    function renderAuditsData(deny, unsafeData) {
+      // Link each badge to its Actions run (if run_id is available).
+      const fallbackUrl = `https://github.com/${REPO}/actions/workflows/audit.yml`;
+      let html = '<div class="audit-grid">';
+
+      function runUrl(data) {
+        if (data && data.run_id) return `https://github.com/${REPO}/actions/runs/${data.run_id}`;
+        return fallbackUrl;
+      }
+
+      function badgeHtml(status, label, detail, color, data) {
+        const url = runUrl(data);
+        return `<a class="audit-badge" href="${url}" target="_blank" rel="noopener">
+          <div class="badge-status"${color ? ` style="color:${color}"` : ''}>${status}</div>
+          <div class="badge-label">${label}</div>
+          ${detail ? `<div class="badge-detail">${detail}</div>` : ''}
+        </a>`;
+      }
+
+      // Collect badges with a severity for sorting (0=fail, 1=warn, 2=ok).
+      const badges = [];
+      function badge(status, label, detail, color, data, severity) {
+        badges.push({ html: badgeHtml(status, label, detail, color, data), severity: severity ?? 2 });
+      }
+
+      if (deny) {
+        const color = deny.status === 'pass' ? 'var(--green)' : 'var(--red)';
+        const icon = deny.status === 'pass' ? '\u2714' : '\u2718';
+        badge(icon, 'cargo deny', `${deny.warnings || 0} warnings, ${deny.errors || 0} errors`, color, deny, deny.status === 'pass' ? 2 : 0);
+      }
+
+      if (unsafeData) {
+        // The AVX2 / NEON kernels legitimately need intrinsics, so a
+        // nonzero count inside `algebraic` is expected; the thresholds
+        // just flag growth.
+        const color = unsafeData.total === 0 ? 'var(--green)' : unsafeData.total <= 40 ? 'var(--yellow)' : 'var(--red)';
+        const detail = (unsafeData.modules || []).filter(m => m.count > 0).map(m => m.name + ':' + m.count).join(', ') || 'none';
+        badge(unsafeData.total, 'unsafe', detail, color, unsafeData, unsafeData.total > 40 ? 0 : unsafeData.total > 0 ? 1 : 2);
+      }
+
+      // Sort: failures first, then warnings, then passing.
+      badges.sort((a, b) => a.severity - b.severity);
+      for (const b of badges) html += b.html;
+      html += '</div>';
+      return html;
+    }
+
+    // Only `mlkem` (the public keygen/encaps/decaps benches) starts
+    // expanded. Per-group choices persist in localStorage from then on.
+    const BENCH_GROUPS_OPEN_BY_DEFAULT = new Set(['mlkem']);
+
+    function benchGroupIsOpen(name) {
+      const stored = localStorage.getItem(`bench-group-open:${name}`);
+      if (stored === 'true') return true;
+      if (stored === 'false') return false;
+      return BENCH_GROUPS_OPEN_BY_DEFAULT.has(name);
+    }
+
+    function onBenchGroupToggle(el) {
+      const name = el.dataset.group;
+      if (!name) return;
+      localStorage.setItem(`bench-group-open:${name}`, String(el.open));
+    }
+
+    function renderBenchmarkData(data) {
+      lastBenchData = data;
+      const groups = data.groups || [];
+      if (groups.length === 0) return '<p class="empty">No data for this commit.</p>';
+
+      const sortArrow = benchSortAsc ? '\u25b2' : '\u25bc';
+
+      const unitSwatch = `<span style="cursor:pointer;user-select:none;border:1px solid var(--border);border-radius:3px;padding:1px 4px;font-size:10px;margin-left:4px" onclick="cycleBenchUnit()">${esc(benchUnit)}</span>`;
+      const sortSwatch = `<span style="cursor:pointer;user-select:none;font-size:10px;margin-left:4px" onclick="toggleBenchSort()" title="Sort within each group">${sortArrow}</span>`;
+      const benchLinkBase = lastBenchData.sha
+        ? `https://github.com/${REPO}/blob/${esc(lastBenchData.sha)}`
+        : null;
+
+      let html = `<div class="bench-controls">
+          <span style="font-size:12px;color:var(--fg-dim)">Unit ${unitSwatch} · Sort ${sortSwatch}</span>
+        </div>`;
+
+      // Headline library-bench trends (ML-KEM-768 keygen/encaps/decaps
+      // medians, µs) from the index history — the scalars ci-upload
+      // stores per commit.
+      let trendsHtml = '';
+      const addTrend = (key, label) => {
+        const pts = benchIndex.filter(e => e[key] > 0).slice(0, 15);
+        if (pts.length < 2) return;
+        const vals = pts.map(e => e[key] / 1e3).reverse();
+        const labels = pts.map(e => (e.sha || '?').slice(0, 7)).reverse();
+        trendsHtml += `<span style="display:inline-flex;align-items:center;gap:4px"><b>${label}</b>${minichart(vals, { color: 'var(--fg-muted)', labels, suffix: ' µs', decimals: 2, width: 90, height: 22 })}</span>`;
+      };
+      addTrend('keygen_ns', 'keygen');
+      addTrend('encaps_ns', 'encaps');
+      addTrend('decaps_ns', 'decaps');
+      if (trendsHtml) {
+        html = `<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin-bottom:12px;font-size:12px;color:var(--fg-dim)">${trendsHtml}</div>` + html;
+      }
+
+      // mlkem (the public keygen/encaps/decaps benches) is the headline
+      // group, so show it first; the rest stay alphabetical.
+      const orderedGroups = [...groups].sort((a, b) => {
+        if (a.name === 'mlkem') return -1;
+        if (b.name === 'mlkem') return 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      for (const g of orderedGroups) {
+        const benches = [...(g.benchmarks || [])].sort((a, b) =>
+          benchSortAsc ? a.time_ns - b.time_ns : b.time_ns - a.time_ns
+        );
+        if (benches.length === 0) continue;
+
+        // Headline is the median; payloads before stddev tracking only
+        // carry time_ns, so fall back to it.
+        const med = b => (b.median_ns != null ? b.median_ns : b.time_ns);
+        const times = benches.map(med);
+        const minT = Math.min(...times);
+        const maxT = Math.max(...times);
+        const open = benchGroupIsOpen(g.name) ? ' open' : '';
+        const benchFile = `benches/${esc(g.name)}.rs`;
+        const groupLink = benchLinkBase
+          ? `<a href="${benchLinkBase}/${benchFile}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px dotted var(--border)">${esc(g.name)}</a>`
+          : esc(g.name);
+
+        html += `<details class="bench-group-details" data-group="${esc(g.name)}" ontoggle="onBenchGroupToggle(this)"${open}>
+          <summary class="bench-group-summary">
+            <span class="bench-group-name">${groupLink}</span>
+            <span class="bench-group-stats">${benches.length} bench${benches.length === 1 ? '' : 'es'} · ${formatTime(minT)} – ${formatTime(maxT)}</span>
+          </summary>
+          <table class="bench-table">
+            <thead><tr>
+              <th>Benchmark</th>
+              <th>Median</th>
+              <th>± spread</th>
+              <th>Mean</th>
+              <th>Samples</th>
+            </tr></thead><tbody>`;
+
+        for (const b of benches) {
+          // Spread, mean, and samples are absent on pre-stddev payloads.
+          const hasSpread = b.fastest_ns != null && b.slowest_ns != null;
+          const spread = hasSpread ? '± ' + formatTime((b.slowest_ns - b.fastest_ns) / 2) : '—';
+          const mean = b.mean_ns != null ? formatTime(b.mean_ns) : '—';
+          const samples = b.samples != null ? b.samples.toLocaleString() : '—';
+          html += `<tr>
+            <td class="bench-name">${esc(b.name)}</td>
+            <td>${formatTime(med(b))}</td>
+            <td>${spread}</td>
+            <td>${mean}</td>
+            <td>${samples}</td>
+          </tr>`;
+        }
+
+        html += '</tbody></table></details>';
+      }
+
+      return html;
+    }
+
+    // --- Cross-analysis ---
+
+    function renderRisks(cov, mut, bench, dudect, unsafeData) {
+      const section = document.getElementById('analysis-section');
+      const el = document.getElementById('analysis-content');
+
+      // Need at least one data source.
+      if (!cov && !mut && !bench && !dudect && !unsafeData) {
+        el.innerHTML = '<p class="empty">No data for this commit.</p>';
+        return;
+      }
+
+      const sha = (cov && cov.sha) || (mut && mut.sha) || (bench && bench.sha) || '';
+      const modules = cov ? (cov.modules || []) : [];
+      const allFiles = modules.flatMap(m => (m.files || []).map(f => ({...f, module: m.name})));
+      const survivors = mut ? (mut.survivors || []) : [];
+      const benchNames = bench ? (bench.groups || []).flatMap(g => g.benchmarks.map(b => g.name + '::' + b.name)) : [];
+
+      let html = '<div class="analysis-grid">';
+
+      // Untested hot paths: functions with high hit counts AND surviving mutants.
+      if (mut && survivors.length > 0) {
+        // Build map of survivor counts per file.
+        const survivorsByFile = new Map();
+        for (const s of survivors) {
+          const key = s.file;
+          if (!survivorsByFile.has(key)) survivorsByFile.set(key, []);
+          survivorsByFile.get(key).push(s);
+        }
+
+        const hotUntested = [];
+        for (const f of allFiles) {
+          const fileSurvivors = survivorsByFile.get('src/' + f.name) || survivorsByFile.get(f.name) || [];
+          if (fileSurvivors.length === 0) continue;
+          const counts = (f.lines || []).filter(l => l[1] > 0).map(l => l[1]);
+          const maxHit = Math.max(0, ...counts);
+          if (maxHit > 100) {
+            hotUntested.push({ file: f.name, maxHit, survivors: fileSurvivors.length });
+          }
+        }
+        hotUntested.sort((a, b) => b.maxHit * b.survivors - a.maxHit * a.survivors);
+
+        if (hotUntested.length > 0) {
+          html += '<div class="cov-insight"><h4>Untested hot paths</h4><ul class="cov-insight-list">';
+          for (const h of hotUntested.slice(0, 5)) {
+            const fname = shortName(h.file);
+            const link = sha ? `https://github.com/${REPO}/blob/${esc(sha)}/src/${esc(h.file)}` : '#';
+            html += `<li>
+              <a href="${link}">${esc(fname)}</a>
+              <span><span class="tag tag-hot">${esc(String(h.maxHit))}\u00d7</span> <span class="tag tag-ct">${h.survivors} surv</span></span>
+            </li>`;
+          }
+          html += '</ul></div>';
+        }
+      }
+
+      // CT + mutant overlap: files containing BOTH a TODO(ct) marker AND
+      // surviving mutants. The TODO(ct) line and survivor lines need not
+      // coincide — the signal is that any CT fix in this file lands in
+      // code where some mutation already escapes the test suite, so the
+      // fix would itself be untested.
+      if (mut && survivors.length > 0) {
+        const ctMutantOverlap = [];
+        for (const f of allFiles) {
+          const fileSurvivors = survivors.filter(s =>
+            s.file === 'src/' + f.name || s.file === f.name);
+          if (fileSurvivors.length === 0) continue;
+          const ctLines = (f.lines || [])
+            .filter(l => l.length > 2 && /TODO\(ct\)/.test(l[2]))
+            .map(l => l[0]);
+          if (ctLines.length === 0) continue;
+          ctMutantOverlap.push({
+            file: f.name,
+            ctLines,
+            survivorLines: fileSurvivors.map(s => s.line).sort((a, b) => a - b),
+          });
+        }
+        // Most surviving mutants first; tiebreak on TODO(ct) count.
+        ctMutantOverlap.sort((a, b) =>
+          b.survivorLines.length - a.survivorLines.length ||
+          b.ctLines.length - a.ctLines.length);
+
+        if (ctMutantOverlap.length > 0) {
+          html += '<div class="cov-insight"><h4>CT + mutant overlap</h4><ul class="cov-insight-list">';
+          for (const c of ctMutantOverlap.slice(0, 5)) {
+            const fname = shortName(c.file);
+            const ghBase = sha ? `https://github.com/${REPO}/blob/${esc(sha)}/src/${esc(c.file)}` : '#';
+            const ctSummary = c.ctLines.length === 1
+              ? `TODO(ct) L${c.ctLines[0]}`
+              : `TODO(ct) ×${c.ctLines.length} (L${c.ctLines[0]}…)`;
+            const survPreview = c.survivorLines.slice(0, 3).map(n => `L${n}`).join(', ');
+            const survSuffix = c.survivorLines.length > 3 ? '…' : '';
+            const survSummary = c.survivorLines.length === 1
+              ? `1 survivor ${survPreview}`
+              : `${c.survivorLines.length} survivors ${survPreview}${survSuffix}`;
+            // Anchor the link at the first TODO(ct) line — the help text
+            // points the reader there.
+            const link = sha ? `${ghBase}#L${c.ctLines[0]}` : '#';
+            html += `<li>
+              <a href="${link}">${esc(fname)}</a>
+              <span><span class="tag tag-ct">${esc(ctSummary)}</span> <span class="tag tag-cold">${esc(survSummary)}</span></span>
+            </li>`;
+          }
+          html += '</ul></div>';
+        }
+      }
+
+      // Benchmark blind spots.
+      if (bench && benchNames.length > 0) {
+        // Hot files not covered by any benchmark name.
+        const hotFiles = allFiles
+          .map(f => {
+            const counts = (f.lines || []).filter(l => l[1] > 0).map(l => l[1]);
+            return { name: f.name, module: f.module, maxHit: Math.max(0, ...counts) };
+          })
+          .filter(f => f.maxHit > 1000)
+          .sort((a, b) => b.maxHit - a.maxHit);
+
+        // Check if any benchmark name contains the module name.
+        const benchModules = new Set(benchNames.map(n => n.split('::')[0]));
+        const unbenchedHot = hotFiles.filter(f => !benchModules.has(f.module));
+
+        if (unbenchedHot.length > 0) {
+          html += '<div class="cov-insight"><h4>Benchmark blind spots</h4><ul class="cov-insight-list">';
+          for (const f of unbenchedHot.slice(0, 5)) {
+            const fname = shortName(f.name);
+            html += `<li>
+              <span>${esc(fname)}</span>
+              <span><span class="tag tag-hot">${esc(String(f.maxHit))}\u00d7</span> <span class="tag tag-cold">no bench</span></span>
+            </li>`;
+          }
+          html += '</ul></div>';
+        }
+      }
+
+      html += '</div>';
+
+      // Module health score table.
+      const modSurvivors = new Map();
+      for (const s of survivors) {
+        const mod = s.file.replace(/^src\//, '').split('/')[0];
+        modSurvivors.set(mod, (modSurvivors.get(mod) || 0) + 1);
+      }
+
+      const healthRows = modules.map(m => {
+        const covPct = m.percent || 0;
+        const missed = modSurvivors.get(m.name) || 0;
+        const tested = mut ? ((mut.summary.caught || 0) + (mut.summary.missed || 0) + (mut.summary.timeout || 0)) : 0;
+        // Approximate module kill rate from survivors.
+        // We know missed count; estimate total mutants proportionally.
+        const totalMutants = tested > 0 ? Math.round(tested * (m.total / (cov.total.total || 1))) : 0;
+        const modKillPct = totalMutants > 0 ? Math.max(0, ((totalMutants - missed) / totalMutants) * 100) : null;
+
+        // Hot path density: fraction of lines hit > 1000x.
+        const fileLines = (m.files || []).flatMap(f => (f.lines || []).filter(l => l[1] > 0));
+        const hotLines = fileLines.filter(l => l[1] > 1000).length;
+        const hotDensity = fileLines.length > 0 ? (hotLines / fileLines.length * 100) : 0;
+
+        // Health score: weighted combination (higher = needs more attention).
+        // Low coverage, low kill rate, high hot density = high priority.
+        const covScore = Math.max(0, 100 - covPct);
+        const killScore = modKillPct !== null ? Math.max(0, 100 - modKillPct) : 0;
+        const hotScore = Math.min(100, hotDensity * 5);
+        const health = (covScore * 0.3 + killScore * 0.5 + hotScore * 0.2);
+
+        return { name: m.name, covPct, modKillPct, missed, hotDensity, health };
+      }).sort((a, b) => b.health - a.health);
+
+      if (healthRows.length > 0) {
+        html += `<table class="health-table">
+          <thead><tr>
+            <th>Module</th>
+            <th>Coverage</th>
+            <th>Survivors</th>
+            <th>Hot density</th>
+            <th>Priority</th>
+          </tr></thead><tbody>`;
+
+        const maxHealth = Math.max(1, ...healthRows.map(r => r.health));
+        for (const r of healthRows) {
+          const covCol = covColor(r.covPct);
+          const prio = (r.health / maxHealth * 100).toFixed(0);
+          const prioColor = r.health / maxHealth >= 0.7 ? 'var(--red)' : r.health / maxHealth >= 0.4 ? 'var(--yellow)' : 'var(--green)';
+          html += `<tr>
+            <td class="module-name">${esc(r.name)}</td>
+            <td style="color:${covCol}">${r.covPct.toFixed(0)}%</td>
+            <td style="color:var(--red)">${r.missed > 0 ? r.missed : '\u2014'}</td>
+            <td>${r.hotDensity.toFixed(1)}%</td>
+            <td><span class="health-bar"><span style="width:${prio}%;background:${prioColor}"></span></span>${r.health.toFixed(0)}</td>
+          </tr>`;
+        }
+        html += '</tbody></table>';
+      }
+
+      // CT failures from dudect.
+      if (dudect) {
+        const failures = (dudect.results || []).filter(r => r.status === 'fail');
+        if (failures.length > 0) {
+          html += '<div class="analysis-grid"><div class="cov-insight"><h4>CT failures (dudect)</h4><ul class="cov-insight-list">';
+          for (const f of failures) {
+            html += `<li><span>${esc(f.name)}</span><span class="tag tag-ct">|t|=${Math.abs(f.max_t).toFixed(1)}</span></li>`;
+          }
+          html += '</ul></div></div>';
+        }
+      }
+
+      // Unsafe hotspots (the SIMD kernels need intrinsics; watch growth).
+      if (unsafeData && unsafeData.total > 0) {
+        html += '<div class="analysis-grid"><div class="cov-insight"><h4>Unsafe code</h4><ul class="cov-insight-list">';
+        for (const m of (unsafeData.modules || []).filter(m => m.count > 0)) {
+          html += `<li><span>${esc(m.name)}</span><span class="tag tag-ct">${m.count}</span></li>`;
+        }
+        html += '</ul></div></div>';
+      }
+
+      el.innerHTML = html;
+    }
+
+    // --- Status banner ---
+
+    async function updateStatus() {
+      const statuses = await Promise.all([
+        fetchJson('/coverage/status.json'),
+        fetchJson(`/${kindOf('bench')}/status.json`),
+        fetchJson(`/${kindOf('mutants')}/status.json`),
+        fetchJson('/dudect/status.json'),
+        fetchJson('/tacet/status.json'),
+      ]);
+      const isBuilding = statuses.some(s => s && s.state === 'running');
+
+      // Animate the header logo when building.
+      document.querySelectorAll('.logo').forEach(el => {
+        el.classList.toggle('building', isBuilding);
+      });
+
+      // Update page title.
+      document.title = isBuilding
+        ? '\u23f3 mlkem-selkie \u00b7 CI'
+        : 'mlkem-selkie \u00b7 CI';
+
+      // Animate the favicon.
+      updateFavicon(isBuilding);
+    }
+
+    // --- Favicon animation ---
+    //
+    // Draws the logo onto a canvas with varying opacity, then pushes
+    // the result as a data URL favicon. Updates every 500ms (2fps) —
+    // fast enough for a smooth 3s breathe cycle, slow enough to avoid
+    // the jitter that comes from rapid favicon href swaps.
+
+    let faviconAnimating = false;
+    let faviconTimer = null;
+    let faviconCanvas = null;
+    let faviconImg = null;
+    let faviconReady = false;
+
+    function updateFavicon(building) {
+      const light = document.getElementById('favicon-light');
+      const dark = document.getElementById('favicon-dark');
+
+      if (!building) {
+        if (faviconTimer) {
+          clearInterval(faviconTimer);
+          faviconTimer = null;
+        }
+        if (faviconAnimating) {
+          if (light) light.href = '/favicon-32x32.png';
+          if (dark) dark.href = '/favicon-32x32-dark.png';
+          faviconAnimating = false;
+        }
+        return;
+      }
+
+      if (faviconAnimating) return;
+      faviconAnimating = true;
+
+      if (!faviconImg) {
+        faviconImg = new Image();
+        faviconImg.onload = () => { faviconReady = true; };
+        const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        faviconImg.src = isDark
+          ? '/selkie-solid-white-on-transparent.svg'
+          : '/selkie-solid-black-on-transparent.svg';
+      }
+      if (!faviconCanvas) {
+        faviconCanvas = document.createElement('canvas');
+        faviconCanvas.width = 32;
+        faviconCanvas.height = 32;
+      }
+
+      const PERIOD = 3000;
+      const start = performance.now();
+
+      faviconTimer = setInterval(() => {
+        if (!faviconReady) return;
+
+        const ctx = faviconCanvas.getContext('2d');
+        ctx.clearRect(0, 0, 32, 32);
+
+        const elapsed = performance.now() - start;
+        const phase = (elapsed % PERIOD) / PERIOD * Math.PI * 2;
+        ctx.globalAlpha = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(phase));
+
+        const nw = faviconImg.naturalWidth || 32;
+        const nh = faviconImg.naturalHeight || 32;
+        const scale = Math.min(32 / nw, 32 / nh) * 0.9;
+        const w = nw * scale;
+        const h = nh * scale;
+        ctx.drawImage(faviconImg, (32 - w) / 2, (32 - h) / 2, w, h);
+
+        const dataUrl = faviconCanvas.toDataURL('image/png');
+        if (light) light.href = dataUrl;
+        if (dark) dark.href = dataUrl;
+      }, 16);
+    }
+
+    // --- Commit nav ---
+
+    let headCommit = null; // from /head.json
+
+    function buildCommitList() {
+      // Merge coverage and bench indices into a unified commit list.
+      const map = new Map();
+
+      // Insert head commit first so the latest push appears immediately,
+      // even before any data uploads finish.
+      if (headCommit) {
+        map.set(headCommit.sha, {
+          sha: headCommit.sha,
+          updated_at: headCommit.updated_at,
+          hasCov: false, hasBench: false, hasMutants: false,
+          subject: headCommit.subject,
+          building: true,
+        });
+      }
+
+      for (const e of covIndex) {
+        const existing = map.get(e.sha);
+        if (existing) {
+          existing.hasCov = true;
+          existing.percent = e.percent;
+          if (e.subject) existing.subject = e.subject;
+          existing.building = false;
+        } else {
+          map.set(e.sha, { sha: e.sha, updated_at: e.updated_at, hasCov: true, hasBench: false, hasMutants: false, percent: e.percent, subject: e.subject });
+        }
+      }
+      for (const e of benchIndex) {
+        const existing = map.get(e.sha);
+        if (existing) {
+          existing.hasBench = true;
+          if (e.subject) existing.subject = e.subject;
+        } else {
+          map.set(e.sha, { sha: e.sha, updated_at: e.updated_at, hasCov: false, hasBench: true, hasMutants: false, subject: e.subject });
+        }
+      }
+      for (const e of mutantsIndex) {
+        const existing = map.get(e.sha);
+        if (existing) {
+          existing.hasMutants = true;
+          if (e.subject) existing.subject = e.subject;
+        } else {
+          map.set(e.sha, { sha: e.sha, updated_at: e.updated_at, hasCov: false, hasBench: false, hasMutants: true, subject: e.subject });
+        }
+      }
+      // Sort by updated_at descending.
+      return [...map.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    }
+
+    function renderCommitSelect(commits) {
+      const select = document.getElementById('commit-select');
+      select.innerHTML = '';
+      if (commits.length === 0) {
+        select.innerHTML = '<option value="">no data</option>';
+        return;
+      }
+      for (const c of commits) {
+        const opt = document.createElement('option');
+        opt.value = c.sha;
+        let label = c.sha.slice(0, 7);
+        if (c.building) label += ' \u23f3';
+        if (c.subject) label += ` ${c.subject.slice(0, 40)}`;
+        opt.textContent = label;
+        select.appendChild(opt);
+      }
+      // Select the current commit, default to first, or — for a
+      // deep-linked sha not in the recent list — add a synthetic option
+      // so the link still resolves (loadCommitData fetches it directly).
+      if (selectedSha && commits.some(c => c.sha === selectedSha)) {
+        select.value = selectedSha;
+      } else if (selectedSha) {
+        const opt = document.createElement('option');
+        opt.value = selectedSha;
+        opt.textContent = selectedSha.slice(0, 7) + ' (linked)';
+        select.insertBefore(opt, select.firstChild);
+        select.value = selectedSha;
+      } else {
+        select.value = commits[0].sha;
+        selectedSha = commits[0].sha;
+      }
+      updateCommitTime(commits);
+    }
+
+    function updateCommitTime(commits) {
+      const timeEl = document.getElementById('commit-time');
+      const c = commits.find(c => c.sha === selectedSha);
+      if (c && c.updated_at) {
+        timeEl.innerHTML = timeAgo(c.updated_at) + ' &middot; ' + commitLink(c.sha);
+      } else {
+        timeEl.textContent = '';
+      }
+    }
+
+    async function onCommitChange(sha) {
+      selectedSha = sha;
+      // Keep the URL shareable: it tracks the viewed commit.
+      history.replaceState(null, '', sha ? '?sha=' + sha : location.pathname);
+      const commits = buildCommitList();
+      updateCommitTime(commits);
+      await loadCommitData(sha, true);
+    }
+
+    // Cache for fetched data — keyed by "kind:sha". Avoids refetching
+    // data that hasn't changed between poll cycles. Capped at 200
+    // entries (~10 commits * 20 kinds) to prevent memory leaks.
+    const dataCache = new Map();
+    const DATA_CACHE_MAX = 200;
+
+    // Invalidate cache entries for a kind (all SHAs). Called when
+    // the manifest reports a new upload for that kind.
+    function invalidateKind(kind) {
+      for (const key of [...dataCache.keys()]) {
+        if (key.startsWith(kind + ':')) dataCache.delete(key);
+      }
+    }
+
+    async function fetchKind(kind, sha) {
+      const cacheKey = `${kind}:${sha}`;
+      if (dataCache.has(cacheKey)) return dataCache.get(cacheKey);
+      let data = await fetchJson(`/${kind}/${sha}.json`);
+      // For infrequently-run data (mutants, CT, instructions, etc.), fall back
+      // to latest.json so the dashboard isn't empty for most commits.
+      if (!data) {
+        data = await fetchJson(`/${kind}/latest.json`);
+        if (data) data._stale = true;
+      }
+      if (data) {
+        dataCache.set(cacheKey, data);
+        if (dataCache.size > DATA_CACHE_MAX) {
+          const first = dataCache.keys().next().value;
+          dataCache.delete(first);
+        }
+      }
+      return data;
+    }
+
+    async function loadCommitData(sha, force) {
+      const covEl = document.getElementById('coverage-content');
+      const covMeta = document.getElementById('coverage-meta');
+      const benchEl = document.getElementById('bench-content');
+      const benchMeta = document.getElementById('bench-meta');
+      const mutEl = document.getElementById('mutants-content');
+      const mutMeta = document.getElementById('mutants-meta');
+      const dudectEl = document.getElementById('dudect-content');
+      const dudectMeta = document.getElementById('dudect-meta');
+
+      // Fetch all kinds in parallel, using the cache to skip unchanged data.
+      // The matrixed families fetch their selected backend/arch variant.
+      const [cov, bench, mut, dudect, tacetData, deny, unsafeData, instructionsData, cyclesData, platformData, ctgrindData, katData] = await Promise.all([
+        fetchKind('coverage', sha),
+        fetchKind(kindOf('bench'), sha),
+        fetchKind(kindOf('mutants'), sha),
+        fetchKind('dudect', sha),
+        fetchKind('tacet', sha),
+        fetchKind('deny', sha),
+        fetchKind('unsafe', sha),
+        fetchKind(kindOf('instructions'), sha),
+        fetchKind(kindOf('cycles'), sha),
+        fetchKind('platform', sha),
+        fetchKind('ctgrind', sha),
+        fetchKind('kat', sha),
+      ]);
+
+      // Only re-render a section if the commit changed or the data
+      // SHA changed (new upload arrived). This preserves UI state
+      // like expanded modules and scroll positions.
+      const shaChanged = force || sha !== renderedForSha;
+      renderedForSha = sha;
+
+      const covSha = cov && cov.sha;
+      if (cov && (shaChanged || covSha !== renderedCov)) {
+        const covPrev = covIndex.length >= 2 ? covIndex[1].percent : null;
+        const covDelta = delta(cov.total.percent, covPrev, { suffix: '%' });
+        covMeta.innerHTML = `${esc(cov.total.covered)}/${esc(cov.total.total)} lines${covDelta}` + runLink(cov) + staleTag(cov);
+        covEl.innerHTML = renderCoverageData(cov);
+        applyStale(covEl, cov);
+        renderedCov = covSha;
+      } else if (!cov && renderedCov !== null) {
+        covMeta.textContent = '';
+        covEl.innerHTML = '<p class="empty">No data for this commit.</p>';
+        renderedCov = null;
+      }
+
+      const benchSha = bench && bench.sha;
+      if (bench && (shaChanged || benchSha !== renderedBench)) {
+        benchMeta.innerHTML = runLink(bench) + staleTag(bench);
+        benchEl.innerHTML = renderBenchmarkData(bench);
+        applyStale(benchEl, bench);
+        renderedBench = benchSha;
+      } else if (!bench && renderedBench !== null) {
+        benchMeta.textContent = '';
+        benchEl.innerHTML = '<p class="empty">No data for this commit.</p>';
+        renderedBench = null;
+      }
+
+      const mutSha = mut && mut.sha;
+      if (mut && (shaChanged || mutSha !== renderedMut)) {
+        const s = mut.summary || {};
+        const tested = (s.caught || 0) + (s.missed || 0) + (s.timeout || 0);
+        const mutPrevEntry = mutantsIndex.length >= 2 ? mutantsIndex[1] : null;
+        const mutPrevCaught = mutPrevEntry ? (mutPrevEntry.caught || 0) : null;
+        const mutDelta = delta(s.caught || 0, mutPrevCaught, {});
+        mutMeta.innerHTML = `${esc(String(tested))} tested${mutDelta}` + runLink(mut) + staleTag(mut);
+        mutEl.innerHTML = renderMutantsData(mut);
+        applyStale(mutEl, mut);
+        renderedMut = mutSha;
+      } else if (!mut && renderedMut !== null) {
+        mutMeta.textContent = '';
+        mutEl.innerHTML = '<p class="empty">No data for this commit.</p>';
+        renderedMut = null;
+      }
+
+      const dudectSha = dudect && dudect.sha;
+      const tacetSha = tacetData && tacetData.sha;
+      const ctChanged = shaChanged || dudectSha !== renderedDudect || tacetSha !== renderedTacet;
+      if ((dudect || tacetData || ctgrindData) && ctChanged) {
+        const dResults = dudect ? (dudect.results || []) : [];
+        const tResults = tacetData ? (tacetData.results || []) : [];
+        const fails = dResults.filter(x => x.status === 'fail').length
+          + tResults.filter(x => x.status === 'fail').length;
+        const total = new Set([...dResults.map(r => r.name), ...tResults.map(r => r.name)]).size;
+        dudectMeta.innerHTML = (fails > 0
+          ? `<span style="color:var(--red)">${fails} fail</span> / ${total} tested`
+          : `${total} pass`) + runLink(dudect) + staleTag(dudect || tacetData);
+        dudectEl.innerHTML = renderCtData(dudect, tacetData, ctgrindData);
+        const ctAnyStale = (dudect && dudect._stale)
+          || (tacetData && tacetData._stale)
+          || (ctgrindData && ctgrindData._stale);
+        dudectEl.classList.toggle('is-stale', !!ctAnyStale);
+        renderedDudect = dudectSha;
+        renderedTacet = tacetSha;
+      } else if (!dudect && !tacetData && !ctgrindData && (renderedDudect !== null || renderedTacet !== null)) {
+        dudectMeta.textContent = '';
+        dudectEl.innerHTML = '<p class="empty">No data for this commit.</p>';
+        renderedDudect = null;
+        renderedTacet = null;
+      }
+
+      // Cross-analysis — needs at least coverage + one other source.
+      renderRisks(cov, mut, bench, dudect, unsafeData);
+
+      // Cycles (rdtsc — sibling to instructions).
+      const cyclesEl = document.getElementById('cycles-content');
+      const cyclesMeta = document.getElementById('cycles-meta');
+      if (cyclesData) {
+        if (cyclesMeta) cyclesMeta.innerHTML = runLink(cyclesData) + staleTag(cyclesData);
+        cyclesEl.innerHTML = renderCyclesData(cyclesData, cyclesIndex);
+        applyStale(cyclesEl, cyclesData);
+      } else {
+        if (cyclesMeta) cyclesMeta.textContent = '';
+        cyclesEl.innerHTML = '<p class="empty">Awaiting first run.</p>';
+      }
+
+      // Audits (policy: deny, unsafe).
+      const auditsEl = document.getElementById('audits-content');
+      const auditsMeta = document.getElementById('audits-meta');
+      const auditSources = { deny, unsafeData };
+      const auditsAny = Object.values(auditSources).some(Boolean);
+      if (auditsAny) {
+        const staleEntries = Object.entries(auditSources)
+          .filter(([, v]) => v && v._stale)
+          .map(([k]) => k);
+        if (auditsMeta) {
+          auditsMeta.innerHTML = staleEntries.length === 0
+            ? ''
+            : `<span class="stale-pill" title="Stale sub-panels: ${staleEntries.join(', ')}">${staleEntries.length} STALE</span>`;
+        }
+        auditsEl.innerHTML = renderAuditsData(deny, unsafeData);
+        auditsEl.classList.toggle('is-stale', staleEntries.length > 0);
+      } else {
+        if (auditsMeta) auditsMeta.textContent = '';
+        auditsEl.innerHTML = '<p class="empty">Awaiting first run.</p>';
+      }
+
+      // Platforms.
+      const platformEl = document.getElementById('platform-content');
+      if (platformData) {
+        const p = platformData.platforms || [];
+        document.getElementById('platform-meta').innerHTML =
+          `${platformData.pass || 0}/${p.length} pass` + staleTag(platformData);
+        platformEl.innerHTML = renderPlatformData(platformData);
+        applyStale(platformEl, platformData);
+      } else {
+        platformEl.innerHTML = '<p class="empty">Awaiting first run.</p>';
+      }
+
+      // Instruction count.
+      const instructionsEl = document.getElementById('instructions-content');
+      const instructionsMeta = document.getElementById('instructions-meta');
+      if (instructionsData) {
+        if (instructionsMeta) instructionsMeta.innerHTML = staleTag(instructionsData);
+        instructionsEl.innerHTML = renderInstructionsData(instructionsData, instructionsIndex);
+        applyStale(instructionsEl, instructionsData);
+      } else {
+        if (instructionsMeta) instructionsMeta.textContent = '';
+        instructionsEl.innerHTML = '<p class="empty">Awaiting first run.</p>';
+      }
+
+      // Conformance.
+      const katEl = document.getElementById('kat-content');
+      const katMeta = document.getElementById('kat-meta');
+      if (katData) {
+        const suites = katData.suites || [];
+        const totalVectors = suites.reduce((s, x) => s + (x.vectors || 0), 0);
+        const totalFail = suites.reduce((s, x) => s + (x.fail || 0), 0);
+        katMeta.innerHTML = (totalFail > 0
+          ? `<span style="color:var(--red)">${totalFail} fail</span>`
+          : `${totalVectors} vectors`) + runLink(katData) + staleTag(katData);
+        katEl.innerHTML = renderKatData(katData);
+        applyStale(katEl, katData);
+      } else {
+        katMeta.textContent = '';
+        katEl.innerHTML = '<p class="empty">Awaiting first run.</p>';
+      }
+
+      // --- Status summary ---
+      const summary = document.getElementById('status-summary');
+      const issues = [];
+      if (dudect) {
+        const dFails = (dudect.results || []).filter(r => r.status === 'fail').length;
+        if (dFails > 0) issues.push(`${dFails} CT leak${dFails > 1 ? 's' : ''}`);
+      }
+      if (tacetData) {
+        const tFails = (tacetData.results || []).filter(r => r.status === 'fail').length;
+        if (tFails > 0) issues.push(`${tFails} tacet fail${tFails > 1 ? 's' : ''}`);
+      }
+      if (ctgrindData && ctgrindData.status !== 'pass') issues.push('ctgrind failed');
+      if (deny && deny.status !== 'pass') issues.push('cargo deny failed');
+
+      if (issues.length > 0) {
+        summary.innerHTML = `<div class="status-warn">\u26a0 ${issues.join(' \u00b7 ')}</div>`;
+        summary.style.display = '';
+      } else if (cov || dudect || ctgrindData) {
+        summary.innerHTML = '<div class="status-ok">\u2714 All checks pass</div>';
+        summary.style.display = '';
+      } else {
+        summary.style.display = 'none';
+      }
+    }
+
+    // --- Polling ---
+
+    // Refetch the trend indices for the currently-selected variants
+    // (called on manifest change and after a backend/arch toggle).
+    async function refreshIndices() {
+      const [ci, bi, mi, ii, cy] = await Promise.all([
+        fetchJson('/coverage/index.json'),
+        fetchJson(`/${kindOf('bench')}/index.json`),
+        fetchJson(`/${kindOf('mutants')}/index.json`),
+        fetchJson(`/${kindOf('instructions')}/index.json`),
+        fetchJson(`/${kindOf('cycles')}/index.json`),
+      ]);
+      covIndex = ci || [];
+      benchIndex = bi || [];
+      mutantsIndex = mi || [];
+      instructionsIndex = ii || [];
+      cyclesIndex = cy || [];
+    }
+
+    async function poll() {
+      // Try the lightweight manifest first — one request instead of 20+.
+      // Falls back to always-fetch if manifest doesn't exist yet (no
+      // uploads since this feature was added).
+      const [manifest, head] = await Promise.all([
+        fetchJson('/manifest.json'),
+        fetchJson('/head.json'),
+      ]);
+      headCommit = head;
+      const hasManifest = manifest != null;
+      const newManifest = manifest || {};
+      const manifestChanged = !hasManifest || JSON.stringify(newManifest) !== JSON.stringify(lastManifest);
+
+      // Invalidate cache for any kind whose SHA changed in the manifest.
+      if (hasManifest) {
+        for (const [kind, sha] of Object.entries(newManifest)) {
+          if (lastManifest[kind] !== sha) invalidateKind(kind);
+        }
+      }
+      lastManifest = newManifest;
+
+      // Refetch indices when manifest changed or doesn't exist.
+      if (manifestChanged) {
+        await refreshIndices();
+        const commits = buildCommitList();
+        renderCommitSelect(commits);
+      }
+
+      await updateStatus();
+
+      // Load data for the selected commit — fetchKind uses the cache
+      // to skip sections whose data hasn't changed.
+      if (selectedSha) {
+        await loadCommitData(selectedSha, manifestChanged);
+      }
+
+      // Update footer with latest data timestamp.
+      const fb = document.getElementById('footer-build');
+      if (fb && selectedSha) {
+        const commits = buildCommitList();
+        const c = commits.find(x => x.sha === selectedSha);
+        fb.textContent = c && c.updated_at
+          ? `Last updated ${timeAgo(c.updated_at)}`
+          : '';
+      }
+    }
+
+    // Initial render, then poll.
+    renderVariantToggles();
+    poll();
+    setInterval(poll, POLL_INTERVAL);
+
+    // --- Scroll-aware nav highlighting ---
+    const navLinks = document.querySelectorAll('.section-nav a');
+    const sections = [...navLinks].map(a => {
+      const id = a.getAttribute('href').slice(1);
+      return { a, el: document.getElementById(id) };
+    }).filter(s => s.el);
+
+    // A click expresses intent directly. Honor it and lock out the observer
+    // during the smooth scroll, so short sections near the page bottom — which
+    // can't scroll into the observer's band — aren't immediately overridden by
+    // the following section.
+    let observerLockUntil = 0;
+    navLinks.forEach(a => a.addEventListener('click', () => {
+      navLinks.forEach(x => x.classList.remove('active'));
+      a.classList.add('active');
+      observerLockUntil = Date.now() + 800;
+    }));
+
+    const observer = new IntersectionObserver(entries => {
+      if (Date.now() < observerLockUntil) return;
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          navLinks.forEach(a => a.classList.remove('active'));
+          const match = sections.find(s => s.el === entry.target);
+          if (match) match.a.classList.add('active');
+        }
+      });
+    }, { rootMargin: '-40% 0px -55% 0px' });
+
+    sections.forEach(s => observer.observe(s.el));
+
+    // --- Commit-step keyboard shortcuts ---
+    // [ / ← step to a newer commit (toward the top of the list).
+    // ] / → step to an older commit. Skipped when typing in an
+    // input or when a modifier is held; SELECT-focused arrow keys
+    // are handled natively via the existing onchange handler.
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const tag = (e.target.tagName || '').toUpperCase();
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return;
+
+      let dir = 0;
+      if (e.key === '[' || e.key === 'ArrowLeft') dir = -1;
+      else if (e.key === ']' || e.key === 'ArrowRight') dir = 1;
+      else return;
+
+      const select = document.getElementById('commit-select');
+      const opts = [...select.options].filter(o => o.value);
+      if (opts.length === 0) return;
+      const idx = opts.findIndex(o => o.value === selectedSha);
+      if (idx < 0) return;
+      const next = Math.max(0, Math.min(opts.length - 1, idx + dir));
+      if (next === idx) return;
+      e.preventDefault();
+      select.value = opts[next].value;
+      onCommitChange(opts[next].value);
+    });
+
+    // --- Chart tooltip ---
+    const chartTipEl = document.createElement('div');
+    chartTipEl.style.cssText = 'position:fixed;pointer-events:none;padding:3px 8px;border-radius:4px;font-size:11px;font-family:SF Mono,Menlo,Consolas,monospace;background:var(--bg-raised);border:1px solid var(--border);color:var(--fg);z-index:20;display:none;white-space:nowrap;box-shadow:var(--shadow-tooltip)';
+    document.body.appendChild(chartTipEl);
+
+    function showChartTip(e, text) {
+      chartTipEl.textContent = text;
+      chartTipEl.style.display = '';
+      chartTipEl.style.left = (e.clientX + 10) + 'px';
+      chartTipEl.style.top = (e.clientY - 28) + 'px';
+    }
+    function hideChartTip() {
+      chartTipEl.style.display = 'none';
+    }
+  </script>
+
+</body>
 </html>

@@ -1,8 +1,9 @@
 name: Deploy dashboard
 
-# Deploys the CI/status site under `.github/site/` (an nginx:alpine container)
-# to Fly, matching the sibling sqisign-selkie. The workflows publish their report
-# artifacts to the Fly volume, which nginx serves under /data/<category>/.
+# Deploys the CI dashboard under `.github/site/` (an nginx:alpine container)
+# to Fly, ported from the sibling sqisign-selkie. The workflows publish JSON
+# payloads to the Fly volume via .github/scripts/ci-upload.rs, which nginx
+# serves under /data/<kind>/.
 #
 # Requires the `FLY_API_TOKEN` repository secret and a Fly app named
 # `mlkem-selkie-ci` (see .github/site/fly.toml).

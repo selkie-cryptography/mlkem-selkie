@@ -80,6 +80,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --no-deps --document-private-items --all-features
+      - name: Publish rustdoc to dashboard
+        # One leg is plenty — rustdoc is backend-independent prose.
+        if: matrix.backend == 'portable' && github.event_name == 'push'
+        uses: ./.github/actions/ci-publish
+        with:
+          path: target/doc
+          dest: rustdoc
+          status: ok
+          summary: rustdoc (private items included)
+          landing-path: mlkem_selkie/
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}
 
   test:
     name: test (portable)
@@ -163,3 +174,88 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo bench --no-run --features expose-internals
+
+  # Re-runs the vector + interop suites under nextest for the JUnit XML the
+  # dashboard's Conformance panel is built from. Main pushes only — the
+  # same tests already gate PRs via the test jobs above.
+  vectors:
+    name: Conformance suites (dashboard)
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@nextest
+      - uses: Swatinem/rust-cache@v2
+      - name: Run vector + interop suites (JUnit)
+        run: |
+          cargo nextest run --profile vectors --cargo-profile release-checked \
+            --test wycheproof --test kats --test libcrux_xtest --test boringssl_xtest
+      - name: Build dashboard JSON
+        run: |
+          rustc -O --edition 2021 .github/scripts/kat-report.rs -o /tmp/kat-report
+          /tmp/kat-report "${{ github.sha }}" target/nextest/vectors/junit.xml > kat.json
+      - name: Verify kat payload has data
+        run: jq -e '.suites | length > 0' kat.json > /dev/null || { echo "::error::kat.json has no suites"; cat kat.json >&2; exit 1; }
+      - name: Upload to dashboard
+        if: github.event_name == 'push'
+        uses: ./.github/actions/ci-upload
+        with:
+          kind: kat
+          payload: kat.json
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}
+
+  # Census of `unsafe` lines per module (the SIMD kernels need intrinsics;
+  # the dashboard's Audits panel watches for growth).
+  unsafe-count:
+    name: unsafe usage census
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build dashboard JSON
+        run: |
+          rustc -O --edition 2021 .github/scripts/unsafe-count.rs -o /tmp/unsafe-count
+          /tmp/unsafe-count "${{ github.sha }}" > unsafe.json
+          cat unsafe.json
+      - name: Upload to dashboard
+        if: github.event_name == 'push'
+        uses: ./.github/actions/ci-upload
+        with:
+          kind: unsafe
+          payload: unsafe.json
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}
+
+  # Summarizes the per-backend test jobs above for the dashboard's
+  # Platforms panel, via the Actions REST API.
+  platform-report:
+    name: Platform matrix report
+    needs: [test, test-neon, test-avx2]
+    if: always() && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build dashboard JSON
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          rustc -O --edition 2021 .github/scripts/platform-report.rs -o /tmp/platform-report
+          /tmp/platform-report "${{ github.run_id }}" "${{ github.sha }}" > platform.json
+      - name: Verify platform payload has data
+        run: jq -e '.platforms | length > 0' platform.json > /dev/null || { echo "::error::platform.json has no jobs"; cat platform.json >&2; exit 1; }
+      - name: Upload to dashboard
+        uses: ./.github/actions/ci-upload
+        with:
+          kind: platform
+          payload: platform.json
+          fly-api-token: ${{ secrets.FLY_API_TOKEN }}
