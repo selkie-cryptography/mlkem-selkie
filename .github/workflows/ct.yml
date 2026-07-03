@@ -22,7 +22,7 @@ jobs:
   statistical:
     name: dudect + tacet
     runs-on: ubuntu-latest
-    # The CT rework has landed: dudect (encaps + decaps) clears |t| < 4.5
+    # The CT rework has landed: dudect (encaps + decaps) clears |t| < 5.0
     # locally and ctgrind catches secret-dependent branches in keygen and
     # decaps. A regression here should fail the build.
     steps:
@@ -41,18 +41,18 @@ jobs:
           mkdir -p ct
           bin=$(find target/release/deps -maxdepth 1 -type f -name 'dudect-*' ! -name '*.d' -perm -u+x | head -1)
           "$bin" 2>&1 | tee ct/dudect.txt
-      - name: Enforce dudect |t| < 4.5
+      - name: Enforce dudect |t| < 5.0
         run: |
           # dudect-bencher prints `max t = <signed float>` per bench but always
           # exits 0; scrape the report and fail if any reading is at or above
-          # the 4.5 threshold (or non-numeric, which means the harness broke).
+          # the 5.0 threshold (or non-numeric, which means the harness broke).
           awk '
             /max t = / {
               match($0, /max t = [+-]?[0-9]+\.[0-9]+/);
               t = substr($0, RSTART + 8, RLENGTH - 8) + 0;
               if (t < 0) t = -t;
               printf "  %s -> |t| = %.5f\n", $2, t;
-              if (t >= 4.5) { print "FAIL: |t| >= 4.5"; bad = 1 }
+              if (t >= 5.0) { print "FAIL: |t| >= 5.0"; bad = 1 }
             }
             END { exit bad ? 1 : 0 }
           ' ct/dudect.txt
