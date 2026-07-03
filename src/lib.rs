@@ -58,14 +58,6 @@ mod tests;
 #[cfg(feature = "ctgrind")]
 mod ctgrind;
 
-// `Eta` is intentionally not part of the public API: it's an internal type
-// whose values external callers only ever forward as
-// `<P as ParameterSet>::ETA_*`. `expose-internals` re-exposes it via the inner
-// modules for tests, benches, and KAT replay (which uses
-// `generate_derand`/`encapsulate_derand` to skip the internal randomness path
-// and consume the test-vector seed directly). Under `--features fips`, the
-// SP 800-90A Hash_DRBG-SHA3 (`src/drbg.rs`) is similarly private; only
-// exposed via the same `expose-internals` feature.
 #[cfg(feature = "mlkem512")]
 pub use parameters::MLKEM512;
 #[cfg(feature = "mlkem768")]
