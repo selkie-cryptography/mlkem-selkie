@@ -221,7 +221,7 @@ pub struct Shake128X4([keccak2::KeccakState; 2]);
 
 /// See the AVX2 variant; this holds four scalar SHAKE128 states.
 #[cfg(not(any(mlkem_selkie_arch = "avx2", mlkem_selkie_arch = "neon")))]
-pub struct Shake128X4([Shake128Xof; 4]);
+pub struct Shake128X4([Shake128Reader; 4]);
 
 impl Shake128X4 {
     /// Absorbs four 34-byte seeds (`rho ‖ j ‖ i`), one per lane.
