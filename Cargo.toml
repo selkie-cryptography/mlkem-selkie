@@ -26,27 +26,37 @@ expose-internals = []
 # dev-dependency would otherwise pull it into via `expose-internals`). Implies
 # `expose-internals` since the test reaches the internal field ops.
 ctgrind = ["expose-internals"]
+# FIPS 140-3 posture: interposes a userspace SP 800-90A Hash_DRBG-SHA3 between
+# the OS entropy (`getrandom`) and ML-KEM's derand entry points, so the DRBG
+# lives inside the crypto module boundary. Off by default — the default build
+# reads directly from the kernel CSPRNG (matching Go's `crypto/mlkem`
+# non-FIPS mode). See `src/drbg.rs`.
+fips = []
 # Routes the `profile` example through dhat's heap-profiling global allocator
 # (writes dhat-heap.json). Off by default so time profiles keep the real
 # allocator. See scripts/profile.rs.
 dhat-heap = []
 
 [dependencies]
-# AES-256 block cipher, the core of our vendored SP 800-90A CTR_DRBG (src/drbg.rs).
-aes = "0.9"
-# OS entropy source — the seed input to the internal `Aes256CtrDrbg` that
-# `KeyPair::generate` and `EncapsulationKey::encapsulate` use to source the
-# in-module randomness FIPS 203 §3.3 requires. The public API takes no caller
-# RNG (matching BoringSSL / aws-lc-rs / Go `crypto/mlkem` / RustCrypto's
-# default), so we read from the OS directly rather than pulling in `rand`.
+# OS entropy source. In the default build, `KeyPair::generate` and
+# `EncapsulationKey::encapsulate` fill the 64-byte / 32-byte derand seed
+# straight from `getrandom` — no userspace DRBG in the ML-KEM data path.
+# Under `--features fips`, `getrandom` still sources the entropy input; a
+# userspace SP 800-90A Hash_DRBG-SHA3 (`src/drbg.rs`) is interposed so the
+# DRBG lives inside the crypto module boundary. The public API takes no
+# caller RNG (matching BoringSSL / aws-lc-rs / Go `crypto/mlkem` /
+# RustCrypto's default), so we read from the OS directly rather than
+# pulling in `rand`.
 getrandom = "0.2"
-# `RngCore` (the trait the DRBG implements so `KeyPair::generate` can call
-# `drbg.fill_bytes`) and the `CryptoRng` marker (asserted on `Aes256CtrDrbg`).
+# `RngCore` (the trait the FIPS-feature `HashDrbg` implements so
+# `KeyPair::generate` can call `drbg.fill_bytes`) and the `CryptoRng`
+# marker (asserted on the DRBG). Kept unconditionally because it is a
+# universal, dep-free trait crate.
 rand_core = "0.6"
-# SHA3-256/512 and SHAKE128/256 for H, G, J, PRF, and the XOF
-# (`src/functions.rs`). Pinned to an exact `=0.0.9` revision: it's a pre-1.0
-# crate on the crypto-critical path, and we want any version change to require
-# a deliberate audit pass.
+# SHA3-256/384/512 and SHAKE128/256 for H, G, J, PRF, and the XOF
+# (`src/functions.rs`, `src/drbg.rs`). Pinned to an exact `=0.0.9` revision:
+# it's a pre-1.0 crate on the crypto-critical path, and we want any version
+# change to require a deliberate audit pass.
 libcrux-sha3 = { version = "=0.0.9", default-features = false }
 # Constant-time equality and selection for the `ML-KEM.Decaps` implicit-rejection
 # check, which compares and selects over secret-derived bytes (src/lib.rs).
@@ -83,6 +93,13 @@ libcrux-ml-kem = { version = "0.0.9", default-features = false, features = [
 ] }
 # OsRng for round-trip property tests of the randomized API.
 rand = "0.8"
+# Deterministic seed stream for the two randomized interop tests
+# (`boringssl_xtest`, `libcrux_xtest`) and the dudect bench's class selector.
+# The library used to expose an internal `Aes256CtrDrbg` for this scaffolding
+# purpose; it's been retired in favor of the FIPS-feature Hash_DRBG-SHA3 and
+# a tiny standalone PRNG here keeps test-only randomness out of the shipped
+# API surface.
+rand_chacha = "0.3"
 # Deserializing the Wycheproof and ACVP JSON vectors (hand-rolled schema, no `wycheproof` crate).
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

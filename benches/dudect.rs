@@ -14,17 +14,18 @@
 //! under Valgrind taint tracking instead, which ignores rejection-loop
 //! timing and flags only secret-dependent branches.
 //!
-//! Input randomness comes from our own `Aes256CtrDrbg` rather than dudect's
-//! `BenchRng`, sidestepping a `rand` version mismatch between the two crates.
+//! Input randomness comes from `ChaCha8Rng` rather than dudect's `BenchRng`,
+//! sidestepping a `rand` version mismatch between the two crates.
 
 use std::hint::black_box;
 
 use dudect_bencher::{BenchRng, Class, CtRunner, ctbench_main};
-use mlkem_selkie::{Ciphertext, KeyPair, MLKEM512, drbg::Aes256CtrDrbg};
-use rand_core::RngCore;
+use mlkem_selkie::{Ciphertext, KeyPair, MLKEM512};
+use rand_chacha::ChaCha8Rng;
+use rand_core::{RngCore, SeedableRng};
 
 /// A random class selector.
-fn random_class(rng: &mut Aes256CtrDrbg) -> Class {
+fn random_class(rng: &mut ChaCha8Rng) -> Class {
     if rng.next_u32() & 1 == 1 {
         Class::Left
     } else {
@@ -37,7 +38,7 @@ fn random_class(rng: &mut Aes256CtrDrbg) -> Class {
 /// shared secret and ciphertext are derived; a CT implementation must show
 /// no `m`-dependent timing variance.
 fn encaps(runner: &mut CtRunner, _rng: &mut BenchRng) {
-    let mut rng = Aes256CtrDrbg::new(&[0x55; 48]);
+    let mut rng = ChaCha8Rng::from_seed([0x55; 32]);
     let keypair = KeyPair::<MLKEM512>::generate_derand(&[0x42; 64]);
     let encapsulation_key = keypair.encapsulation_key;
     let fixed_m = [0x55u8; 32];
@@ -60,7 +61,7 @@ fn encaps(runner: &mut CtRunner, _rng: &mut BenchRng) {
 /// Decapsulation: valid (Left) vs malleated (Right) ciphertext under a fixed
 /// key — the implicit-rejection path must be constant-time.
 fn decaps(runner: &mut CtRunner, _rng: &mut BenchRng) {
-    let mut rng = Aes256CtrDrbg::new(&[0x33; 48]);
+    let mut rng = ChaCha8Rng::from_seed([0x33; 32]);
 
     let keypair = KeyPair::<MLKEM512>::generate_derand(&[0x42; 64]);
     let (_, ciphertext) = keypair.encapsulation_key.encapsulate_derand(&[0x55; 32]);

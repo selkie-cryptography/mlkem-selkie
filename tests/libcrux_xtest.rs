@@ -21,8 +21,9 @@
 //!
 //! [libcrux]: https://github.com/cryspen/libcrux
 
-use mlkem_selkie::{Ciphertext, KeyPair, MLKEM512, MLKEM768, MLKEM1024, drbg::Aes256CtrDrbg};
-use rand_core::RngCore;
+use mlkem_selkie::{Ciphertext, KeyPair, MLKEM512, MLKEM768, MLKEM1024};
+use rand_chacha::ChaCha8Rng;
+use rand_core::{RngCore, SeedableRng};
 
 /// Number of random interop iterations per parameter set.
 ///
@@ -32,7 +33,7 @@ use rand_core::RngCore;
 const ITERATIONS: usize = 1000;
 
 /// Draws a fresh `(seed, message)` pair from the deterministic DRBG.
-fn next_inputs(drbg: &mut Aes256CtrDrbg) -> ([u8; 64], [u8; 32]) {
+fn next_inputs(drbg: &mut ChaCha8Rng) -> ([u8; 64], [u8; 32]) {
     let mut seed = [0u8; 64];
     let mut message = [0u8; 32];
     drbg.fill_bytes(&mut seed);
@@ -43,7 +44,7 @@ fn next_inputs(drbg: &mut Aes256CtrDrbg) -> ([u8; 64], [u8; 32]) {
 
 #[test]
 fn interop_mlkem512() {
-    let mut drbg = Aes256CtrDrbg::new(&[0x51; 48]);
+    let mut drbg = ChaCha8Rng::from_seed([0x51; 32]);
 
     for i in 0..ITERATIONS {
         let (seed, message) = next_inputs(&mut drbg);
@@ -88,7 +89,7 @@ fn interop_mlkem512() {
 
 #[test]
 fn interop_mlkem768() {
-    let mut drbg = Aes256CtrDrbg::new(&[0x76; 48]);
+    let mut drbg = ChaCha8Rng::from_seed([0x76; 32]);
 
     for i in 0..ITERATIONS {
         let (seed, message) = next_inputs(&mut drbg);
@@ -133,7 +134,7 @@ fn interop_mlkem768() {
 
 #[test]
 fn interop_mlkem1024() {
-    let mut drbg = Aes256CtrDrbg::new(&[0x10; 48]);
+    let mut drbg = ChaCha8Rng::from_seed([0x10; 32]);
 
     for i in 0..ITERATIONS {
         let (seed, message) = next_inputs(&mut drbg);

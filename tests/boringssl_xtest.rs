@@ -27,8 +27,9 @@ use std::{
     process::{Command, Stdio},
 };
 
-use mlkem_selkie::{KeyPair, MLKEM768, drbg::Aes256CtrDrbg};
-use rand_core::RngCore;
+use mlkem_selkie::{KeyPair, MLKEM768};
+use rand_chacha::ChaCha8Rng;
+use rand_core::{RngCore, SeedableRng};
 
 /// Number of random interop iterations (ML-KEM-768).
 const ITERATIONS: usize = 1000;
@@ -45,7 +46,7 @@ fn interop_boringssl_mlkem768() {
 
     // Deterministic inputs: derive a key pair from each seed, encapsulate `m`,
     // and remember the resulting (shared secret, ciphertext) per iteration.
-    let mut drbg = Aes256CtrDrbg::new(&[0xB5; 48]);
+    let mut drbg = ChaCha8Rng::from_seed([0xB5; 32]);
     let mut keypairs = Vec::with_capacity(ITERATIONS);
     let mut our_secrets = Vec::with_capacity(ITERATIONS);
     let mut input = String::new();
