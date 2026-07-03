@@ -10,65 +10,28 @@ keywords = ["cryptography", "post-quantum", "quantum-resistant",
 
 [features]
 default = ["mlkem512", "mlkem768", "mlkem1024"]
-# Each parameter set is independently selectable; enabling one exposes its marker
-# type and a nicely-aliased `mlkem{512,768,1024}` module. All three are on by
-# default.
 mlkem512 = []
 mlkem768 = []
 mlkem1024 = []
-# Re-expose the internal modules (algebraic, PKE, encoding, functions, sampling)
-# as `pub` for white-box tests, fuzzing, and benchmarks. Off by default; the
-# normal public API does not need it.
+# Re-expose internal modules as `pub` for white-box tests, fuzzing, benchmarks.
 expose-internals = []
-# Gates the Valgrind taint-tracking constant-time test (tests/ctgrind.rs) behind
-# its own feature so it builds and runs only in the dedicated Constant-time
-# workflow (ct.yml), never in the primary `cargo test` (which the self
-# dev-dependency would otherwise pull it into via `expose-internals`). Implies
-# `expose-internals` since the test reaches the internal field ops.
+# Enables `tests/ctgrind.rs` only under the dedicated Constant-time workflow.
 ctgrind = ["expose-internals"]
-# FIPS 140-3 posture: interposes a userspace SP 800-90A Hash_DRBG-SHA3 between
-# the OS entropy (`getrandom`) and ML-KEM's derand entry points, so the DRBG
-# lives inside the crypto module boundary. Off by default — the default build
-# reads directly from the kernel CSPRNG (matching Go's `crypto/mlkem`
-# non-FIPS mode). See `src/drbg.rs`.
+# Interposes a userspace SP 800-90A Hash_DRBG-SHA3 between OS entropy and
+# ML-KEM's derand entry points. Off by default (kernel CSPRNG).
 fips = []
-# Routes the `profile` example through dhat's heap-profiling global allocator
-# (writes dhat-heap.json). Off by default so time profiles keep the real
-# allocator. See scripts/profile.rs.
 dhat-heap = []
 
 [dependencies]
-# OS entropy source. In the default build, `KeyPair::generate` and
-# `EncapsulationKey::encapsulate` fill the 64-byte / 32-byte derand seed
-# straight from `getrandom` — no userspace DRBG in the ML-KEM data path.
-# Under `--features fips`, `getrandom` still sources the entropy input; a
-# userspace SP 800-90A Hash_DRBG-SHA3 (`src/drbg.rs`) is interposed so the
-# DRBG lives inside the crypto module boundary. The public API takes no
-# caller RNG (matching BoringSSL / aws-lc-rs / Go `crypto/mlkem` /
-# RustCrypto's default), so we read from the OS directly rather than
-# pulling in `rand`.
 getrandom = "0.2"
-# `RngCore` (the trait the FIPS-feature `HashDrbg` implements so
-# `KeyPair::generate` can call `drbg.fill_bytes`) and the `CryptoRng`
-# marker (asserted on the DRBG). Kept unconditionally because it is a
-# universal, dep-free trait crate.
 rand_core = "0.6"
-# SHA3-256/384/512 and SHAKE128/256 for H, G, J, PRF, and the XOF
-# (`src/functions.rs`, `src/drbg.rs`). Pinned to an exact `=0.0.9` revision:
-# it's a pre-1.0 crate on the crypto-critical path, and we want any version
-# change to require a deliberate audit pass.
+# Pinned to `=0.0.9`: pre-1.0 crate on the crypto-critical path.
 libcrux-sha3 = { version = "=0.0.9", default-features = false }
-# Constant-time equality and selection for the `ML-KEM.Decaps` implicit-rejection
-# check, which compares and selects over secret-derived bytes (src/lib.rs).
 subtle = "2"
-# Zeroizing secret key material on drop and the decaps/keygen stack transients.
 zeroize = { version = "1.7.0", features = ["derive"] }
 
-# Batched (SIMD) Keccak for the parallel SHAKE streams in matrix expansion
-# (`SampleNTT`) and CBD sampling — AVX2 4-way / NEON 2-way, opted into per
-# target on top of the scalar `libcrux-sha3` above. Same Keccak `libcrux-ml-kem`
-# (our interop dev-dep) uses, so the batched output is bit-identical to
-# scalar.
+# Batched SIMD Keccak for parallel SHAKE streams; layered on top of the scalar
+# `libcrux-sha3` above.
 [target.'cfg(all(target_arch = "aarch64", target_feature = "neon"))'.dependencies]
 libcrux-sha3 = { version = "=0.0.9", default-features = false, features = ["simd128"] }
 
@@ -76,134 +39,91 @@ libcrux-sha3 = { version = "=0.0.9", default-features = false, features = ["simd
 libcrux-sha3 = { version = "=0.0.9", default-features = false, features = ["simd256"] }
 
 [dev-dependencies]
-# A self dev-dependency that turns on `expose-internals` whenever the
-# dev-dependencies are active (tests, benches, examples), so the
-# internal-arithmetic property tests and benches run under a plain
-# `cargo test` / `cargo bench` without leaking the feature into the default
-# public build.
+# Self dev-dep so `expose-internals` is active for tests/benches/examples
+# without leaking into the default public build.
 mlkem-selkie = { path = ".", version = "0.1.0", features = ["expose-internals"] }
-# Hex decoding of the Wycheproof, ACVP, and interop test vectors.
 hex = "0.4"
-# An independent, formally-verified ML-KEM implementation for the randomized
-# cross-implementation interop tests (tests/libcrux_xtest.rs).
 libcrux-ml-kem = { version = "0.0.9", default-features = false, features = [
     "mlkem512",
     "mlkem768",
     "mlkem1024",
 ] }
-# OsRng for round-trip property tests of the randomized API.
 rand = "0.8"
-# Deterministic seed stream for the two randomized interop tests
-# (`boringssl_xtest`, `libcrux_xtest`) and the dudect bench's class selector.
-# The library used to expose an internal `Aes256CtrDrbg` for this scaffolding
-# purpose; it's been retired in favor of the FIPS-feature Hash_DRBG-SHA3 and
-# a tiny standalone PRNG here keeps test-only randomness out of the shipped
-# API surface.
+# Deterministic PRNG for the randomized interop tests and the dudect bench.
 rand_chacha = "0.3"
-# Deserializing the Wycheproof and ACVP JSON vectors (hand-rolled schema, no `wycheproof` crate).
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Wall-clock median benchmarks (benches/mlkem.rs, benches/algebraic.rs).
 divan = "0.1"
-# Heap profiling for the `profile` example, under the `dhat-heap` feature.
 dhat = "0.3"
-# Property-based tests (tests/*_properties.rs).
 proptest = "1"
-# `#[cfg_attr(test, mutants::skip)]` attribute for cargo-mutants.
 mutants = "0.0.4"
-# Constant-time t-test (benches/dudect.rs).
 dudect-bencher = "0.7"
-# Attacker-model-aware constant-time analysis (benches/tacet.rs).
 tacet = "0.4"
-# Deterministic callgrind instruction counts (benches/instructions.rs).
 gungraun = "0.19"
 
-# x86_64-only: the rdtsc `cycles` bench. criterion-cycles-per-byte has no
-# unprivileged cycle source on aarch64, so the deps and the bench body are
-# confined to x86_64 (a skip stub compiles elsewhere).
+# x86_64-only: rdtsc bench has no unprivileged cycle source on aarch64.
 [target.'cfg(target_arch = "x86_64")'.dev-dependencies]
 criterion = "0.8"
 criterion-cycles-per-byte = "0.8"
 
-# Linux-only, optional: crabgrind issues Valgrind client requests. Used both
-# by the ctgrind taint-tracking test (tests/ctgrind.rs) and, in-crate, to
-# declassify public-but-secret-derived bytes (e.g. `rho` in `K-PKE.KeyGen`)
-# that would otherwise light up Valgrind's rejection-sampling branches. Its
-# build script needs <valgrind/valgrind.h> (absent on stock macOS), so it is
-# confined to Linux; tests/ctgrind.rs compiles to an empty target elsewhere.
-# Paired with the `ctgrind` feature on the Constant-time workflow (ct.yml).
+# Linux-only: crabgrind needs <valgrind/valgrind.h>. Used by the ctgrind test
+# and, in-crate, to declassify `rho` under memcheck.
 [target.'cfg(target_os = "linux")'.dependencies]
 crabgrind = { version = "0.2", optional = true }
 
-# Property tests that reach internal field/ring arithmetic.
 [[test]]
 name = "algebraic_properties"
 required-features = ["expose-internals"]
 
-# Valgrind taint-tracking constant-time test (Linux-only at runtime). Gated
-# behind the dedicated `ctgrind` feature so it stays out of the primary
-# `cargo test` and runs only in the Constant-time workflow (ct.yml).
 [[test]]
 name = "ctgrind"
 required-features = ["ctgrind"]
 
-# Public-API benchmarks: keygen / encaps / decaps and key parsing.
 [[bench]]
 name = "mlkem"
 harness = false
 
-# Internal hot-path benchmarks (NTT, sampling, encoding); needs the internals
-# exposed.
 [[bench]]
 name = "algebraic"
 harness = false
 required-features = ["expose-internals"]
 
-# Constant-time t-test bench (dudect). Reaches internal field ops.
 [[bench]]
 name = "dudect"
 harness = false
 required-features = ["expose-internals"]
 
-# Attacker-model constant-time analysis (tacet).
 [[bench]]
 name = "tacet"
 harness = false
 required-features = ["expose-internals"]
 
-# Deterministic callgrind instruction counts (gungraun).
 [[bench]]
 name = "instructions"
 harness = false
 required-features = ["expose-internals"]
 
-# rdtsc megacycles (criterion-cycles-per-byte); x86_64-only at runtime, skip
-# stub elsewhere. Public API only, so no feature gate.
+# x86_64-only at runtime; skip stub elsewhere.
 [[bench]]
 name = "cycles"
 harness = false
 
-# Release codegen with full debuginfo, for flamegraphs / samply / dhat so hot
-# paths match production while the profiler can still attribute inlined frames.
+# Release + debuginfo for flamegraphs / samply / dhat.
 [profile.profiling]
 inherits = "release"
 debug = true
 
-# Release optimization with debug-assertions + overflow-checks retained, for CI
-# test runs (catches arithmetic UB that the unoptimized debug profile would also
-# catch, but at release speed).
+# Release optimization with overflow-checks + debug-assertions retained, for CI.
 [profile.release-checked]
 inherits = "release"
 debug-assertions = true
 overflow-checks = true
 
-# cargo-mutants builds a fresh tree per mutant, so build time dominates; inherit
-# release-checked but drop debuginfo. Pairs with .cargo/mutants.toml.
+# cargo-mutants: release-checked minus debuginfo. Pairs with `.cargo/mutants.toml`.
 [profile.mutants]
 inherits = "release-checked"
 debug = "none"
 
-# When using the hax toolchain, we have more dependencies.  This is only
-# required when doing proofs.
+# Hax toolchain only, for proofs.
 [target.'cfg(hax)'.dependencies]
 hax-lib-macros = { version = "0.1.0-pre.1", git = "https://github.com/hacspec/hax" }
