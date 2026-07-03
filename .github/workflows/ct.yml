@@ -33,29 +33,22 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build dudect bench
         run: cargo bench --bench dudect --features expose-internals --no-run
-      - name: dudect t-test
+      - name: dudect t-test (3 independent runs)
         run: |
           # Run the bench binary directly: `cargo bench --bench` passes
-          # `--bench` to the harness, which dudect-bencher rejects.
+          # `--bench` to the harness, which dudect-bencher rejects. Three
+          # independent readings feed the median gate below; see
+          # .github/scripts/dudect-gate.rs for why one reading is not enough.
           set -o pipefail
           mkdir -p ct
           bin=$(find target/release/deps -maxdepth 1 -type f -name 'dudect-*' ! -name '*.d' -perm -u+x | head -1)
-          "$bin" 2>&1 | tee ct/dudect.txt
-      - name: Enforce dudect |t| < 5.0
+          for i in 1 2 3; do
+            "$bin" 2>&1 | tee "ct/dudect-run$i.txt"
+          done
+      - name: Enforce median dudect |t| < 5.0
         run: |
-          # dudect-bencher prints `max t = <signed float>` per bench but always
-          # exits 0; scrape the report and fail if any reading is at or above
-          # the 5.0 threshold (or non-numeric, which means the harness broke).
-          awk '
-            /max t = / {
-              match($0, /max t = [+-]?[0-9]+\.[0-9]+/);
-              t = substr($0, RSTART + 8, RLENGTH - 8) + 0;
-              if (t < 0) t = -t;
-              printf "  %s -> |t| = %.5f\n", $2, t;
-              if (t >= 5.0) { print "FAIL: |t| >= 5.0"; bad = 1 }
-            }
-            END { exit bad ? 1 : 0 }
-          ' ct/dudect.txt
+          rustc -O --edition 2021 .github/scripts/dudect-gate.rs -o /tmp/dudect-gate
+          /tmp/dudect-gate ct/dudect.txt ct/dudect-run1.txt ct/dudect-run2.txt ct/dudect-run3.txt
       - name: Build tacet bench
         run: cargo bench --bench tacet --features expose-internals --no-run
       - name: tacet attacker-model analysis

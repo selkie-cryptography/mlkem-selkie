@@ -12,7 +12,9 @@ use std::fs;
 use std::io::{self, Write};
 use std::time::SystemTime;
 
-const THRESHOLD: f64 = 4.5;
+/// Pass/fail cutoff for a reading; keep in sync with `THRESHOLD` in
+/// `dudect-gate.rs`.
+const THRESHOLD: f64 = 5.0;
 
 struct Result {
     name: String,

@@ -36,3 +36,7 @@ jobs:
         run: |
           rustc --test -O --edition 2021 .github/scripts/kat-report.rs -o /tmp/kat-report-test
           /tmp/kat-report-test
+      - name: Run dudect-gate self-test
+        run: |
+          rustc --test -O --edition 2021 .github/scripts/dudect-gate.rs -o /tmp/dudect-gate-test
+          /tmp/dudect-gate-test

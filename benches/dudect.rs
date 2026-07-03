@@ -3,7 +3,9 @@
 //! `cargo bench --bench dudect --features expose-internals`. The pass threshold
 //! is `|t| < 5.0`. Each bench takes 100k samples: at small counts (~2k) the
 //! max-t statistic is dominated by scheduler noise on shared CI runners and
-//! produces spurious excursions past the threshold.
+//! produces spurious excursions past the threshold. CI runs the binary three
+//! times and gates on the per-bench median |t|, since even at 100k samples a
+//! single reading on a shared runner can spike on a true null.
 //!
 //! Key generation is intentionally not covered here: `SampleNTT`'s rejection-
 //! sampling iteration count varies with the (public) `rho`, which dominates
