@@ -22,9 +22,12 @@ use core::ops::Deref;
 use libcrux_sha3::avx2::x4::incremental as keccak4;
 #[cfg(mlkem_selkie_arch = "neon")]
 use libcrux_sha3::neon::x2::incremental as keccak2;
-use sha3::{
-    Digest, Sha3_256, Sha3_512, Shake128, Shake128Reader, Shake256,
-    digest::{ExtendableOutput, Update, XofReader},
+use libcrux_sha3::portable::{
+    self, KeccakState,
+    incremental::{
+        Shake256Xof, Xof, shake128_absorb_final, shake128_init,
+        shake128_squeeze_first_three_blocks, shake128_squeeze_next_block,
+    },
 };
 
 use crate::parameters::Eta;
@@ -38,7 +41,7 @@ mod tests;
 /// Takes one 32-byte input and two 1-byte inputs and produces a streaming,
 /// variable-length output for the rejection sampler `SampleNTT` (Algorithm 7 in
 /// [FIPS 203]). Because `SampleNTT` cannot know in advance how many bytes it
-/// will need, the return type is a streaming [`XofReader`] rather than a
+/// will need, the return type is a streaming SHAKE128 state rather than a
 /// fixed-size buffer. This is the scalar per-stream path; matrix expansion
 /// drives four streams at once through the batched [`Shake128X4`].
 ///
@@ -48,19 +51,76 @@ mod tests;
 // this seed `rho` be raw bytes.
 #[must_use]
 pub fn XOF(rho: &[u8; 32], i: u8, j: u8) -> Shake128Reader {
-    let mut h = Shake128::default();
-    h.update(rho);
-    h.update(&[i, j]);
+    let mut buf = [0u8; 34];
+    buf[..32].copy_from_slice(rho);
+    buf[32] = i;
+    buf[33] = j;
 
-    h.finalize_xof()
+    let mut state = shake128_init();
+    shake128_absorb_final(&mut state, &buf);
+
+    Shake128Reader::new(state)
+}
+
+/// Streaming SHAKE128 reader on top of libcrux's fixed-block
+/// `shake128_squeeze_*` primitives. Matches the squeeze layout used by
+/// [`Shake128X4`] and by `libcrux_sha3::{avx2,neon}::x{4,2}::shake128_*`, so
+/// scalar and batched streams are bit-identical for identical seeds.
+pub struct Shake128Reader {
+    state: KeccakState,
+    // Buffered squeezed bytes; sized for the first three blocks squeeze.
+    // Subsequent refills only use the first `SHAKE128_BLOCK` slot.
+    buf: [u8; SHAKE128_THREE_BLOCKS],
+    filled: usize,
+    pos: usize,
+    squeezed_first_three: bool,
+}
+
+impl Shake128Reader {
+    fn new(state: KeccakState) -> Self {
+        Self {
+            state,
+            buf: [0u8; SHAKE128_THREE_BLOCKS],
+            filled: 0,
+            pos: 0,
+            squeezed_first_three: false,
+        }
+    }
+
+    /// Copies bytes into `dst`, block-buffering so partial-block reads work.
+    // reason: `take` is clamped to `dst.len() - i` and `filled - pos`, so both
+    // slice ranges stay within `dst` and `buf` respectively; the invariants
+    // `pos <= filled <= SHAKE128_THREE_BLOCKS` and `i <= dst.len()` follow
+    // from the loop guard and `pos = 0; filled = block_size` after each refill.
+    #[allow(clippy::indexing_slicing)]
+    pub fn squeeze(&mut self, dst: &mut [u8]) {
+        let mut i = 0;
+        while i < dst.len() {
+            if self.pos >= self.filled {
+                if !self.squeezed_first_three {
+                    shake128_squeeze_first_three_blocks(&mut self.state, &mut self.buf);
+                    self.filled = SHAKE128_THREE_BLOCKS;
+                    self.squeezed_first_three = true;
+                } else {
+                    shake128_squeeze_next_block(&mut self.state, &mut self.buf[..SHAKE128_BLOCK]);
+                    self.filled = SHAKE128_BLOCK;
+                }
+                self.pos = 0;
+            }
+            let take = (self.filled - self.pos).min(dst.len() - i);
+            dst[i..i + take].copy_from_slice(&self.buf[self.pos..self.pos + take]);
+            self.pos += take;
+            i += take;
+        }
+    }
 }
 
 /// The output of [`PRF`]: an exactly-sized SHAKE256 squeeze, one variant per
 /// value of [`Eta`].
 ///
 /// Each variant holds precisely `64 * eta` bytes with no slack, so [`Deref`]
-/// and [`AsRef`] can only ever yield a length matching the requested `eta`;
-/// there is no unused tail to read by accident.
+/// can only ever yield a length matching the requested `eta`; there is no
+/// unused tail to read by accident.
 pub enum PrfOutput {
     /// `eta = 2`: a `64 * 2`-byte squeeze.
     Eta2([u8; 64 * 2]),
@@ -89,20 +149,19 @@ impl Deref for PrfOutput {
 /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.1
 #[must_use]
 pub fn PRF(eta: Eta, s: &[u8; 32], b: u8) -> PrfOutput {
-    let mut h = Shake256::default();
-    h.update(s);
-    h.update(&[b]);
-    let mut reader = h.finalize_xof();
+    let mut xof = Shake256Xof::new();
+    xof.absorb(s);
+    xof.absorb_final(&[b]);
 
     match eta {
         Eta::Two => {
             let mut bytes = [0u8; 64 * 2];
-            reader.read(&mut bytes);
+            xof.squeeze(&mut bytes);
             PrfOutput::Eta2(bytes)
         }
         Eta::Three => {
             let mut bytes = [0u8; 64 * 3];
-            reader.read(&mut bytes);
+            xof.squeeze(&mut bytes);
             PrfOutput::Eta3(bytes)
         }
     }
@@ -134,9 +193,7 @@ pub fn shake256_x4(inputs: [&[u8]; 4], outputs: [&mut [u8]; 4]) {
 
     #[cfg(not(any(mlkem_selkie_arch = "avx2", mlkem_selkie_arch = "neon")))]
     for (input, output) in inputs.into_iter().zip(outputs) {
-        let mut h = Shake256::default();
-        h.update(input);
-        h.finalize_xof().read(output);
+        portable::shake256(output, input);
     }
 }
 
@@ -153,7 +210,7 @@ pub const SHAKE128_THREE_BLOCKS: usize = 3 * SHAKE128_BLOCK;
 /// [`Self::absorb`] takes the four seeds; the squeeze methods then produce
 /// fixed blocks for all four lanes at once. Compile-time dispatch (the
 /// `mlkem_selkie_arch` cfg from `build.rs`) maps the four lanes onto AVX2
-/// 4-way, NEON 2-way run twice, or four scalar SHAKE128 readers — the squeezed
+/// 4-way, NEON 2-way run twice, or four scalar SHAKE128 states — the squeezed
 /// bytes are bit-identical to four independent scalar SHAKE128 streams.
 #[cfg(mlkem_selkie_arch = "avx2")]
 pub struct Shake128X4(keccak4::KeccakState);
@@ -162,9 +219,9 @@ pub struct Shake128X4(keccak4::KeccakState);
 #[cfg(mlkem_selkie_arch = "neon")]
 pub struct Shake128X4([keccak2::KeccakState; 2]);
 
-/// See the AVX2 variant; this holds four scalar SHAKE128 readers.
+/// See the AVX2 variant; this holds four scalar SHAKE128 states.
 #[cfg(not(any(mlkem_selkie_arch = "avx2", mlkem_selkie_arch = "neon")))]
-pub struct Shake128X4([Shake128Reader; 4]);
+pub struct Shake128X4([Shake128Xof; 4]);
 
 impl Shake128X4 {
     /// Absorbs four 34-byte seeds (`rho ‖ j ‖ i`), one per lane.
@@ -231,8 +288,8 @@ impl Shake128X4 {
     #[cfg(not(any(mlkem_selkie_arch = "avx2", mlkem_selkie_arch = "neon")))]
     pub fn squeeze_first_three_blocks(&mut self) -> [[u8; SHAKE128_THREE_BLOCKS]; 4] {
         let mut out = [[0u8; SHAKE128_THREE_BLOCKS]; 4];
-        for (reader, lane) in self.0.iter_mut().zip(&mut out) {
-            reader.read(lane);
+        for (xof, lane) in self.0.iter_mut().zip(&mut out) {
+            xof.squeeze(lane);
         }
 
         out
@@ -264,62 +321,48 @@ impl Shake128X4 {
     #[cfg(not(any(mlkem_selkie_arch = "avx2", mlkem_selkie_arch = "neon")))]
     pub fn squeeze_next_block(&mut self) -> [[u8; SHAKE128_BLOCK]; 4] {
         let mut out = [[0u8; SHAKE128_BLOCK]; 4];
-        for (reader, lane) in self.0.iter_mut().zip(&mut out) {
-            reader.read(lane);
+        for (xof, lane) in self.0.iter_mut().zip(&mut out) {
+            xof.squeeze(lane);
         }
 
         out
     }
 }
 
-/// `H` from [section 4.1] takes a variable-length byte input and returns a
-/// 32-byte output.
-///
-/// This is SHA3-256 by another name.
+/// `H` from [section 4.1]: SHA3-256 into 32 bytes.
 ///
 /// [section 4.1]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.1
 #[must_use]
 pub fn H(preimage: &[u8]) -> [u8; 32] {
-    let mut h = Sha3_256::new();
-    Digest::update(&mut h, preimage);
+    let mut out = [0u8; 32];
+    portable::sha256(&mut out, preimage);
 
-    h.finalize().into()
+    out
 }
 
-/// `J` from [section 4.1] hashes the 32-byte rejection seed `z` followed by the
-/// ciphertext `c`, returning a 32-byte output.
-///
-/// This is SHAKE256 truncated to 32 bytes. `ML-KEM.Decaps` is its only caller
-/// and always evaluates `J(z ‖ c)` (Algorithm 18), so rather than take a single
-/// `B*` preimage like the abstract `J`, this absorbs `z` and `c` in two
-/// `update`s — identical to hashing the concatenation, but without allocating a
-/// joined buffer for the ciphertext-sized input.
+/// `J` from [section 4.1]: SHAKE256 of `z ‖ c` truncated to 32 bytes. Absorbs
+/// `z` and `c` incrementally to skip a joined-buffer allocation.
 ///
 /// [section 4.1]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.1
 #[must_use]
 pub fn J(z: &[u8; 32], c: &[u8]) -> [u8; 32] {
-    let mut h = Shake256::default();
-    h.update(z);
-    h.update(c);
-    let mut reader = h.finalize_xof();
+    let mut xof = Shake256Xof::new();
+    xof.absorb(z);
+    xof.absorb_final(c);
 
-    let mut output = [0u8; 32];
-    reader.read(&mut output);
+    let mut out = [0u8; 32];
+    xof.squeeze(&mut out);
 
-    output
+    out
 }
 
-/// `G` from [section 4.1] takes a variable-length byte input and returns two
-/// 32-byte outputs.
-///
-/// This is SHA3-512, split into two 32-byte halves.
+/// `G` from [section 4.1]: SHA3-512, split into two 32-byte halves.
 ///
 /// [section 4.1]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.1
 #[must_use]
 pub fn G(preimage: &[u8]) -> ([u8; 32], [u8; 32]) {
-    let mut h = Sha3_512::new();
-    Digest::update(&mut h, preimage);
-    let digest = h.finalize();
+    let mut digest = [0u8; 64];
+    portable::sha512(&mut digest, preimage);
 
     let (left, right) = digest.split_at(32);
 

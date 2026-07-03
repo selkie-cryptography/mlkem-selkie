@@ -3,7 +3,7 @@
 //! Extends the ring types of [`crate::algebraic`] with two samplers:
 //!
 //! - [`TqElement::sample_ntt`] (Algorithm 7) rejection-samples a uniform
-//!   NTT-domain polynomial from a SHAKE128 [`XofReader`];
+//!   NTT-domain polynomial from a SHAKE128 XOF state;
 //!   [`TqElement::sample_ntt_x4`] is the batched form that builds the public
 //!   matrix `A` from `rho` four streams at a time.
 //! - [`RqElement::sample_cbd`] (Algorithm 8) samples a polynomial from the
@@ -11,8 +11,6 @@
 //!   vectors.
 //!
 //! [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
-
-use sha3::digest::XofReader;
 
 use crate::{
     algebraic::{FieldElement, PolynomialRingElement, RqElement, TqElement},
@@ -44,7 +42,7 @@ impl TqElement {
         let mut triple = [0u8; 3];
 
         while count < parameters::N {
-            reader.read(&mut triple);
+            reader.squeeze(&mut triple);
             let [b0, b1, b2] = triple;
 
             let d1 = u16::from(b0) | (u16::from(b1 & 0x0F) << 8);

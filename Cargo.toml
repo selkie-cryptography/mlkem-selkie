@@ -43,8 +43,11 @@ getrandom = "0.2"
 # `RngCore` (the trait the DRBG implements so `KeyPair::generate` can call
 # `drbg.fill_bytes`) and the `CryptoRng` marker (asserted on `Aes256CtrDrbg`).
 rand_core = "0.6"
-# SHA3-256/512 and SHAKE128/256 for H, G, J, PRF, and the XOF (src/functions.rs).
-sha3 = "0.10.8"
+# SHA3-256/512 and SHAKE128/256 for H, G, J, PRF, and the XOF
+# (`src/functions.rs`). Pinned to an exact `=0.0.9` revision: it's a pre-1.0
+# crate on the crypto-critical path, and we want any version change to require
+# a deliberate audit pass.
+libcrux-sha3 = { version = "=0.0.9", default-features = false }
 # Constant-time equality and selection for the `ML-KEM.Decaps` implicit-rejection
 # check, which compares and selects over secret-derived bytes (src/lib.rs).
 subtle = "2"
@@ -52,12 +55,10 @@ subtle = "2"
 zeroize = { version = "1.7.0", features = ["derive"] }
 
 # Batched (SIMD) Keccak for the parallel SHAKE streams in matrix expansion
-# (`SampleNTT`) and CBD sampling — AVX2 4-way / NEON 2-way, pulled in only on
-# the targets that use them (the scalar `sha3` path needs none). Same Keccak
-# `libcrux-ml-kem` (our interop dev-dep) uses, so the batched output is
-# bit-identical to scalar. Pinned to an exact `=0.0.9` revision: it's a pre-1.0
-# crate on the crypto-critical path, and we want any version change to require
-# a deliberate audit pass. See `src/functions.rs`.
+# (`SampleNTT`) and CBD sampling — AVX2 4-way / NEON 2-way, opted into per
+# target on top of the scalar `libcrux-sha3` above. Same Keccak `libcrux-ml-kem`
+# (our interop dev-dep) uses, so the batched output is bit-identical to
+# scalar.
 [target.'cfg(all(target_arch = "aarch64", target_feature = "neon"))'.dependencies]
 libcrux-sha3 = { version = "=0.0.9", default-features = false, features = ["simd128"] }
 
