@@ -1,5 +1,10 @@
 //! Unit tests for the batched-Keccak primitives.
 
+use libcrux_sha3::portable::{
+    self,
+    incremental::{Shake128Xof, Xof},
+};
+
 use super::*;
 
 /// `shake256_x4` produces the same four outputs as four scalar SHAKE256
@@ -15,11 +20,11 @@ fn shake256_x4_matches_scalar() {
     );
 
     let scalar: [[u8; 192]; 4] = core::array::from_fn(|i| {
-        let mut h = Shake256::default();
-        h.update(inputs.get(i).map_or(&[][..], <[u8; 33]>::as_slice));
         let mut out = [0u8; 192];
-        h.finalize_xof().read(&mut out);
-
+        portable::shake256(
+            &mut out,
+            inputs.get(i).map_or(&[][..], <[u8; 33]>::as_slice),
+        );
         out
     });
 
@@ -38,14 +43,13 @@ fn shake128_x4_matches_scalar() {
     let next = state.squeeze_next_block();
 
     for ((seed, lane_first), lane_next) in seeds.iter().zip(&first).zip(&next) {
-        let mut h = Shake128::default();
-        h.update(seed);
-        let mut reader = h.finalize_xof();
+        let mut xof = Shake128Xof::new();
+        xof.absorb_final(seed);
 
         let mut scalar_first = [0u8; SHAKE128_THREE_BLOCKS];
         let mut scalar_next = [0u8; SHAKE128_BLOCK];
-        reader.read(&mut scalar_first);
-        reader.read(&mut scalar_next);
+        xof.squeeze(&mut scalar_first);
+        xof.squeeze(&mut scalar_next);
 
         assert_eq!(lane_first, &scalar_first);
         assert_eq!(lane_next, &scalar_next);
