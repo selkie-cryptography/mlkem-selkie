@@ -54,7 +54,7 @@ fn covers_partial_full_and_multiblock_output_sizes() {
 
 /// All three strength-matched aliases actually build and produce distinct
 /// streams for the same-shape entropy prefix. Guards against a
-/// copy-paste bug in the type aliases or the `DrbgFor::fill_from_os` impls.
+/// copy-paste bug in the type aliases or the `fill_from_fips_drbg_sha3_*` fns.
 #[test]
 fn all_three_strengths_produce_distinct_streams() {
     // Zero-pad to the widest entropy length; each impl only reads the prefix

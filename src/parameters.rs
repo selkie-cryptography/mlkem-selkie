@@ -6,9 +6,6 @@ use core::fmt::Debug;
 
 use zeroize::Zeroize;
 
-#[cfg(feature = "fips")]
-pub use crate::drbg::DrbgFor;
-
 /// The bounds an element type must satisfy to live in a
 /// [`ParameterSet::KArray`]: enough for the vector and matrix newtypes to derive
 /// `Clone`/`Debug`/`PartialEq`/`Eq`, remain `Send + Sync`, and `Zeroize`.
@@ -78,9 +75,10 @@ impl From<Eta> for usize {
 // the key/ciphertext types thread-safe (and let the divan benchmarks run their
 // closures across threads).
 pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
-    /// Strength-matched userspace DRBG (see [`crate::drbg`]).
+    /// Sources OS entropy through this parameter set's strength-matched
+    /// SP 800-90A Hash_DRBG-SHA3 and fills `dst` (see [`crate::drbg`]).
     #[cfg(feature = "fips")]
-    type Drbg: DrbgFor;
+    fn fill_from_fips_drbg(dst: &mut [u8]);
 
     /// Represents the dimensions of the vectors *s* and *e* in `K-PKE.KeyGen()`
     /// and the dimensions of the matrix *Â* and the vectors *r*, *e_1*, and
@@ -229,7 +227,9 @@ pub struct MLKEM512;
 #[cfg(feature = "mlkem512")]
 impl ParameterSet for MLKEM512 {
     #[cfg(feature = "fips")]
-    type Drbg = crate::drbg::HashDrbgSha3_256;
+    fn fill_from_fips_drbg(dst: &mut [u8]) {
+        crate::drbg::fill_from_fips_drbg_sha3_256(dst);
+    }
 
     const K: usize = 2;
     const ETA_1: Eta = Eta::Three;
@@ -276,7 +276,9 @@ pub struct MLKEM768;
 #[cfg(feature = "mlkem768")]
 impl ParameterSet for MLKEM768 {
     #[cfg(feature = "fips")]
-    type Drbg = crate::drbg::HashDrbgSha3_384;
+    fn fill_from_fips_drbg(dst: &mut [u8]) {
+        crate::drbg::fill_from_fips_drbg_sha3_384(dst);
+    }
 
     const K: usize = 3;
     const ETA_1: Eta = Eta::Two;
@@ -323,7 +325,9 @@ pub struct MLKEM1024;
 #[cfg(feature = "mlkem1024")]
 impl ParameterSet for MLKEM1024 {
     #[cfg(feature = "fips")]
-    type Drbg = crate::drbg::HashDrbgSha3_512;
+    fn fill_from_fips_drbg(dst: &mut [u8]) {
+        crate::drbg::fill_from_fips_drbg_sha3_512(dst);
+    }
 
     const K: usize = 4;
     const ETA_1: Eta = Eta::Two;
