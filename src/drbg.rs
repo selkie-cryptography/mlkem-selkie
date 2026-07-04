@@ -246,17 +246,6 @@ where
 
 impl<H, const SEEDLEN: usize> CryptoRng for HashDrbg<H, SEEDLEN> where H: DrbgHash {}
 
-/// One-shot: source entropy from the OS, instantiate the concrete
-/// [`HashDrbg`], and fill `dst`.
-///
-/// # Panics
-///
-/// Panics if the OS entropy source is unavailable.
-pub trait DrbgFor {
-    /// See [`DrbgFor`].
-    fn fill_from_os(dst: &mut [u8]);
-}
-
 // `security_strength * 1.5 / 8` bytes per SP 800-90A §8.6.7 (one draw covers
 // entropy + nonce when they share a source).
 const ENTROPY_LEN_128: usize = 24;
@@ -265,32 +254,41 @@ const ENTROPY_LEN_256: usize = 48;
 
 const GETRANDOM_ERR: &str = "OS entropy source (`getrandom`) unavailable";
 
-impl DrbgFor for HashDrbgSha3_256 {
-    fn fill_from_os(dst: &mut [u8]) {
-        let mut entropy = [0u8; ENTROPY_LEN_128];
-        getrandom::getrandom(&mut entropy).expect(GETRANDOM_ERR);
-        let mut drbg = Self::new(&entropy);
-        entropy.zeroize();
-        drbg.fill_bytes(dst);
-    }
+/// One-shot fill: OS entropy → Hash_DRBG-SHA3-256 → `dst`.
+///
+/// # Panics
+///
+/// Panics if `getrandom` fails.
+pub fn fill_from_fips_drbg_sha3_256(dst: &mut [u8]) {
+    let mut entropy = [0u8; ENTROPY_LEN_128];
+    getrandom::getrandom(&mut entropy).expect(GETRANDOM_ERR);
+    let mut drbg = HashDrbgSha3_256::new(&entropy);
+    entropy.zeroize();
+    drbg.fill_bytes(dst);
 }
 
-impl DrbgFor for HashDrbgSha3_384 {
-    fn fill_from_os(dst: &mut [u8]) {
-        let mut entropy = [0u8; ENTROPY_LEN_192];
-        getrandom::getrandom(&mut entropy).expect(GETRANDOM_ERR);
-        let mut drbg = Self::new(&entropy);
-        entropy.zeroize();
-        drbg.fill_bytes(dst);
-    }
+/// One-shot fill: OS entropy → Hash_DRBG-SHA3-384 → `dst`.
+///
+/// # Panics
+///
+/// Panics if `getrandom` fails.
+pub fn fill_from_fips_drbg_sha3_384(dst: &mut [u8]) {
+    let mut entropy = [0u8; ENTROPY_LEN_192];
+    getrandom::getrandom(&mut entropy).expect(GETRANDOM_ERR);
+    let mut drbg = HashDrbgSha3_384::new(&entropy);
+    entropy.zeroize();
+    drbg.fill_bytes(dst);
 }
 
-impl DrbgFor for HashDrbgSha3_512 {
-    fn fill_from_os(dst: &mut [u8]) {
-        let mut entropy = [0u8; ENTROPY_LEN_256];
-        getrandom::getrandom(&mut entropy).expect(GETRANDOM_ERR);
-        let mut drbg = Self::new(&entropy);
-        entropy.zeroize();
-        drbg.fill_bytes(dst);
-    }
+/// One-shot fill: OS entropy → Hash_DRBG-SHA3-512 → `dst`.
+///
+/// # Panics
+///
+/// Panics if `getrandom` fails.
+pub fn fill_from_fips_drbg_sha3_512(dst: &mut [u8]) {
+    let mut entropy = [0u8; ENTROPY_LEN_256];
+    getrandom::getrandom(&mut entropy).expect(GETRANDOM_ERR);
+    let mut drbg = HashDrbgSha3_512::new(&entropy);
+    entropy.zeroize();
+    drbg.fill_bytes(dst);
 }

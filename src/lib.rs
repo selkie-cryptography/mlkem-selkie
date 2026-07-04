@@ -246,7 +246,7 @@ impl<P: ParameterSet> EncapsulationKey<P> {
         let mut m = [0u8; 32];
 
         #[cfg(feature = "fips")]
-        <P::Drbg as parameters::DrbgFor>::fill_from_os(&mut m);
+        P::fill_from_fips_drbg(&mut m);
         #[cfg(not(feature = "fips"))]
         getrandom::getrandom(&mut m)
             .expect("ML-KEM.Encaps: OS entropy source (`getrandom`) unavailable");
@@ -540,7 +540,7 @@ impl<P: ParameterSet> KeyPair<P> {
         let mut seed = [0u8; 64];
 
         #[cfg(feature = "fips")]
-        <P::Drbg as parameters::DrbgFor>::fill_from_os(&mut seed);
+        P::fill_from_fips_drbg(&mut seed);
         #[cfg(not(feature = "fips"))]
         getrandom::getrandom(&mut seed)
             .expect("ML-KEM.KeyGen: OS entropy source (`getrandom`) unavailable");
