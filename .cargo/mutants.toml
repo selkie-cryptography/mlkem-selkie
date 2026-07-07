@@ -19,10 +19,15 @@ profile = "mutants"
 # Run mutants with the internals exposed so the white-box property and unit
 # tests (algebraic_properties, field/NTT/encoding) can kill arithmetic mutants,
 # under the release-checked profile (debug-assertions + overflow-checks).
+# `fips` is added so the userspace SP 800-90A Hash_DRBG-SHA3 code path
+# (`src/drbg.rs`, `ParameterSet::fill_from_fips_drbg`) is compiled in and
+# reachable by the drbg unit tests + downstream keygen/encaps flows —
+# otherwise every mutant against fips-gated code is invisible.
+#
 # Do not repeat `--cargo-profile` here — `profile = "mutants"` above already
 # forwards it; passing it again makes nextest reject the build with
 # `'--cargo-profile <NAME>' cannot be used multiple times`.
-additional_cargo_test_args = ["--features", "expose-internals"]
+additional_cargo_test_args = ["--features", "expose-internals,fips"]
 
 # Timeout: 2x baseline with a 60s floor. The NTT rejection-sampling and DRBG
 # loops can spin on a mutated bound; the build/test timeouts cap those rather
