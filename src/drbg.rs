@@ -191,7 +191,6 @@ where
     }
 }
 
-
 /// `v += addend (mod 2^(8*N))`, big-endian.
 fn add_be_u8<const N: usize>(v: &mut [u8; N], addend: u8) {
     let mut carry: u16 = u16::from(addend);

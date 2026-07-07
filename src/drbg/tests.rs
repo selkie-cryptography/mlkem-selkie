@@ -236,9 +236,8 @@ fn acvp_hashdrbg_sha3_256() {
         hex::decode(s).expect("hex")
     }
 
-    let vectors: TestVectors =
-        serde_json::from_str(include_str!("vectors/hashdrbg_sha3_256.json"))
-            .expect("parse ACVP JSON");
+    let vectors: TestVectors = serde_json::from_str(include_str!("vectors/hashdrbg_sha3_256.json"))
+        .expect("parse ACVP JSON");
 
     let mut ran = 0usize;
     for group in &vectors.test_groups {
