@@ -123,8 +123,8 @@ fn add_be_u8_propagates_carry_across_boundary() {
 /// [`HashDrbg::reseed`] (§10.1.1.3), and generate-with-additional-input
 /// (§10.1.1.4). The library's production path never touches these — the KEM
 /// instantiates once and calls `fill_bytes` once — but the NIST ACVP
-/// `hashDRBG-1.0` vectors do, and running against them is the only way to
-/// catch mutations against the DRBG's spec-transliterated arithmetic.
+/// `hashDRBG-1.0` vectors exercise them, giving a spec-authored cross-check
+/// against the DRBG's transliterated arithmetic.
 impl<H, const SEEDLEN: usize> HashDrbg<H, SEEDLEN>
 where
     H: DrbgHash,
@@ -133,11 +133,17 @@ where
     /// inputs are concatenated into `seed_material` before Hash_df.
     #[must_use]
     fn new_with_perso(entropy_input: &[u8], nonce: &[u8], personalization: &[u8]) -> Self {
+        let mut scratch = [0u8; ACVP_HASH_DF_BUF];
+
         let mut v = [0u8; SEEDLEN];
-        Self::hash_df(&[entropy_input, nonce, personalization], &mut v);
+        Self::hash_df(
+            &[entropy_input, nonce, personalization],
+            &mut scratch,
+            &mut v,
+        );
 
         let mut c = [0u8; SEEDLEN];
-        Self::hash_df(&[&[0x00u8], &v], &mut c);
+        Self::hash_df(&[&[0x00u8], &v], &mut scratch, &mut c);
 
         Self {
             v,
@@ -149,14 +155,17 @@ where
 
     /// §10.1.1.3 `Hash_DRBG_Reseed`.
     fn reseed(&mut self, entropy_input: &[u8], additional_input: &[u8]) {
+        let mut scratch = [0u8; ACVP_HASH_DF_BUF];
+
         let mut new_v = [0u8; SEEDLEN];
         Self::hash_df(
             &[&[0x01u8], &self.v, entropy_input, additional_input],
+            &mut scratch,
             &mut new_v,
         );
 
         let mut new_c = [0u8; SEEDLEN];
-        Self::hash_df(&[&[0x00u8], &new_v], &mut new_c);
+        Self::hash_df(&[&[0x00u8], &new_v], &mut scratch, &mut new_c);
 
         self.v = new_v;
         self.c = new_c;
@@ -169,18 +178,26 @@ where
     /// production ensures mutants against those paths are exercised here.
     fn generate_with_additional_input(&mut self, additional_input: &[u8], out: &mut [u8]) {
         if !additional_input.is_empty() {
-            let mut input: Vec<u8> = Vec::with_capacity(1 + SEEDLEN + additional_input.len());
-            input.push(0x02);
-            input.extend_from_slice(&self.v);
-            input.extend_from_slice(additional_input);
+            let mut input = [0u8; ACVP_HASH_DF_BUF];
+            let n = 1 + SEEDLEN + additional_input.len();
+            input[0] = 0x02;
+            input[1..1 + SEEDLEN].copy_from_slice(&self.v);
+            input[1 + SEEDLEN..n].copy_from_slice(additional_input);
             let mut w = [0u8; MAX_DIGEST];
-            H::hash(&mut w[..H::OUTLEN], &input);
+            H::hash(&mut w[..H::OUTLEN], &input[..n]);
             add_be_slice(&mut self.v, &w[..H::OUTLEN]);
         }
 
         self.generate(out);
     }
 }
+
+/// Stack scratch sized for the widest ACVP shape: `Hash_df` prefix (5) +
+/// entropy (160) + nonce (32) + personalization (128) = 325 for
+/// `new_with_perso`, and prefix (5) + [0x01] (1) + V (up to 111) + entropy
+/// (160) + additional_input (96) = 373 for `reseed`. 512 rounds up with
+/// headroom for larger inputs a future ACVP release might carry.
+const ACVP_HASH_DF_BUF: usize = 512;
 
 /// NIST ACVP `hashDRBG-1.0` SHA3-256 KAT harness. The vendored JSON is the
 /// SHA3-256 subset (PR-enabled and PR-disabled groups) of
