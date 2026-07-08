@@ -96,11 +96,13 @@ where
     /// lets the same buffer cover the nonce requirement (§8.6.7).
     #[must_use]
     pub fn new(entropy_input: &[u8]) -> Self {
+        let mut scratch = [0u8; HASH_INPUT_BUF];
+
         let mut v = [0u8; SEEDLEN];
-        Self::hash_df(&[entropy_input], &mut v);
+        Self::hash_df(&[entropy_input], &mut scratch, &mut v);
 
         let mut c = [0u8; SEEDLEN];
-        Self::hash_df(&[&[0x00u8], &v], &mut c);
+        Self::hash_df(&[&[0x00u8], &v], &mut scratch, &mut c);
 
         Self {
             v,
@@ -111,30 +113,33 @@ where
     }
 
     /// `Hash_df`, SP 800-90A §10.4.1. Assembles `counter || no_of_bits ||
-    /// input_pieces` into a heap buffer once, then updates just the counter
-    /// byte in place per iteration. Instantiate/reseed are cold-path so the
-    /// single allocation is cheap; the ACVP-shape entry points feed inputs
-    /// (entropy + nonce + personalization, up to ~320 bytes for SHA3-256)
-    /// that a fixed stack buffer sized for the production path could not
-    /// hold.
-    fn hash_df(input_pieces: &[&[u8]], out: &mut [u8]) {
+    /// input_pieces` into the caller-provided `scratch` buffer once, then
+    /// updates just the counter byte in place per iteration. `scratch` must
+    /// have length at least `5 + sum(piece.len() for piece in input_pieces)`.
+    /// The buffer lives on the caller's stack so this function does no heap
+    /// work; production sizes it to [`HASH_INPUT_BUF`] and the ACVP test
+    /// harness sizes it to fit the wider entropy + nonce + personalization
+    /// shapes.
+    fn hash_df(input_pieces: &[&[u8]], scratch: &mut [u8], out: &mut [u8]) {
         let outlen = H::OUTLEN;
         let no_of_bits_to_return: u32 = (out.len() as u32) * 8;
         let iterations = out.len().div_ceil(outlen);
 
         let input_len: usize = input_pieces.iter().map(|p| p.len()).sum();
-        let mut buf: Vec<u8> = Vec::with_capacity(5 + input_len);
-        buf.push(0); // counter placeholder — set per iteration.
-        buf.extend_from_slice(&no_of_bits_to_return.to_be_bytes());
+        let buf = &mut scratch[..5 + input_len];
+        buf[0] = 0; // counter placeholder — set per iteration.
+        buf[1..5].copy_from_slice(&no_of_bits_to_return.to_be_bytes());
+        let mut off = 5;
         for piece in input_pieces {
-            buf.extend_from_slice(piece);
+            buf[off..off + piece.len()].copy_from_slice(piece);
+            off += piece.len();
         }
 
         let mut digest = [0u8; MAX_DIGEST];
         let mut counter: u8 = 1;
         for i in 0..iterations {
             buf[0] = counter;
-            H::hash(&mut digest[..outlen], &buf);
+            H::hash(&mut digest[..outlen], buf);
 
             let start = i * outlen;
             let end = (start + outlen).min(out.len());
