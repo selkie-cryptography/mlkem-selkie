@@ -29,11 +29,13 @@ profile = "mutants"
 # `'--cargo-profile <NAME>' cannot be used multiple times`.
 additional_cargo_test_args = ["--features", "expose-internals,fips"]
 
-# Timeout: 2x baseline with a 60s floor. The NTT rejection-sampling and DRBG
+# Timeout: 2x baseline with a 180s floor. The NTT rejection-sampling and DRBG
 # loops can spin on a mutated bound; the build/test timeouts cap those rather
-# than annotating every loop predicate with `mutants::skip`.
+# than annotating every loop predicate with `mutants::skip`. The 180s floor is
+# generous enough that real assertions (not the timeout guillotine) get to
+# fire on mutants that add cost to hot paths.
 timeout_multiplier = 2.0
-minimum_test_timeout = 60
+minimum_test_timeout = 180
 build_timeout_multiplier = 3.0
 
 # --- Exclusions ---
