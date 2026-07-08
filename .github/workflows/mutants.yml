@@ -10,6 +10,13 @@ on:
 permissions:
   contents: read
 
+env:
+  # sccache turns per-mutant rustc re-invocations into cache hits; the GHA
+  # backend persists across jobs on the same runner arch. Doubles the cost
+  # savings from `-j 4` below.
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: sccache
+
 jobs:
   incremental:
     name: cargo-mutants (changed code)
@@ -24,11 +31,16 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-mutants,cargo-nextest
+      - uses: mozilla-actions/sccache-action@v0.0.5
       - uses: Swatinem/rust-cache@v2
       - name: Mutate only the PR diff
+        # `-j 4` matches the ubuntu-latest 4-vCPU runner. Each mutant is a
+        # single-threaded compile + short test, so raising from `-j 2` roughly
+        # halves wall-time; sccache above catches the rustc-level redundancy
+        # the parallelism exposes.
         run: |
           git diff "origin/${{ github.base_ref }}" > pr.diff
-          cargo mutants --no-shuffle -j 2 --in-diff pr.diff
+          cargo mutants --no-shuffle -j 4 --in-diff pr.diff
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -62,10 +74,12 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-mutants,cargo-nextest
+      - uses: mozilla-actions/sccache-action@v0.0.5
       - uses: Swatinem/rust-cache@v2
       - name: Run full mutation testing
         # Don't fail the job on surviving mutants — summarize and publish them.
-        run: cargo mutants --no-shuffle -j 2 || true
+        # `-j 4` on x86_64 ubuntu / macOS runners (both are 4-vCPU tiers).
+        run: cargo mutants --no-shuffle -j 4 || true
       - name: Summarize
         run: |
           caught=$(wc -l < mutants.out/caught.txt 2>/dev/null || echo 0)
