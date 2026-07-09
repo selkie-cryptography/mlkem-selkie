@@ -12,8 +12,7 @@ permissions:
 
 env:
   # sccache turns per-mutant rustc re-invocations into cache hits; the GHA
-  # backend persists across jobs on the same runner arch. Doubles the cost
-  # savings from `-j 4` below.
+  # backend persists across jobs on the same runner arch.
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: sccache
 
@@ -35,9 +34,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Mutate only the PR diff
         # `-j 4` matches the ubuntu-latest 4-vCPU runner. Each mutant is a
-        # single-threaded compile + short test, so raising from `-j 2` roughly
-        # halves wall-time; sccache above catches the rustc-level redundancy
-        # the parallelism exposes.
+        # single-threaded compile + short test.
         run: |
           git diff "origin/${{ github.base_ref }}" > pr.diff
           cargo mutants --no-shuffle -j 4 --in-diff pr.diff
@@ -47,25 +44,23 @@ jobs:
           name: mutants-out
           path: mutants.out
 
-  full:
-    name: cargo-mutants (full tree, ${{ matrix.arch }})
+  # Full-tree runs are sharded 8 ways per architecture. Wall-time is bounded
+  # by the slowest shard rather than the sequential 1600-mutant grind — see
+  # [[full-summarize]] for the fan-in that produces one dashboard payload
+  # per arch.
+  full-shard:
+    name: full ${{ matrix.arch }} shard ${{ matrix.shard }}/8
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # x86_64: covers the AVX2 backend and the scalar core.
-          - arch: x86_64
-            runner: ubuntu-latest
-            dest: mutants
-          # aarch64 (Apple Silicon): covers `src/algebraic/poly/arch/neon.rs`,
-          # which is `cfg(target_arch = "aarch64")` and never compiles on the
-          # ubuntu runner.
-          - arch: aarch64
-            runner: macos-latest
-            dest: mutants-aarch64
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 360
+        # x86_64 covers the AVX2 backend and the scalar core; aarch64
+        # (Apple Silicon) covers `src/algebraic/poly/arch/neon.rs`, which
+        # is `cfg(target_arch = "aarch64")` and never compiles on ubuntu.
+        arch: [x86_64, aarch64]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-latest' || 'macos-latest' }}
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
         with:
@@ -76,10 +71,62 @@ jobs:
           tool: cargo-mutants,cargo-nextest
       - uses: mozilla-actions/sccache-action@v0.0.10
       - uses: Swatinem/rust-cache@v2
-      - name: Run full mutation testing
-        # Don't fail the job on surviving mutants — summarize and publish them.
-        # `-j 4` on x86_64 ubuntu / macOS runners (both are 4-vCPU tiers).
-        run: cargo mutants --no-shuffle -j 4 || true
+      - name: Run one mutation shard
+        # `--shard i/8` splits the mutant set into 8 groups by index; each
+        # shard's outputs are unioned by the summarize job. `|| true`
+        # swallows surviving mutants (which are signal, not build failure).
+        run: cargo mutants --no-shuffle -j 4 --shard ${{ matrix.shard }}/8 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutants-shard-${{ matrix.arch }}-${{ matrix.shard }}
+          path: mutants.out
+
+  # Per-arch fan-in: pulls the 8 shard artifacts for the arch, concatenates
+  # them into a single mutants.out/, and produces the dashboard payload.
+  # Runs regardless of individual shard success so a runner death on one
+  # shard doesn't hide the results from the other seven.
+  full-summarize:
+    name: full summary (${{ matrix.arch }})
+    if: |
+      always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    needs: full-shard
+    runs-on: ubuntu-latest
+    # The summarizer is pure text munging + a one-file rustc compile; skip
+    # the crate-wide sccache wrapper for this job.
+    env:
+      RUSTC_WRAPPER: ""
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: x86_64, dest: mutants}
+          - {arch: aarch64, dest: mutants-aarch64}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: mutants-shard-${{ matrix.arch }}-*
+          path: shards
+      - name: Merge shard outputs
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          mkdir -p mutants.out
+          outcomes=(shards/*/outcomes.json)
+          if [ ${#outcomes[@]} -eq 0 ]; then
+            echo '{"outcomes":[]}' > mutants.out/outcomes.json
+          else
+            jq -s '{outcomes: (map(.outcomes) | add)}' "${outcomes[@]}" > mutants.out/outcomes.json
+          fi
+          for suf in caught missed timeout unviable success; do
+            : > "mutants.out/${suf}.txt"
+            for f in shards/*/"${suf}.txt"; do
+              cat "$f" >> "mutants.out/${suf}.txt"
+            done
+          done
       - name: Summarize
         run: |
           caught=$(wc -l < mutants.out/caught.txt 2>/dev/null || echo 0)
@@ -87,12 +134,11 @@ jobs:
           viable=$((caught + missed))
           score=0
           [ "$viable" -gt 0 ] && score=$((100 * caught / viable))
-          # `viable == 0` means the baseline build/test failed (or no mutants
-          # were emitted) — `cargo mutants || true` swallows the exit code, so
-          # without this arm a broken baseline would pass silently (the
-          # ci-upload floor also rejects an empty payload).
+          # `viable == 0` means every shard's baseline failed (or produced
+          # no mutants). The per-shard `|| true` above hides that inside
+          # each job; this arm surfaces it at fan-in.
           if [ "$viable" -eq 0 ]; then
-            echo "no mutants tested (baseline failed?)" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "no mutants tested across shards (baseline failed?)" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           echo "caught $caught/$viable ($score%)" | tee -a "$GITHUB_STEP_SUMMARY"
