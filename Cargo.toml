@@ -119,10 +119,18 @@ inherits = "release"
 debug-assertions = true
 overflow-checks = true
 
-# cargo-mutants: release-checked minus debuginfo. Pairs with `.cargo/mutants.toml`.
+# cargo-mutants: release-checked, minus debuginfo, with `opt-level = 1` to
+# collapse the per-mutant rustc bill. The mutation signal is "did any test
+# fail," which is opt-invariant; the release-inherited `-O3` codegen was
+# dominating each mutant's wall-time (~150s build vs ~20s test) without
+# strengthening what mutation tests actually check. `debug-assertions=true`
+# and `overflow-checks=true` are preserved from `release-checked` — those are
+# what catch arithmetic mutants, not `opt-level`.
+# Pairs with `.cargo/mutants.toml`.
 [profile.mutants]
 inherits = "release-checked"
 debug = "none"
+opt-level = 1
 
 # Hax toolchain only, for proofs.
 [target.'cfg(hax)'.dependencies]
