@@ -15,10 +15,12 @@ env:
   # backend persists across jobs on the same runner arch.
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: sccache
-  # Enables the unstable `codegen-backend` profile key that `[profile.mutants]`
-  # in Cargo.toml uses to select Cranelift. Requires nightly Cargo (installed
-  # in each mutant job below). Contained to this workflow.
+  # Enables the unstable `codegen-backend` profile key (nightly Cargo, installed
+  # per mutant job below) and selects Cranelift for the `mutants` profile.
+  # Kept out of Cargo.toml so stable Cargo elsewhere in CI can parse the
+  # manifest — the profile key would otherwise fail every stable job.
   CARGO_UNSTABLE_CODEGEN_BACKEND: "true"
+  CARGO_PROFILE_MUTANTS_CODEGEN_BACKEND: cranelift
 
 jobs:
   incremental:

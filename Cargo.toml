@@ -119,16 +119,16 @@ inherits = "release"
 debug-assertions = true
 overflow-checks = true
 
-# cargo-mutants: cut per-mutant rustc time with `opt-level = 1` + Cranelift.
-# Mutation signal is opt-invariant; `debug-assertions` and `overflow-checks`
-# from `release-checked` are what catch arithmetic mutants. Cranelift is
-# nightly-only, gated on `CARGO_UNSTABLE_CODEGEN_BACKEND` in the workflow.
-# Pairs with `.cargo/mutants.toml`.
+# cargo-mutants: cut per-mutant rustc time with `opt-level = 1`. Mutation
+# signal is opt-invariant; `debug-assertions` and `overflow-checks` from
+# `release-checked` are what catch arithmetic mutants. Cranelift is layered
+# on top via `CARGO_PROFILE_MUTANTS_CODEGEN_BACKEND=cranelift` in the mutants
+# workflow — keeping it out of the manifest so stable Cargo never sees the
+# unstable profile key. Pairs with `.cargo/mutants.toml`.
 [profile.mutants]
 inherits = "release-checked"
 debug = "none"
 opt-level = 1
-codegen-backend = "cranelift"
 
 # Hax toolchain only, for proofs.
 [target.'cfg(hax)'.dependencies]
