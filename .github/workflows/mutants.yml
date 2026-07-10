@@ -16,17 +16,24 @@ env:
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: sccache
   # Enables the unstable `codegen-backend` profile key (nightly Cargo, installed
-  # per mutant job below) and selects Cranelift for the `mutants` profile.
-  # Kept out of Cargo.toml so stable Cargo elsewhere in CI can parse the
-  # manifest — the profile key would otherwise fail every stable job.
+  # per mutant job below). Kept out of Cargo.toml so stable Cargo elsewhere in
+  # CI can parse the manifest — the profile key would otherwise fail every
+  # stable job. The backend selection itself is set per-job/arch below because
+  # Cranelift's aarch64 target is missing several intrinsics we depend on
+  # (NEON `ld2` in our multiply kernel, and `xar`/`bcaxu`/`eor3u`/`rax1`
+  # from libcrux-sha3's ARMv8.4 SHA3 crypto path). Cranelift replaces those
+  # with `trap`, so any test that exercises NEON or hardware SHA3 panics
+  # before it can catch anything. We keep Cranelift on x86_64 (mature) and
+  # fall back to LLVM on aarch64.
   CARGO_UNSTABLE_CODEGEN_BACKEND: "true"
-  CARGO_PROFILE_MUTANTS_CODEGEN_BACKEND: cranelift
 
 jobs:
   incremental:
     name: cargo-mutants (changed code)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    env:
+      CARGO_PROFILE_MUTANTS_CODEGEN_BACKEND: cranelift
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,22 +50,28 @@ jobs:
       - name: Mutate only the PR diff
         # `-j 2` matches the free-plan ubuntu-latest 2-vCPU runner. Prior
         # `-j 4` oversubscribed the CPU and made per-mutant cargo processes
-        # thrash for cores instead of parallelize.
+        # thrash for cores instead of parallelize. Shuffled ordering (default,
+        # i.e. no `--no-shuffle`) spreads slow mutants across shards in the
+        # full-tree job; kept consistent here for symmetry.
         run: |
           git diff "origin/${{ github.base_ref }}" > pr.diff
-          cargo mutants --no-shuffle -j 2 --in-diff pr.diff
+          cargo mutants -j 2 --in-diff pr.diff
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: mutants-out
           path: mutants.out
 
-  # Full-tree runs are sharded 8 ways per architecture. Wall-time is bounded
-  # by the slowest shard rather than the sequential 1600-mutant grind — see
-  # [[full-summarize]] for the fan-in that produces one dashboard payload
-  # per arch.
+  # Full-tree runs are sharded per architecture. Wall-time is bounded by the
+  # slowest shard rather than the sequential 1600-mutant grind — see
+  # [[full-summarize]] for the fan-in that produces one dashboard payload per
+  # arch. Shard counts are asymmetric: free-plan ubuntu-latest (2-vCPU Xeon
+  # vCPUs) is ~5x slower per-mutant than macos-latest (M1, 3-vCPU), so
+  # x86_64 gets 16 shards to keep its wall time near aarch64's. aarch64 stays
+  # at 8 to respect the free-plan 5-concurrent macOS runner cap (going higher
+  # would just queue).
   full-shard:
-    name: full ${{ matrix.arch }} shard ${{ matrix.shard }}/8
+    name: full ${{ matrix.arch }} shard ${{ matrix.shard }}/${{ matrix.arch == 'x86_64' && '16' || '8' }}
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
@@ -67,9 +80,23 @@ jobs:
         # (Apple Silicon) covers `src/algebraic/poly/arch/neon.rs`, which
         # is `cfg(target_arch = "aarch64")` and never compiles on ubuntu.
         arch: [x86_64, aarch64]
-        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        # aarch64 uses only shards 0..7; 8..15 are x86_64-only.
+        exclude:
+          - {arch: aarch64, shard: 8}
+          - {arch: aarch64, shard: 9}
+          - {arch: aarch64, shard: 10}
+          - {arch: aarch64, shard: 11}
+          - {arch: aarch64, shard: 12}
+          - {arch: aarch64, shard: 13}
+          - {arch: aarch64, shard: 14}
+          - {arch: aarch64, shard: 15}
     runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-latest' || 'macos-latest' }}
     timeout-minutes: 120
+    env:
+      # Cranelift only on x86_64 (see top-level env for the aarch64 gap).
+      # Empty string means the profile falls back to LLVM.
+      CARGO_PROFILE_MUTANTS_CODEGEN_BACKEND: ${{ matrix.arch == 'x86_64' && 'cranelift' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -83,13 +110,16 @@ jobs:
       - uses: mozilla-actions/sccache-action@v0.0.10
       - uses: Swatinem/rust-cache@v2
       - name: Run one mutation shard
-        # `--shard i/8` splits the mutant set into 8 groups by index; each
-        # shard's outputs are unioned by the summarize job. `|| true`
-        # swallows surviving mutants (which are signal, not build failure).
-        # `-j` matches each runner's actual vCPU count on the free plan
-        # (ubuntu-latest = 2, macos-latest M1 = 3); prior `-j 4` was
-        # oversubscribed on both.
-        run: cargo mutants --no-shuffle -j ${{ matrix.arch == 'x86_64' && '2' || '3' }} --shard ${{ matrix.shard }}/8 || true
+        # `--shard i/N` splits the mutant set into N groups by index (N is
+        # per-arch, see the matrix comment above); each shard's outputs are
+        # unioned by the summarize job. `|| true` swallows surviving mutants
+        # (which are signal, not build failure). `-j` matches each runner's
+        # actual vCPU count on the free plan (ubuntu-latest = 2, macos-latest
+        # M1 = 3); prior `-j 4` was oversubscribed on both. Shuffled mutant
+        # order (cargo-mutants default) spreads timeout-prone mutants across
+        # shards so wall time tracks the average, not the tail — trading
+        # per-shard reproducibility (which CI doesn't need) for load balance.
+        run: cargo mutants -j ${{ matrix.arch == 'x86_64' && '2' || '3' }} --shard ${{ matrix.shard }}/${{ matrix.arch == 'x86_64' && '16' || '8' }} || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:

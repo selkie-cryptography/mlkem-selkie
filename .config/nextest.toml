@@ -5,3 +5,12 @@
 # shapes into the dashboard's Conformance panel payload.
 [profile.vectors.junit]
 path = "junit.xml"
+
+# `mutants` is used by cargo-mutants (see `.cargo/mutants.toml`). It runs the
+# lib unit tests + wycheproof + ACVP KATs + proptests + ctgrind, but skips
+# `libcrux_xtest` — the libcrux interop suite is broad-integration coverage
+# that overlaps with wycheproof/ACVP at much higher per-test cost, and the
+# mutants it uniquely catches are rare enough that dropping it per-mutant
+# and re-checking on the schedule/main-push CI job is a better trade.
+[profile.mutants]
+default-filter = "not binary(=libcrux_xtest)"

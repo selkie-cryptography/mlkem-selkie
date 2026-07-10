@@ -4,9 +4,11 @@
 #   cargo mutants                       # full run
 #   cargo mutants --in-diff <(git diff main)  # only changed code
 #
-# The suite runs lib unit tests AND the integration tests under `tests/`
-# (wycheproof, ACVP KATs, proptests, libcrux interop) so the end-to-end checks
-# participate in killing mutants. Requires `cargo-nextest` on PATH.
+# The suite runs lib unit tests AND most integration tests under `tests/`
+# (wycheproof, ACVP KATs, proptests, ctgrind). `libcrux_xtest` is excluded
+# via the `mutants` nextest profile in `.config/nextest.toml` — it's the
+# heaviest integration binary and its per-mutant cost is disproportionate.
+# Requires `cargo-nextest` on PATH.
 
 # nextest as the default test tool. CI assumes this.
 test_tool = "nextest"
@@ -27,7 +29,7 @@ profile = "mutants"
 # Do not repeat `--cargo-profile` here — `profile = "mutants"` above already
 # forwards it; passing it again makes nextest reject the build with
 # `'--cargo-profile <NAME>' cannot be used multiple times`.
-additional_cargo_test_args = ["--features", "expose-internals,fips"]
+additional_cargo_test_args = ["--features", "expose-internals,fips", "--profile", "mutants"]
 
 # Timeout: 2x baseline with a 90s floor. The NTT rejection-sampling and DRBG
 # loops can spin on a mutated bound; the build/test timeouts cap those rather
