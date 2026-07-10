@@ -15,6 +15,10 @@ env:
   # backend persists across jobs on the same runner arch.
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: sccache
+  # Enables the unstable `codegen-backend` profile key that `[profile.mutants]`
+  # in Cargo.toml uses to select Cranelift. Requires nightly Cargo (installed
+  # in each mutant job below). Contained to this workflow.
+  CARGO_UNSTABLE_CODEGEN_BACKEND: "true"
 
 jobs:
   incremental:
@@ -26,18 +30,21 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustc-codegen-cranelift-preview
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-mutants,cargo-nextest
       - uses: mozilla-actions/sccache-action@v0.0.10
       - uses: Swatinem/rust-cache@v2
       - name: Mutate only the PR diff
-        # `-j 4` matches the ubuntu-latest 4-vCPU runner. Each mutant is a
-        # single-threaded compile + short test.
+        # `-j 2` matches the free-plan ubuntu-latest 2-vCPU runner. Prior
+        # `-j 4` oversubscribed the CPU and made per-mutant cargo processes
+        # thrash for cores instead of parallelize.
         run: |
           git diff "origin/${{ github.base_ref }}" > pr.diff
-          cargo mutants --no-shuffle -j 4 --in-diff pr.diff
+          cargo mutants --no-shuffle -j 2 --in-diff pr.diff
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -65,7 +72,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustc-codegen-cranelift-preview
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-mutants,cargo-nextest
@@ -75,7 +84,10 @@ jobs:
         # `--shard i/8` splits the mutant set into 8 groups by index; each
         # shard's outputs are unioned by the summarize job. `|| true`
         # swallows surviving mutants (which are signal, not build failure).
-        run: cargo mutants --no-shuffle -j 4 --shard ${{ matrix.shard }}/8 || true
+        # `-j` matches each runner's actual vCPU count on the free plan
+        # (ubuntu-latest = 2, macos-latest M1 = 3); prior `-j 4` was
+        # oversubscribed on both.
+        run: cargo mutants --no-shuffle -j ${{ matrix.arch == 'x86_64' && '2' || '3' }} --shard ${{ matrix.shard }}/8 || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
