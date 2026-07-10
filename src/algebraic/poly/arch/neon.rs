@@ -16,9 +16,9 @@
 
 use core::arch::aarch64::{
     int16x4_t, int16x8_t, int16x8x2_t, int32x4_t, vaddq_s16, vcombine_s16, vdup_n_s16, vdupq_n_s16,
-    vdupq_n_s32, vget_low_s16, vld1q_s16, vld2q_s16, vmlaq_n_s32, vmovl_high_s16, vmovl_s16,
-    vmovn_s32, vmul_s16, vmull_high_s16, vmull_s16, vmulq_n_s32, vshrn_n_s32, vshrq_n_s32,
-    vst1q_s16, vst2q_s16, vsubq_s16, vsubq_s32,
+    vdupq_n_s32, vget_low_s16, vld1q_s16, vld2q_s16, vmlaq_n_s32, vmlsq_s16, vmovl_high_s16,
+    vmovl_s16, vmovn_s32, vmul_s16, vmull_high_s16, vmull_s16, vmulq_n_s32, vmulq_s16,
+    vqrdmulhq_s16, vshrn_n_s32, vshrq_n_s32, vst1q_s16, vst2q_s16, vsubq_s16, vsubq_s32,
 };
 
 use crate::{algebraic::field::FieldElement, parameters};
@@ -39,6 +39,24 @@ const BARRETT_V: i32 = ((1 << 26) + (parameters::Q as i32) / 2) / (parameters::Q
 /// The final NTT⁻¹ scale `f = 128^-1 * R^2 mod q = 1441` in Montgomery form,
 /// mirroring `generic`'s `NTT_INVERSE_SCALE`.
 const NTT_INVERSE_SCALE: i16 = 1441;
+
+/// Barrett multipliers `round(zeta * 2^15 / q)` paired with
+/// [`super::ZETA_RAW`], for [`barrett_const_mul`] in the NTT butterflies. The
+/// `2^15` (not `2^16`) pre-divides by 2 to compensate for `sqrdmulh`'s doubling
+/// behavior.
+const ZETA_BARRETT: [i16; 128] = {
+    let mut table = [0i16; 128];
+    let mut i = 0;
+    while i < 128 {
+        #[allow(clippy::indexing_slicing)] // reason: i < 128 by the loop guard.
+        {
+            let zeta = super::ZETA_RAW[i] as i32;
+            table[i] = ((zeta * (1 << 15) + (Q as i32) / 2) / (Q as i32)) as i16;
+        }
+        i += 1;
+    }
+    table
+};
 
 /// Montgomery-reduces four `i32` products to `i16`, returning `a * R^-1 mod q`
 /// in `(-q, q)` per lane: the vector form of `FieldElement::montgomery_reduce`.
@@ -71,6 +89,26 @@ fn fqmul(a: int16x8_t, b: int16x8_t) -> int16x8_t {
             montgomery_reduce(product_low, q, qinv),
             montgomery_reduce(product_high, q, qinv),
         )
+    }
+}
+
+/// Multiplies `a` by a compile-time constant `b` using Barrett reduction with
+/// the precomputed multiplier `b_bar = round(b * 2^15 / q)`, returning
+/// `a * b mod q` per lane in three vector instructions.
+///
+/// `b` must be a canonical (non-Montgomery) representative for the result to
+/// preserve the Montgomery-domain convention: given `a = a_true * R`,
+/// `a * b mod q = (a_true * b) * R`. For NTT butterflies with zeta table
+/// [`ZETA_BARRETT`] paired with [`super::ZETA_RAW`], this replaces the
+/// [`fqmul`] path (~12 intrinsics per lane) with 3.
+#[inline]
+fn barrett_const_mul(a: int16x8_t, b: int16x8_t, b_bar: int16x8_t) -> int16x8_t {
+    // SAFETY: NEON is baseline on aarch64; every intrinsic below is total.
+    unsafe {
+        let c_low = vmulq_s16(a, b);
+        let t = vqrdmulhq_s16(a, b_bar);
+
+        vmlsq_s16(c_low, t, vdupq_n_s16(Q))
     }
 }
 
@@ -154,26 +192,29 @@ pub(crate) fn multiply(
 pub(crate) fn ntt(coefficients: &mut [FieldElement; parameters::N]) {
     let mut k = 1;
 
-    // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so the array and
-    // `ZETA_MONT` reinterpret as `[i16]`. Each vector window `[j, j + 8)` and
+    // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so the array
+    // reinterprets as `[i16]`. Each vector window `[j, j + 8)` and
     // `[j + len, j + len + 8)` stays within the 256-element array (the loops
     // bound `j + len + 8 <= start + 2*len <= 256`), and `k < 32 < 128` indexes
-    // `ZETA_MONT`. `vld1q`/`vst1q` are unaligned. NEON is baseline on aarch64.
+    // `ZETA_RAW` / `ZETA_BARRETT`. `vld1q`/`vst1q` are unaligned. NEON is
+    // baseline on aarch64.
     unsafe {
         let ptr = coefficients.as_mut_ptr().cast::<i16>();
-        let zeta_ptr = super::ZETA_MONT.as_ptr().cast::<i16>();
+        let zeta_raw_ptr = super::ZETA_RAW.as_ptr().cast::<i16>();
+        let zeta_bar_ptr = ZETA_BARRETT.as_ptr();
 
         for len in [128usize, 64, 32, 16, 8] {
             let mut start = 0;
             while start < 256 {
-                let zeta = vdupq_n_s16(*zeta_ptr.add(k));
+                let zeta = vdupq_n_s16(*zeta_raw_ptr.add(k));
+                let zeta_bar = vdupq_n_s16(*zeta_bar_ptr.add(k));
                 k += 1;
 
                 let mut j = start;
                 while j < start + len {
                     let vj = vld1q_s16(ptr.add(j));
                     let vjl = vld1q_s16(ptr.add(j + len));
-                    let t = fqmul(zeta, vjl);
+                    let t = barrett_const_mul(vjl, zeta, zeta_bar);
 
                     vst1q_s16(ptr.add(j + len), vsubq_s16(vj, t));
                     vst1q_s16(ptr.add(j), vaddq_s16(vj, t));
@@ -238,19 +279,22 @@ pub(crate) fn ntt_inverse(coefficients: &mut [FieldElement; parameters::N]) {
         }
     }
 
-    // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so the array and
-    // `ZETA_MONT` reinterpret as `[i16]`. Each vector window `[j, j + 8)` and
+    // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so the array
+    // reinterprets as `[i16]`. Each vector window `[j, j + 8)` and
     // `[j + len, j + len + 8)` stays within the 256-element array, and the
-    // descending `k` indexes `ZETA_MONT` (it reaches 0 only after the last use).
-    // `vld1q`/`vst1q` are unaligned. NEON is baseline on aarch64.
+    // descending `k` indexes `ZETA_RAW` / `ZETA_BARRETT` (it reaches 0 only
+    // after the last use). `vld1q`/`vst1q` are unaligned. NEON is baseline
+    // on aarch64.
     unsafe {
         let ptr = coefficients.as_mut_ptr().cast::<i16>();
-        let zeta_ptr = super::ZETA_MONT.as_ptr().cast::<i16>();
+        let zeta_raw_ptr = super::ZETA_RAW.as_ptr().cast::<i16>();
+        let zeta_bar_ptr = ZETA_BARRETT.as_ptr();
 
         for len in [8usize, 16, 32, 64, 128] {
             let mut start = 0;
             while start < 256 {
-                let zeta = vdupq_n_s16(*zeta_ptr.add(k));
+                let zeta = vdupq_n_s16(*zeta_raw_ptr.add(k));
+                let zeta_bar = vdupq_n_s16(*zeta_bar_ptr.add(k));
                 k -= 1;
 
                 let mut j = start;
@@ -259,7 +303,10 @@ pub(crate) fn ntt_inverse(coefficients: &mut [FieldElement; parameters::N]) {
                     let vjl = vld1q_s16(ptr.add(j + len));
 
                     vst1q_s16(ptr.add(j), barrett_reduce(vaddq_s16(vj, vjl)));
-                    vst1q_s16(ptr.add(j + len), fqmul(zeta, vsubq_s16(vjl, vj)));
+                    vst1q_s16(
+                        ptr.add(j + len),
+                        barrett_const_mul(vsubq_s16(vjl, vj), zeta, zeta_bar),
+                    );
 
                     j += 8;
                 }

@@ -7,8 +7,10 @@
 //! cfg that `build.rs` emits; absent it, the portable scalar [`generic`]
 //! backend is used.
 //!
-//! The shared Montgomery-form zeta tables live here so every backend reads the
-//! same constants (the vector backends reinterpret them as `[i16]`).
+//! The shared zeta tables live here so every backend reads the same constants.
+//! [`ZETA_RAW`] holds the canonical values from FIPS 203 Appendix A;
+//! [`ZETA_MONT`] and [`GAMMA_MONT`] are Montgomery-form derivations of those
+//! (the vector backends reinterpret them as `[i16]`).
 
 use crate::algebraic::field::FieldElement;
 
@@ -25,11 +27,11 @@ pub(crate) use generic::{multiply, ntt, ntt_inverse};
 #[cfg(mlkem_selkie_arch = "neon")]
 pub(crate) use neon::{multiply, ntt, ntt_inverse};
 
-/// The Montgomery-form values `ζ^BitRev7(i) * R mod q` for `i` in `{0, ...,
-/// 127}`, derived from the canonical [FIPS 203 Appendix A] table.
+/// The canonical values `ζ^BitRev7(i) mod q` for `i` in `{0, ..., 127}`,
+/// [FIPS 203 Appendix A].
 ///
 /// [FIPS 203 Appendix A]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#appendix.A
-const ZETA_MONT: [FieldElement; 128] = FieldElement::montgomery_table([
+pub(super) const ZETA_RAW: [u16; 128] = [
     1, 1729, 2580, 3289, 2642, 630, 1897, 848, 1062, 1919, 193, 797, 2786, 3260, 569, 1746, 296,
     2447, 1339, 1476, 3046, 56, 2240, 1333, 1426, 2094, 535, 2882, 2393, 2879, 1974, 821, 289, 331,
     3253, 1756, 1197, 2304, 2277, 2055, 650, 1977, 2513, 632, 2865, 33, 1320, 1915, 2319, 1435,
@@ -38,7 +40,11 @@ const ZETA_MONT: [FieldElement; 128] = FieldElement::montgomery_table([
     1789, 1847, 952, 1461, 2687, 939, 2308, 2437, 2388, 733, 2337, 268, 641, 1584, 2298, 2037,
     3220, 375, 2549, 2090, 1645, 1063, 319, 2773, 757, 2099, 561, 2466, 2594, 2804, 1092, 403,
     1026, 1143, 2150, 2775, 886, 1722, 1212, 1874, 1029, 2110, 2935, 885, 2154,
-]);
+];
+
+/// The Montgomery-form values `ζ^BitRev7(i) * R mod q`, derived from
+/// [`ZETA_RAW`].
+const ZETA_MONT: [FieldElement; 128] = FieldElement::montgomery_table(ZETA_RAW);
 
 /// The Montgomery-form values `ζ^(2 BitRev7(i) + 1) * R mod q` for `i` in
 /// `{0, ..., 127}`, derived from the canonical [FIPS 203 Appendix A] table (the
