@@ -15,7 +15,6 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
 
 jobs:
   fmt:
@@ -42,9 +41,9 @@ jobs:
       # only ever lint the portable kernels.
       matrix:
         include:
-          - { backend: portable, os: ubuntu-latest, rustflags: "-D warnings" }
-          - { backend: neon, os: macos-latest, rustflags: "-D warnings" }
-          - { backend: avx2, os: ubuntu-latest, rustflags: "-D warnings -C target-cpu=x86-64-v3" }
+          - { backend: portable, os: ubuntu-latest, rustflags: "" }
+          - { backend: neon, os: macos-latest, rustflags: "" }
+          - { backend: avx2, os: ubuntu-latest, rustflags: "-C target-cpu=x86-64-v3" }
     env:
       RUSTFLAGS: ${{ matrix.rustflags }}
     steps:
@@ -56,9 +55,9 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Clippy (default features)
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets
       - name: Clippy (all features)
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --all-features
 
   doc:
     name: doc (${{ matrix.backend }})
@@ -67,10 +66,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { backend: portable, os: ubuntu-latest, rustflags: "-D warnings" }
-          - { backend: neon, os: macos-latest, rustflags: "-D warnings" }
-          - { backend: avx2, os: ubuntu-latest, rustflags: "-D warnings -C target-cpu=x86-64-v3" }
+          - { backend: portable, os: ubuntu-latest, rustflags: "" }
+          - { backend: neon, os: macos-latest, rustflags: "" }
+          - { backend: avx2, os: ubuntu-latest, rustflags: "-C target-cpu=x86-64-v3" }
     env:
+      # rustdoc has its own flag path; `build.warnings = "deny"` covers cargo
+      # commands but not rustdoc, so this stays.
       RUSTDOCFLAGS: -D warnings
       RUSTFLAGS: ${{ matrix.rustflags }}
     steps:
@@ -138,7 +139,7 @@ jobs:
     # (poly/arch/avx2) run against the scalar backend here. `RUSTFLAGS` is set in
     # the job (it overrides .cargo/config.toml's target rustflags).
     env:
-      RUSTFLAGS: "-D warnings -C target-cpu=x86-64-v3"
+      RUSTFLAGS: "-C target-cpu=x86-64-v3"
     steps:
       - uses: actions/checkout@v4
         with:

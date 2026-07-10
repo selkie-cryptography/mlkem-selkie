@@ -1,10 +1,16 @@
+# Deny lint warnings in local packages. Stabilized in Cargo 1.97, replaces
+# the `RUSTFLAGS: -D warnings` sprinkles that used to live in every CI job.
+# Applies to `cargo build`/`check`/`test`/`clippy`.
+[build]
+warnings = "deny"
+
 # Raise the x86_64 baseline to x86-64-v3 (AVX2, BMI2, FMA, ...) so `build.rs`
 # detects AVX2 and selects the `avx2` polynomial backend. aarch64 has NEON in
 # its baseline and needs no flags here.
 #
 # Note: an explicit `RUSTFLAGS` env var overrides these target rustflags
-# entirely. CI sets `RUSTFLAGS`, so the AVX2 CI job passes `-C target-cpu` in its
-# own `RUSTFLAGS` rather than relying on this file.
+# entirely. CI jobs that want the portable backend pass `RUSTFLAGS: ""`, and
+# the AVX2 CI job passes `-C target-cpu` in its own `RUSTFLAGS`.
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-C", "target-cpu=x86-64-v3"]
 
