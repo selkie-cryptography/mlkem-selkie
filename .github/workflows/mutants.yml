@@ -93,10 +93,6 @@ jobs:
           - {arch: aarch64, shard: 15}
     runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-latest' || 'macos-latest' }}
     timeout-minutes: 120
-    env:
-      # Cranelift only on x86_64 (see top-level env for the aarch64 gap).
-      # Empty string means the profile falls back to LLVM.
-      CARGO_PROFILE_MUTANTS_CODEGEN_BACKEND: ${{ matrix.arch == 'x86_64' && 'cranelift' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -119,7 +115,15 @@ jobs:
         # order (cargo-mutants default) spreads timeout-prone mutants across
         # shards so wall time tracks the average, not the tail — trading
         # per-shard reproducibility (which CI doesn't need) for load balance.
-        run: cargo mutants -j ${{ matrix.arch == 'x86_64' && '2' || '3' }} --shard ${{ matrix.shard }}/${{ matrix.arch == 'x86_64' && '16' || '8' }} || true
+        # `CARGO_PROFILE_MUTANTS_CODEGEN_BACKEND` is exported here rather than
+        # at env-level so aarch64 truly doesn't see it — setting it to `""`
+        # via a matrix expression made cargo try to load a codegen backend
+        # named `""` and fail immediately, wiping the whole shard.
+        run: |
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            export CARGO_PROFILE_MUTANTS_CODEGEN_BACKEND=cranelift
+          fi
+          cargo mutants -j ${{ matrix.arch == 'x86_64' && '2' || '3' }} --shard ${{ matrix.shard }}/${{ matrix.arch == 'x86_64' && '16' || '8' }} || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
