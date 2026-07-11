@@ -119,16 +119,22 @@ inherits = "release"
 debug-assertions = true
 overflow-checks = true
 
-# cargo-mutants: cut per-mutant rustc time with `opt-level = 1`. Mutation
-# signal is opt-invariant; `debug-assertions` and `overflow-checks` from
-# `release-checked` are what catch arithmetic mutants. Cranelift is layered
-# on top via `CARGO_PROFILE_MUTANTS_CODEGEN_BACKEND=cranelift` in the mutants
-# workflow — keeping it out of the manifest so stable Cargo never sees the
-# unstable profile key. Pairs with `.cargo/mutants.toml`.
+# cargo-mutants: cut per-mutant rustc time with `opt-level = 1` and
+# `incremental = true`. Mutation signal is opt-invariant; `debug-assertions`
+# and `overflow-checks` from `release-checked` are what catch arithmetic
+# mutants. `incremental` is off by default here (inherited from `release`), but
+# a mutation run is thousands of single-function edits to the same crate reverted
+# back to baseline each time — the best case for incremental, so each mutant
+# recompiles only the changed codegen unit instead of the whole lib (~2x faster
+# per mutant, measured). Cranelift is layered on top via
+# `CARGO_PROFILE_MUTANTS_CODEGEN_BACKEND=cranelift` in the mutants workflow —
+# keeping it out of the manifest so stable Cargo never sees the unstable profile
+# key. Pairs with `.cargo/mutants.toml`.
 [profile.mutants]
 inherits = "release-checked"
 debug = "none"
 opt-level = 1
+incremental = true
 
 # Hax toolchain only, for proofs.
 [target.'cfg(hax)'.dependencies]

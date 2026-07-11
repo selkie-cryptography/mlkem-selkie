@@ -18,6 +18,10 @@ test_tool = "nextest"
 # debuginfo — build time dominates per-mutant cost.
 profile = "mutants"
 
+# Seed each scratch build dir with the (rust-cache-warmed) `target/` so its
+# first build isn't a cold dep recompile; pairs with `incremental`.
+copy_target = true
+
 # Run mutants with the internals exposed so the white-box property and unit
 # tests (algebraic_properties, field/NTT/encoding) can kill arithmetic mutants,
 # under the release-checked profile (debug-assertions + overflow-checks).
@@ -41,8 +45,6 @@ timeout_multiplier = 2.0
 minimum_test_timeout = 90
 build_timeout_multiplier = 3.0
 
-# --- Exclusions ---
-#
 # Keep this list minimal. A surviving mutant is a signal, not noise; only
 # exclude where mutation *cannot* produce a meaningful test failure.
 exclude_re = [
