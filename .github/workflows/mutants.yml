@@ -15,16 +15,16 @@ env:
   # backend persists across jobs on the same runner arch.
   SCCACHE_GHA_ENABLED: "true"
   RUSTC_WRAPPER: sccache
-  # Enables the unstable `codegen-backend` profile key (nightly Cargo, installed
-  # per mutant job below). Kept out of Cargo.toml so stable Cargo elsewhere in
-  # CI can parse the manifest — the profile key would otherwise fail every
-  # stable job. The backend selection itself is set per-job/arch below because
-  # Cranelift's aarch64 target is missing several intrinsics we depend on
-  # (NEON `ld2` in our multiply kernel, and `xar`/`bcaxu`/`eor3u`/`rax1`
-  # from libcrux-sha3's ARMv8.4 SHA3 crypto path). Cranelift replaces those
-  # with `trap`, so any test that exercises NEON or hardware SHA3 panics
-  # before it can catch anything. We keep Cranelift on x86_64 (mature) and
-  # fall back to LLVM on aarch64.
+  # Enables the unstable `codegen-backend` profile key (nightly Cargo,
+  # installed per mutant job below). Kept out of Cargo.toml so stable Cargo
+  # elsewhere in CI can parse the manifest — the profile key would otherwise
+  # fail every stable job. The backend selection itself is set per-job/arch
+  # below because Cranelift's aarch64 target is missing several intrinsics we
+  # depend on (NEON `ld2` in our multiply kernel, and
+  # `xar`/`bcaxu`/`eor3u`/`rax1` from libcrux-sha3's ARMv8.4 SHA3 crypto
+  # path). Cranelift replaces those with `trap`, so any test that exercises
+  # NEON or hardware SHA3 panics before it can catch anything. We keep
+  # Cranelift on x86_64 (mature) and fall back to LLVM on aarch64.
   CARGO_UNSTABLE_CODEGEN_BACKEND: "true"
 
 jobs:
@@ -42,12 +42,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustc-codegen-cranelift-preview
-      # Link with mold: relinking is the per-mutant tail now codegen is cheap.
-      # `mold -run` needs no rustflags, so `target-cpu=v3` survives. Swap for
-      # `wild` once it ships incremental linking.
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-mutants,cargo-nextest,mold
+          tool: cargo-mutants,cargo-nextest
+      # Link with mold: relinking is the per-mutant tail now codegen is cheap.
+      # `mold -run` needs no rustflags, so `target-cpu=v3` survives.
+      - run: sudo apt-get update && sudo apt-get install -y mold
       - uses: mozilla-actions/sccache-action@v0.0.10
       - uses: Swatinem/rust-cache@v2
       - name: Mutate only the PR diff
@@ -108,9 +108,7 @@ jobs:
           tool: cargo-mutants,cargo-nextest
       # mold is Linux-only; x86_64 shards only. aarch64 uses bundled lld (below).
       - if: matrix.arch == 'x86_64'
-        uses: taiki-e/install-action@v2
-        with:
-          tool: mold
+        run: sudo apt-get update && sudo apt-get install -y mold
       - uses: mozilla-actions/sccache-action@v0.0.10
       - uses: Swatinem/rust-cache@v2
       - name: Run one mutation shard
@@ -123,10 +121,10 @@ jobs:
         # order (cargo-mutants default) spreads timeout-prone mutants across
         # shards so wall time tracks the average, not the tail — trading
         # per-shard reproducibility (which CI doesn't need) for load balance.
-        # `CARGO_PROFILE_MUTANTS_CODEGEN_BACKEND` is exported here rather than
-        # at env-level so aarch64 truly doesn't see it — setting it to `""`
-        # via a matrix expression made cargo try to load a codegen backend
-        # named `""` and fail immediately, wiping the whole shard.
+        # `CARGO_PROFILE_MUTANTS_CODEGEN_BACKEND` is exported here rather
+        # than at env-level so aarch64 truly doesn't see it — setting it to
+        # `""` via a matrix expression made cargo try to load a codegen
+        # backend named `""` and fail immediately, wiping the whole shard.
         # Linker: x86_64 via mold; aarch64 via bundled lld (ld64.lld).
         run: |
           if [ "${{ matrix.arch }}" = "x86_64" ]; then
