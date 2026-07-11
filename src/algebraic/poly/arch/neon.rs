@@ -44,11 +44,11 @@ const NTT_INVERSE_SCALE: i16 = 1441;
 /// [`super::ZETA_RAW`], for [`barrett_const_mul`] in the NTT butterflies. The
 /// `2^15` (not `2^16`) pre-divides by 2 to compensate for `sqrdmulh`'s doubling
 /// behavior.
+#[allow(clippy::indexing_slicing)] // reason: i < 128 by the loop guard.
 const ZETA_BARRETT: [i16; 128] = {
     let mut table = [0i16; 128];
     let mut i = 0;
     while i < 128 {
-        #[allow(clippy::indexing_slicing)] // reason: i < 128 by the loop guard.
         {
             let zeta = super::ZETA_RAW[i] as i32;
             table[i] = ((zeta * (1 << 15) + (Q as i32) / 2) / (Q as i32)) as i16;
