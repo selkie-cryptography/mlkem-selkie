@@ -42,9 +42,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustc-codegen-cranelift-preview
+      # Link with mold: relinking is the per-mutant tail now codegen is cheap.
+      # `mold -run` needs no rustflags, so `target-cpu=v3` survives. Swap for
+      # `wild` once it ships incremental linking.
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-mutants,cargo-nextest
+          tool: cargo-mutants,cargo-nextest,mold
       - uses: mozilla-actions/sccache-action@v0.0.10
       - uses: Swatinem/rust-cache@v2
       - name: Mutate only the PR diff
@@ -55,7 +58,7 @@ jobs:
         # full-tree job; kept consistent here for symmetry.
         run: |
           git diff "origin/${{ github.base_ref }}" > pr.diff
-          cargo mutants -j 2 --in-diff pr.diff
+          mold -run cargo mutants -j 2 --in-diff pr.diff
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -103,6 +106,11 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-mutants,cargo-nextest
+      # mold is Linux-only; x86_64 shards only. aarch64 uses bundled lld (below).
+      - if: matrix.arch == 'x86_64'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: mold
       - uses: mozilla-actions/sccache-action@v0.0.10
       - uses: Swatinem/rust-cache@v2
       - name: Run one mutation shard
@@ -119,11 +127,15 @@ jobs:
         # at env-level so aarch64 truly doesn't see it — setting it to `""`
         # via a matrix expression made cargo try to load a codegen backend
         # named `""` and fail immediately, wiping the whole shard.
+        # Linker: x86_64 via mold; aarch64 via bundled lld (ld64.lld).
         run: |
           if [ "${{ matrix.arch }}" = "x86_64" ]; then
             export CARGO_PROFILE_MUTANTS_CODEGEN_BACKEND=cranelift
+            mold -run cargo mutants -j 2 --shard ${{ matrix.shard }}/16 || true
+          else
+            export CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS="-Clink-arg=--ld-path=$(rustc --print sysroot)/lib/rustlib/aarch64-apple-darwin/bin/gcc-ld/ld64.lld"
+            cargo mutants -j 3 --shard ${{ matrix.shard }}/8 || true
           fi
-          cargo mutants -j ${{ matrix.arch == 'x86_64' && '2' || '3' }} --shard ${{ matrix.shard }}/${{ matrix.arch == 'x86_64' && '16' || '8' }} || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
