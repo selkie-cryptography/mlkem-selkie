@@ -28,12 +28,20 @@ env:
   CARGO_UNSTABLE_CODEGEN_BACKEND: "true"
 
 jobs:
+  # Per-arch incremental run: without both legs, PRs that only touch code
+  # inside `#[cfg(mlkem_selkie_arch = "neon")]` (or `..."avx2"`) would show
+  # every mutant as MISSED, because the file isn't in the compile graph on
+  # the other arch's runner. cargo-mutants walks source with `syn` (cfg-blind)
+  # so it emits mutations for the gated file anyway; the build then trivially
+  # succeeds and tests pass, but nothing exercised the mutation.
   incremental:
-    name: cargo-mutants (changed code)
+    name: cargo-mutants (changed code, ${{ matrix.arch }})
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    env:
-      CARGO_PROFILE_MUTANTS_CODEGEN_BACKEND: cranelift
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+    runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-latest' || 'macos-latest' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,24 +53,33 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-mutants,cargo-nextest
-      # Link with mold: relinking is the per-mutant tail now codegen is cheap.
-      # `mold -run` needs no rustflags, so `target-cpu=v3` survives.
-      - run: sudo apt-get update && sudo apt-get install -y mold
+      # Link with mold on x86_64: relinking is the per-mutant tail now codegen
+      # is cheap. `mold -run` needs no rustflags, so `target-cpu=v3` survives.
+      # aarch64 uses the system linker.
+      - if: matrix.arch == 'x86_64'
+        run: sudo apt-get update && sudo apt-get install -y mold
       - uses: mozilla-actions/sccache-action@v0.0.10
       - uses: Swatinem/rust-cache@v2
       - name: Mutate only the PR diff
-        # `-j 2` matches the free-plan ubuntu-latest 2-vCPU runner. Prior
-        # `-j 4` oversubscribed the CPU and made per-mutant cargo processes
-        # thrash for cores instead of parallelize. Shuffled ordering (default,
-        # i.e. no `--no-shuffle`) spreads slow mutants across shards in the
-        # full-tree job; kept consistent here for symmetry.
+        # `-j` matches each runner's actual vCPU count on the free plan
+        # (ubuntu-latest = 2, macos-latest M1 = 3). Cranelift + mold are
+        # x86_64-only (Cranelift's aarch64 backend traps on our NEON `ld2`
+        # + libcrux-sha3 crypto intrinsics); shell-exported so an unset env
+        # doesn't collide with cargo trying to load a codegen backend named
+        # "".
         run: |
+          if [ "${{ matrix.arch }}" = "x86_64" ]; then
+            export CARGO_PROFILE_MUTANTS_CODEGEN_BACKEND=cranelift
+            RUNNER="mold -run"
+          else
+            RUNNER=""
+          fi
           git diff "origin/${{ github.base_ref }}" > pr.diff
-          mold -run cargo mutants -j 2 --in-diff pr.diff
+          $RUNNER cargo mutants -j ${{ matrix.arch == 'x86_64' && '2' || '3' }} --in-diff pr.diff
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: mutants-out
+          name: mutants-out-${{ matrix.arch }}
           path: mutants.out
 
   # Full-tree runs are sharded per architecture. Wall-time is bounded by the
