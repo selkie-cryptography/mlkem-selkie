@@ -3,9 +3,13 @@
 //! `cargo bench --bench dudect --features expose-internals`. The pass threshold
 //! is `|t| < 5.0`. Each bench takes 100k samples: at small counts (~2k) the
 //! max-t statistic is dominated by scheduler noise on shared CI runners and
-//! produces spurious excursions past the threshold. CI runs the binary three
+//! produces spurious excursions past the threshold. CI runs the binary five
 //! times and gates on the per-bench median |t|, since even at 100k samples a
 //! single reading on a shared runner can spike on a true null.
+//!
+//! [`decaps_null`] pairs with [`decaps`] as a runner-noise diagnostic: both
+//! classes of input are byte-identical, so any non-trivial `|t|` measures
+//! the runner's noise floor, not a real leak.
 //!
 //! Key generation is intentionally not covered here: `SampleNTT`'s rejection-
 //! sampling iteration count varies with the (public) `rho`, which dominates
@@ -84,4 +88,30 @@ fn decaps(runner: &mut CtRunner, _rng: &mut BenchRng) {
     }
 }
 
-ctbench_main!(encaps, decaps);
+/// Null test: same ciphertext for both classes. Any non-trivial `|t|` here
+/// is pure host noise — there's no possible information leak because the
+/// two "classes" of input are byte-identical. Feeds a paired diagnostic
+/// against the real [`decaps`] bench: if `|t|` on `decaps_null` matches
+/// or exceeds `|t|` on `decaps` on the same runner, the shared-vCPU noise
+/// floor is above the gate threshold and the `decaps` reading is not
+/// distinguishable from noise. If `decaps_null` sits near zero while
+/// `decaps` reads high, the `decaps` signal is real.
+fn decaps_null(runner: &mut CtRunner, _rng: &mut BenchRng) {
+    let mut rng = ChaCha8Rng::from_seed([0x33; 32]);
+
+    let keypair = KeyPair::<MLKEM512>::generate_derand(&[0x42; 64]);
+    let (_, ciphertext) = keypair.encapsulation_key.encapsulate_derand(&[0x55; 32]);
+    let valid = ciphertext.as_bytes().to_vec();
+    let decapsulation_key = keypair.decapsulation_key;
+
+    for _ in 0..100_000 {
+        let class = random_class(&mut rng);
+        let ciphertext = Ciphertext::<MLKEM512>::from_bytes(&valid).expect("valid length");
+
+        runner.run_one(class, || {
+            black_box(decapsulation_key.decapsulate(black_box(&ciphertext)))
+        });
+    }
+}
+
+ctbench_main!(encaps, decaps, decaps_null);
