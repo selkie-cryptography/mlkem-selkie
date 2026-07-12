@@ -63,6 +63,32 @@ fn ntt_matches_generic() {
     }
 }
 
+/// Every [`super::ZETA_BARRETT`] entry matches `round(zeta * 2^15 / q)`
+/// recomputed via an independent `u32` code path.
+///
+/// The Barrett-with-constant sequence self-corrects for `b_bar` errors of a
+/// few units, so mutations that perturb the const initializer (rounding-
+/// direction flips, operator swaps in the divisor) leave [`ntt`] output
+/// unchanged modulo q and would slip through [`ntt_matches_generic`]. This
+/// test compares the shipped table against a from-scratch recomputation so
+/// any per-entry mismatch is caught directly.
+#[test]
+fn zeta_barrett_matches_reference() {
+    let q: u32 = parameters::Q as u32;
+
+    for (i, &zeta) in crate::algebraic::poly::arch::ZETA_RAW.iter().enumerate() {
+        let zeta_u = u32::from(zeta);
+        let reference = ((zeta_u * 32_768 + q / 2) / q) as i16;
+
+        assert_eq!(
+            super::ZETA_BARRETT[i],
+            reference,
+            "ZETA_BARRETT[{i}] mismatch: got {}, expected {reference} (zeta={zeta})",
+            super::ZETA_BARRETT[i],
+        );
+    }
+}
+
 /// `ntt_inverse` matches the scalar backend over many random canonical inputs.
 #[test]
 fn ntt_inverse_matches_generic() {
