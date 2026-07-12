@@ -68,13 +68,21 @@ jobs:
         # doesn't collide with cargo trying to load a codegen backend named
         # "".
         run: |
+          # Exclude arch-mismatched backend files from the diff: on x86_64
+          # the neon backend is cfg'd out of the compile graph so cargo-
+          # mutants can't tell the difference between correct and mutated
+          # code (both trivially "pass" because the code isn't built),
+          # producing all-MISSED false negatives. Same for the avx2 backend
+          # on aarch64. Full-tree runs cover both arches.
           if [ "${{ matrix.arch }}" = "x86_64" ]; then
             export CARGO_PROFILE_MUTANTS_CODEGEN_BACKEND=cranelift
             RUNNER="mold -run"
+            EXCLUDE=":(exclude)src/algebraic/poly/arch/neon.rs"
           else
             RUNNER=""
+            EXCLUDE=":(exclude)src/algebraic/poly/arch/avx2.rs"
           fi
-          git diff "origin/${{ github.base_ref }}" > pr.diff
+          git diff "origin/${{ github.base_ref }}" -- . "$EXCLUDE" > pr.diff
           $RUNNER cargo mutants -j ${{ matrix.arch == 'x86_64' && '2' || '3' }} --in-diff pr.diff
       - uses: actions/upload-artifact@v4
         if: always()
