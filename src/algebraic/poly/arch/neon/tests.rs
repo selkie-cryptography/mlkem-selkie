@@ -75,16 +75,17 @@ fn ntt_matches_generic() {
 #[test]
 fn zeta_barrett_matches_reference() {
     let q: u32 = parameters::Q as u32;
+    let pairs = crate::algebraic::poly::arch::ZETA_RAW
+        .iter()
+        .zip(super::ZETA_BARRETT.iter());
 
-    for (i, &zeta) in crate::algebraic::poly::arch::ZETA_RAW.iter().enumerate() {
+    for (i, (&zeta, &bar)) in pairs.enumerate() {
         let zeta_u = u32::from(zeta);
         let reference = ((zeta_u * 32_768 + q / 2) / q) as i16;
 
         assert_eq!(
-            super::ZETA_BARRETT[i],
-            reference,
-            "ZETA_BARRETT[{i}] mismatch: got {}, expected {reference} (zeta={zeta})",
-            super::ZETA_BARRETT[i],
+            bar, reference,
+            "ZETA_BARRETT[{i}] mismatch: got {bar}, expected {reference} (zeta={zeta})",
         );
     }
 }
