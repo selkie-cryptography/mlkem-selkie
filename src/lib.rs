@@ -429,6 +429,12 @@ impl<P: ParameterSet> DecapsulationKey<P> {
         // K_bar <- J(z || c); absorbed in two parts, no joined buffer.
         let mut k_bar = J(self.z.as_bytes(), ciphertext.as_bytes());
 
+        // Evict decrypt's L1 cache footprint before encrypt: dudect saw a
+        // persistent class-dependent signal in `decrypt → encrypt` despite
+        // both halves being CT in isolation, consistent with µarch state
+        // carried across the sequence.
+        erase_l1_footprint();
+
         // c' <- K-PKE.Encrypt(ek_PKE, m', r')
         let c_prime = self.ek.ek_pke.encrypt(&m_prime, &r_prime);
 
@@ -452,6 +458,24 @@ impl<P: ParameterSet> DecapsulationKey<P> {
 
         SharedSecret(secret)
     }
+}
+
+/// Read-touches every cache line of a 32 KB scratch region to evict any
+/// L1D lines the caller populated. Used inside
+/// [`DecapsulationKey::decapsulate`] to break µarch state carried from
+/// `K-PKE.Decrypt`'s class-dependent polynomial memory access into the
+/// subsequent `K-PKE.Encrypt`. The size covers the smallest L1D on modern
+/// x86_64 and aarch64 targets.
+#[inline(never)]
+fn erase_l1_footprint() {
+    const SIZE: usize = 32 * 1024;
+    static SCRATCH: [u8; SIZE] = [0u8; SIZE];
+
+    let acc = SCRATCH
+        .iter()
+        .step_by(64)
+        .fold(0u8, |a, &b| a.wrapping_add(core::hint::black_box(b)));
+    core::hint::black_box(acc);
 }
 
 impl<P: ParameterSet> TryFrom<&[u8]> for DecapsulationKey<P> {
