@@ -46,6 +46,27 @@ pub(super) const ZETA_RAW: [u16; 128] = [
 /// [`ZETA_RAW`].
 const ZETA_MONT: [FieldElement; 128] = FieldElement::montgomery_table(ZETA_RAW);
 
+/// Barrett multipliers `round(zeta * 2^15 / q)` paired with [`ZETA_RAW`],
+/// consumed by the SIMD backends' Barrett-with-constant NTT butterflies
+/// (`neon::barrett_const_mul` via `vqrdmulhq_s16`,
+/// `avx2::barrett_const_mul` via `_mm256_mulhrs_epi16`). The `2^15` (not
+/// `2^16`) pre-divides by 2 to compensate for the doubling in both
+/// instructions.
+pub(super) const ZETA_BARRETT: [i16; 128] = {
+    let q = crate::parameters::Q as i32;
+    let mut table = [0i16; 128];
+    let mut i = 0;
+    while i < 128 {
+        #[allow(clippy::indexing_slicing)] // reason: i < 128 by the loop guard.
+        {
+            let zeta = ZETA_RAW[i] as i32;
+            table[i] = ((zeta * (1 << 15) + q / 2) / q) as i16;
+        }
+        i += 1;
+    }
+    table
+};
+
 /// The Montgomery-form values `ζ^(2 BitRev7(i) + 1) * R mod q` for `i` in
 /// `{0, ..., 127}`, derived from the canonical [FIPS 203 Appendix A] table (the
 /// modular reduction applied, matching BoringSSL).

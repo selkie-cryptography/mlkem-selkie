@@ -40,24 +40,6 @@ const BARRETT_V: i32 = ((1 << 26) + (parameters::Q as i32) / 2) / (parameters::Q
 /// mirroring `generic`'s `NTT_INVERSE_SCALE`.
 const NTT_INVERSE_SCALE: i16 = 1441;
 
-/// Barrett multipliers `round(zeta * 2^15 / q)` paired with
-/// [`super::ZETA_RAW`], for [`barrett_const_mul`] in the NTT butterflies. The
-/// `2^15` (not `2^16`) pre-divides by 2 to compensate for `sqrdmulh`'s doubling
-/// behavior.
-#[allow(clippy::indexing_slicing)] // reason: i < 128 by the loop guard.
-const ZETA_BARRETT: [i16; 128] = {
-    let mut table = [0i16; 128];
-    let mut i = 0;
-    while i < 128 {
-        {
-            let zeta = super::ZETA_RAW[i] as i32;
-            table[i] = ((zeta * (1 << 15) + (Q as i32) / 2) / (Q as i32)) as i16;
-        }
-        i += 1;
-    }
-    table
-};
-
 /// Montgomery-reduces four `i32` products to `i16`, returning `a * R^-1 mod q`
 /// in `(-q, q)` per lane: the vector form of `FieldElement::montgomery_reduce`.
 #[inline]
@@ -201,7 +183,7 @@ pub(crate) fn ntt(coefficients: &mut [FieldElement; parameters::N]) {
     unsafe {
         let ptr = coefficients.as_mut_ptr().cast::<i16>();
         let zeta_raw_ptr = super::ZETA_RAW.as_ptr().cast::<i16>();
-        let zeta_bar_ptr = ZETA_BARRETT.as_ptr();
+        let zeta_bar_ptr = super::ZETA_BARRETT.as_ptr();
 
         for len in [128usize, 64, 32, 16, 8] {
             let mut start = 0;
@@ -288,7 +270,7 @@ pub(crate) fn ntt_inverse(coefficients: &mut [FieldElement; parameters::N]) {
     unsafe {
         let ptr = coefficients.as_mut_ptr().cast::<i16>();
         let zeta_raw_ptr = super::ZETA_RAW.as_ptr().cast::<i16>();
-        let zeta_bar_ptr = ZETA_BARRETT.as_ptr();
+        let zeta_bar_ptr = super::ZETA_BARRETT.as_ptr();
 
         for len in [8usize, 16, 32, 64, 128] {
             let mut start = 0;
