@@ -10,6 +10,12 @@ on:
       - "tests/ctgrind.rs"
       - "src/**"
       - ".github/workflows/ct.yml"
+      # Scripts the workflow compiles-and-runs; a change to the gate or the
+      # dashboard converters is a CT-relevant change and needs CI validation.
+      - ".github/scripts/dudect-gate.rs"
+      - ".github/scripts/dudect-to-json.rs"
+      - ".github/scripts/tacet-to-json.rs"
+      - ".github/scripts/ctgrind-report.rs"
   schedule:
     # Weekly, to track the CT signal over time on the dashboard.
     - cron: "0 7 * * 1"
