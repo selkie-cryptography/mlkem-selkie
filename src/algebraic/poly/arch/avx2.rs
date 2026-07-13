@@ -16,9 +16,9 @@
 #![allow(unsafe_code)]
 
 use core::arch::x86_64::{
-    __m256i, _mm256_add_epi16, _mm256_loadu_si256, _mm256_mulhi_epi16, _mm256_mullo_epi16,
-    _mm256_permute2x128_si256, _mm256_permute4x64_epi64, _mm256_set1_epi16, _mm256_setr_epi8,
-    _mm256_shuffle_epi8, _mm256_srai_epi16, _mm256_storeu_si256, _mm256_sub_epi16,
+    __m256i, _mm256_add_epi16, _mm256_loadu_si256, _mm256_mulhi_epi16, _mm256_mulhrs_epi16,
+    _mm256_mullo_epi16, _mm256_permute2x128_si256, _mm256_permute4x64_epi64, _mm256_set1_epi16,
+    _mm256_setr_epi8, _mm256_shuffle_epi8, _mm256_srai_epi16, _mm256_storeu_si256, _mm256_sub_epi16,
 };
 
 use crate::{algebraic::field::FieldElement, parameters};
@@ -59,6 +59,29 @@ fn fqmul(a: __m256i, b: __m256i) -> __m256i {
         let t = _mm256_mulhi_epi16(m, q);
 
         _mm256_sub_epi16(hi, t)
+    }
+}
+
+/// Multiplies `a` by a compile-time constant `b` using Barrett reduction with
+/// the precomputed multiplier `b_bar = round(b * 2^15 / q)`, returning
+/// `a * b mod q` per lane in four vector instructions.
+///
+/// `b` must be a canonical (non-Montgomery) representative for the result to
+/// preserve the Montgomery-domain convention: given `a = a_true * R`,
+/// `a * b mod q = (a_true * b) * R`. For NTT butterflies with the shared
+/// [`super::ZETA_BARRETT`] table paired with [`super::ZETA_RAW`], this
+/// replaces the [`fqmul`] path (`mullo` + `mulhi` + `mullo` + `mulhi` + `sub`,
+/// five intrinsics) with four.
+#[inline]
+fn barrett_const_mul(a: __m256i, b: __m256i, b_bar: __m256i) -> __m256i {
+    // SAFETY: the avx2 module compiles only with AVX2 enabled; every intrinsic
+    // below is total.
+    unsafe {
+        let c_low = _mm256_mullo_epi16(a, b);
+        let t = _mm256_mulhrs_epi16(a, b_bar);
+        let tq = _mm256_mullo_epi16(t, _mm256_set1_epi16(Q));
+
+        _mm256_sub_epi16(c_low, tq)
     }
 }
 
@@ -170,25 +193,28 @@ pub(crate) fn multiply(
 pub(crate) fn ntt(coefficients: &mut [FieldElement; parameters::N]) {
     let mut k = 1;
 
-    // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so the array and
-    // `ZETA_MONT` reinterpret as `[i16]`. Each `__m256i` window `[j, j + 16)` and
+    // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so the array
+    // reinterprets as `[i16]`. Each `__m256i` window `[j, j + 16)` and
     // `[j + len, j + len + 16)` stays within the 256-element array, and `k`
-    // indexes `ZETA_MONT`. `loadu`/`storeu` are unaligned; the module is AVX2.
+    // indexes `ZETA_RAW` / `ZETA_BARRETT`. `loadu`/`storeu` are unaligned;
+    // the module is AVX2.
     unsafe {
         let ptr = coefficients.as_mut_ptr().cast::<i16>();
-        let zeta_ptr = super::ZETA_MONT.as_ptr().cast::<i16>();
+        let zeta_raw_ptr = super::ZETA_RAW.as_ptr().cast::<i16>();
+        let zeta_bar_ptr = super::ZETA_BARRETT.as_ptr();
 
         for len in [128usize, 64, 32, 16] {
             let mut start = 0;
             while start < 256 {
-                let zeta = _mm256_set1_epi16(*zeta_ptr.add(k));
+                let zeta = _mm256_set1_epi16(*zeta_raw_ptr.add(k));
+                let zeta_bar = _mm256_set1_epi16(*zeta_bar_ptr.add(k));
                 k += 1;
 
                 let mut j = start;
                 while j < start + len {
                     let vj = _mm256_loadu_si256(ptr.add(j).cast::<__m256i>());
                     let vjl = _mm256_loadu_si256(ptr.add(j + len).cast::<__m256i>());
-                    let t = fqmul(zeta, vjl);
+                    let t = barrett_const_mul(vjl, zeta, zeta_bar);
 
                     _mm256_storeu_si256(
                         ptr.add(j + len).cast::<__m256i>(),
@@ -256,18 +282,21 @@ pub(crate) fn ntt_inverse(coefficients: &mut [FieldElement; parameters::N]) {
         }
     }
 
-    // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so the array and
-    // `ZETA_MONT` reinterpret as `[i16]`. Each `__m256i` window stays within the
-    // 256-element array, and the descending `k` indexes `ZETA_MONT` (it reaches 0
-    // only after the last use). `loadu`/`storeu` are unaligned; the module is AVX2.
+    // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so the array
+    // reinterprets as `[i16]`. Each `__m256i` window stays within the
+    // 256-element array, and the descending `k` indexes `ZETA_RAW` /
+    // `ZETA_BARRETT` (it reaches 0 only after the last use). `loadu`/`storeu`
+    // are unaligned; the module is AVX2.
     unsafe {
         let ptr = coefficients.as_mut_ptr().cast::<i16>();
-        let zeta_ptr = super::ZETA_MONT.as_ptr().cast::<i16>();
+        let zeta_raw_ptr = super::ZETA_RAW.as_ptr().cast::<i16>();
+        let zeta_bar_ptr = super::ZETA_BARRETT.as_ptr();
 
         for len in [16usize, 32, 64, 128] {
             let mut start = 0;
             while start < 256 {
-                let zeta = _mm256_set1_epi16(*zeta_ptr.add(k));
+                let zeta = _mm256_set1_epi16(*zeta_raw_ptr.add(k));
+                let zeta_bar = _mm256_set1_epi16(*zeta_bar_ptr.add(k));
                 k -= 1;
 
                 let mut j = start;
@@ -281,7 +310,7 @@ pub(crate) fn ntt_inverse(coefficients: &mut [FieldElement; parameters::N]) {
                     );
                     _mm256_storeu_si256(
                         ptr.add(j + len).cast::<__m256i>(),
-                        fqmul(zeta, _mm256_sub_epi16(vjl, vj)),
+                        barrett_const_mul(_mm256_sub_epi16(vjl, vj), zeta, zeta_bar),
                     );
 
                     j += 16;

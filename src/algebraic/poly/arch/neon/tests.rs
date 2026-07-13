@@ -63,7 +63,7 @@ fn ntt_matches_generic() {
     }
 }
 
-/// Every [`super::ZETA_BARRETT`] entry matches `round(zeta * 2^15 / q)`
+/// Every [`crate::algebraic::poly::arch::ZETA_BARRETT`] entry matches `round(zeta * 2^15 / q)`
 /// recomputed via an independent `u32` code path.
 ///
 /// The Barrett-with-constant sequence self-corrects for `b_bar` errors of a
@@ -77,7 +77,7 @@ fn zeta_barrett_matches_reference() {
     let q: u32 = parameters::Q as u32;
     let pairs = crate::algebraic::poly::arch::ZETA_RAW
         .iter()
-        .zip(super::ZETA_BARRETT.iter());
+        .zip(crate::algebraic::poly::arch::ZETA_BARRETT.iter());
 
     for (i, (&zeta, &bar)) in pairs.enumerate() {
         let zeta_u = u32::from(zeta);
