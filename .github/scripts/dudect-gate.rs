@@ -1,4 +1,5 @@
-//! Gate dudect readings on the per-bench median |t| across several runs.
+//! Gate dudect readings on a paired sign test against per-bench null-inputs
+//! calibration, falling back to a median gate for benches without a null pair.
 //!
 //! Usage: dudect-gate <median-out> <report>...
 //!
@@ -6,26 +7,59 @@
 //! ...` line per bench and always exits 0, so pass/fail lives here. Shared CI
 //! runners have heavy-tailed timing noise, and dudect's statistic is a max
 //! over t-tests at many crop percentiles, so a single reading can spike far
-//! past the gate on a true null (observed |t| 3.06 -> 10.72 across identical
-//! runs minutes apart). Each report contributes one reading per bench and the
-//! gate fails a bench only if its median |t| is at or above [`THRESHOLD`]: a
-//! real leak fails every run and still trips the gate, a one-run noise
-//! excursion does not.
+//! past the raw-|t| gate on a true null.
 //!
-//! The median reading's report line is written to `<median-out>` so the
-//! dashboard tracks the same reading the gate enforced. Exits nonzero if any
-//! bench's median is at or above [`THRESHOLD`], a bench is missing a reading
-//! in some report, or no readings parse at all.
+//! # Paired sign test
+//!
+//! For every bench `X` that also has a companion `X_null` bench (same code
+//! path, byte-identical inputs for both classes, so zero possible information
+//! leak), the gate compares them per-run: `d_i = |t_{X,i}| - |t_{X_null,i}|`.
+//! Under the null hypothesis "code is constant-time" the two benches share
+//! the same distribution and `sign(d_i)` is 50/50; a real leak elevates
+//! `|t_X|` above `|t_{X_null}|` and drives all diffs positive. Reject the
+//! null when the one-sided binomial p-value falls below [`ALPHA`]. This is
+//! nonparametric, uses the per-run pairing so runner-noise cancels within
+//! each pair, and reports a real p-value instead of a hand-tuned threshold.
+//!
+//! # Fallback median gate
+//!
+//! Benches without an `X_null` sibling use the legacy median-|t| gate at
+//! [`MEDIAN_THRESHOLD`]. This preserves existing signals for benches whose
+//! calibration companion hasn't landed yet.
+//!
+//! # Null benches
+//!
+//! Benches whose name ends in `_null` are informational only — their raw |t|
+//! measures runner noise, which is a machine condition rather than a code
+//! failure. Their median is reported so a reader can eyeball the noise
+//! floor.
+//!
+//! # Output
+//!
+//! The median reading's report line is written to `<median-out>` for the
+//! dashboard converter. Exits nonzero if any paired sign test rejects H0,
+//! any unpaired bench crosses [`MEDIAN_THRESHOLD`], a bench is missing
+//! readings, or no readings parse at all.
 //!
 //! Compile: `rustc -O dudect-gate.rs -o dudect-gate`
 //! Self-test: `rustc --test dudect-gate.rs -o dudect-gate-test &&
 //! ./dudect-gate-test`
 
-use std::{collections::BTreeMap, env, fs, process::ExitCode};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    env, fs,
+    process::ExitCode,
+};
 
-/// Pass/fail cutoff: a bench fails when its median |t| is at or above this.
-/// Keep in sync with `THRESHOLD` in `dudect-to-json.rs`.
-const THRESHOLD: f64 = 5.0;
+/// One-sided significance level for the paired sign test.
+const ALPHA: f64 = 0.05;
+
+/// Fallback pass/fail cutoff for unpaired benches. Keep in sync with
+/// `THRESHOLD` in `dudect-to-json.rs`.
+const MEDIAN_THRESHOLD: f64 = 5.0;
+
+/// Suffix that identifies a null-calibration bench.
+const NULL_SUFFIX: &str = "_null";
 
 /// One `bench <name> ... max t = <t>` line from a dudect report.
 struct Reading {
@@ -74,7 +108,7 @@ struct GateOutcome {
     /// The median reading's report line per complete bench, in
     /// dudect-bencher's own format for the dashboard converter.
     medians: String,
-    /// Whether any bench breached [`THRESHOLD`] or was missing readings.
+    /// Whether any bench breached its gate or was missing readings.
     failed: bool,
 }
 
@@ -97,7 +131,7 @@ impl Benches {
         }
     }
 
-    /// Gates every bench on the median of its |t| readings.
+    /// Gates every bench, dispatching by whether an `_null` sibling exists.
     fn gate(self) -> GateOutcome {
         let mut outcome = GateOutcome {
             log: String::new(),
@@ -111,7 +145,11 @@ impl Benches {
             return outcome;
         }
 
-        for (name, readings) in &self.readings {
+        let names: BTreeSet<String> = self.readings.keys().cloned().collect();
+
+        for name in &names {
+            let readings = &self.readings[name];
+
             if readings.len() != self.expected {
                 outcome.log.push_str(&format!(
                     "FAIL: {name}: {} readings, expected {}\n",
@@ -122,32 +160,121 @@ impl Benches {
                 continue;
             }
 
-            // Sort an index permutation so the log can still list the
-            // readings in run order.
-            let mut by_t: Vec<usize> = (0..readings.len()).collect();
-            by_t.sort_by(|&a, &b| readings[a].abs_t.total_cmp(&readings[b].abs_t));
-            let median = &readings[by_t[(self.expected - 1) / 2]];
-
-            let runs: Vec<String> = readings.iter().map(|r| format!("{:.5}", r.abs_t)).collect();
-            outcome.log.push_str(&format!(
-                "  {name} -> |t| runs: {}, median = {:.5}\n",
-                runs.join(" "),
-                median.abs_t
-            ));
-
-            outcome.medians.push_str(&median.line);
+            // Always emit the median reading for the dashboard, regardless
+            // of gate shape.
+            let median_line = median_reading(readings).line.clone();
+            outcome.medians.push_str(&median_line);
             outcome.medians.push('\n');
 
-            if median.abs_t >= THRESHOLD {
-                outcome
-                    .log
-                    .push_str(&format!("FAIL: {name} median |t| >= {THRESHOLD}\n"));
-                outcome.failed = true;
+            if name.ends_with(NULL_SUFFIX) {
+                report_null_bench(&mut outcome, name, readings);
+                continue;
             }
+
+            let null_name = format!("{name}{NULL_SUFFIX}");
+            if let Some(null_readings) = self.readings.get(&null_name) {
+                if null_readings.len() == self.expected {
+                    paired_sign_gate(&mut outcome, name, readings, null_readings);
+                    continue;
+                }
+            }
+
+            median_gate(&mut outcome, name, readings);
         }
 
         outcome
     }
+}
+
+/// Returns the median reading (lower of the two middle for even N).
+fn median_reading(readings: &[Reading]) -> &Reading {
+    let mut idx: Vec<usize> = (0..readings.len()).collect();
+    idx.sort_by(|&a, &b| readings[a].abs_t.total_cmp(&readings[b].abs_t));
+    &readings[idx[(readings.len() - 1) / 2]]
+}
+
+/// Paired sign test: fail when all-positive diffs give a one-sided binomial
+/// p-value below [`ALPHA`].
+fn paired_sign_gate(
+    outcome: &mut GateOutcome,
+    name: &str,
+    real: &[Reading],
+    null: &[Reading],
+) {
+    let n = real.len();
+    let diffs: Vec<f64> = real.iter().zip(null).map(|(r, z)| r.abs_t - z.abs_t).collect();
+    let positive = diffs.iter().filter(|&&d| d > 0.0).count();
+    let p_value = binomial_upper_tail(positive, n);
+
+    let real_median = median_reading(real).abs_t;
+    let null_median = median_reading(null).abs_t;
+
+    let diffs_str: Vec<String> = diffs.iter().map(|d| format!("{d:+.5}")).collect();
+    outcome.log.push_str(&format!(
+        "  {name} vs {name}{NULL_SUFFIX}: diffs {}, {positive}/{n} positive (p = {p_value:.4}); \
+         real median = {real_median:.5}, null median = {null_median:.5}\n",
+        diffs_str.join(" "),
+    ));
+
+    if p_value < ALPHA {
+        outcome.log.push_str(&format!(
+            "FAIL: {name} paired sign test rejects H0 (p = {p_value:.4} < {ALPHA})\n"
+        ));
+        outcome.failed = true;
+    }
+}
+
+/// Legacy median-|t| gate for benches without a null sibling.
+fn median_gate(outcome: &mut GateOutcome, name: &str, readings: &[Reading]) {
+    let median = median_reading(readings).abs_t;
+    let runs: Vec<String> = readings.iter().map(|r| format!("{:.5}", r.abs_t)).collect();
+
+    outcome.log.push_str(&format!(
+        "  {name} -> |t| runs: {}, median = {median:.5} (no null pair)\n",
+        runs.join(" "),
+    ));
+
+    if median >= MEDIAN_THRESHOLD {
+        outcome.log.push_str(&format!(
+            "FAIL: {name} median |t| >= {MEDIAN_THRESHOLD}\n"
+        ));
+        outcome.failed = true;
+    }
+}
+
+/// Emits a null-bench median as calibration info; never fails the gate on it.
+fn report_null_bench(outcome: &mut GateOutcome, name: &str, readings: &[Reading]) {
+    let median = median_reading(readings).abs_t;
+    let runs: Vec<String> = readings.iter().map(|r| format!("{:.5}", r.abs_t)).collect();
+
+    outcome.log.push_str(&format!(
+        "  {name} (null calibration) -> |t| runs: {}, median = {median:.5}\n",
+        runs.join(" "),
+    ));
+}
+
+/// Returns `P[X >= k]` where `X ~ Binomial(n, 0.5)`. Symmetric coin.
+fn binomial_upper_tail(k: usize, n: usize) -> f64 {
+    if k > n {
+        return 0.0;
+    }
+    let denom = 2u128.pow(u32::try_from(n).expect("n fits in u32"));
+    let mut num: u128 = 0;
+    for i in k..=n {
+        num += binomial_coefficient(n, i);
+    }
+    (num as f64) / (denom as f64)
+}
+
+/// `C(n, k)` for small `n` — u128 for headroom up to n <= 60ish. dudect run
+/// counts are single digits in practice.
+fn binomial_coefficient(n: usize, k: usize) -> u128 {
+    let k = k.min(n - k);
+    let mut result: u128 = 1;
+    for i in 0..k {
+        result = result * (n - i) as u128 / (i + 1) as u128;
+    }
+    result
 }
 
 /// Reads the report files named on the command line, gates them, and writes
@@ -189,25 +316,26 @@ fn main() -> ExitCode {
 mod tests {
     use super::*;
 
-    /// A dudect report with the given decaps and encaps `max t` readings.
-    fn report(decaps_t: f64, encaps_t: f64) -> String {
+    /// A dudect report line for one bench with the given `max t`.
+    fn line(name: &str, t: f64) -> String {
         format!(
-            "bench decaps seeded with 0x428b8e5da2d1aca4\n\
-             bench decaps ... : n == +0.100M, max t = {decaps_t:+.5}, max tau = +0.00491, (5/tau)^2 = 1038661\n\
-             bench encaps seeded with 0xd8c5546c4574dd1d\n\
-             bench encaps ... : n == +0.026M, max t = {encaps_t:+.5}, max tau = +0.01237, (5/tau)^2 = 163303\n"
+            "bench {name} ... : n == +0.100M, max t = {t:+.5}, max tau = +0.00491, (5/tau)^2 = 1038661"
         )
+    }
+
+    fn report(lines: &[String]) -> String {
+        lines.join("\n") + "\n"
     }
 
     #[test]
     fn parses_reading_line() {
-        let line = "bench decaps ... : n == +0.100M, max t = -1.54877, max tau = -0.00491, (5/tau)^2 = 1038661";
+        let raw = "bench decaps ... : n == +0.100M, max t = -1.54877, max tau = -0.00491, (5/tau)^2 = 1038661";
 
-        let (name, reading) = Reading::parse(line).expect("reading line parses");
+        let (name, reading) = Reading::parse(raw).expect("reading line parses");
 
         assert_eq!(name, "decaps");
         assert_eq!(reading.abs_t, 1.54877);
-        assert_eq!(reading.line, line);
+        assert_eq!(reading.line, raw);
     }
 
     #[test]
@@ -218,56 +346,109 @@ mod tests {
     }
 
     #[test]
-    fn one_run_noise_spike_passes() {
-        let reports = [
-            report(10.71542, 1.98935),
-            report(-1.54877, 2.36055),
-            report(-1.24036, -1.65129),
-        ];
+    fn binomial_coefficient_matches_pascals_triangle() {
+        assert_eq!(binomial_coefficient(5, 0), 1);
+        assert_eq!(binomial_coefficient(5, 5), 1);
+        assert_eq!(binomial_coefficient(5, 2), 10);
+        assert_eq!(binomial_coefficient(8, 3), 56);
+    }
+
+    #[test]
+    fn binomial_upper_tail_matches_table() {
+        // P[X = 5 | n=5] = 1/32
+        assert!((binomial_upper_tail(5, 5) - 1.0 / 32.0).abs() < 1e-9);
+        // P[X >= 4 | n=5] = 6/32
+        assert!((binomial_upper_tail(4, 5) - 6.0 / 32.0).abs() < 1e-9);
+        // P[X >= 7 | n=8] = 9/256
+        assert!((binomial_upper_tail(7, 8) - 9.0 / 256.0).abs() < 1e-9);
+    }
+
+    /// 5/5 positive diffs — the sign test rejects H0 at ALPHA=0.05.
+    #[test]
+    fn paired_all_positive_fails() {
+        let reports: Vec<String> = [
+            (10.0, 2.0),
+            (11.0, 1.5),
+            (9.5, 2.1),
+            (12.0, 1.8),
+            (10.5, 2.3),
+        ]
+        .into_iter()
+        .map(|(d, n)| report(&[line("decaps", d), line("decaps_null", n)]))
+        .collect();
+
+        let outcome = Benches::from_reports(&reports).gate();
+
+        assert!(outcome.failed, "log:\n{}", outcome.log);
+        assert!(outcome.log.contains("paired sign test rejects H0"));
+        assert!(outcome.log.contains("5/5 positive"));
+    }
+
+    /// 3/5 positive diffs (sign-balanced noise) — sign test passes.
+    #[test]
+    fn paired_balanced_signs_passes() {
+        let reports: Vec<String> = [
+            (10.0, 2.0),   // +
+            (11.0, 12.5),  // -
+            (9.5, 2.1),    // +
+            (12.0, 14.8),  // -
+            (10.5, 2.3),   // +
+        ]
+        .into_iter()
+        .map(|(d, n)| report(&[line("decaps", d), line("decaps_null", n)]))
+        .collect();
 
         let outcome = Benches::from_reports(&reports).gate();
 
         assert!(!outcome.failed, "log:\n{}", outcome.log);
-        assert!(outcome.medians.contains("max t = -1.54877"));
-        assert!(outcome.medians.contains("max t = +1.98935"));
+        assert!(outcome.log.contains("3/5 positive"));
     }
 
+    /// A null bench with sky-high `|t|` does not fail the gate on its own;
+    /// its sibling still gates via the paired test.
     #[test]
-    fn persistent_leak_fails() {
-        let reports = [
-            report(10.71542, 1.98935),
-            report(9.80000, 2.36055),
-            report(-1.24036, -1.65129),
-        ];
+    fn null_bench_is_informational_only() {
+        let reports: Vec<String> = [
+            (2.0, 40.0),
+            (1.8, 35.0),
+            (2.1, 42.0),
+            (1.9, 38.0),
+            (2.0, 41.0),
+        ]
+        .into_iter()
+        .map(|(d, n)| report(&[line("decaps", d), line("decaps_null", n)]))
+        .collect();
 
         let outcome = Benches::from_reports(&reports).gate();
 
-        assert!(outcome.failed);
-        assert!(outcome.log.contains("FAIL: decaps median |t| >= 5"));
-        assert!(!outcome.log.contains("FAIL: encaps"));
+        // decaps < null every run, so 0/5 positive → paired test passes.
+        assert!(!outcome.failed, "log:\n{}", outcome.log);
+        assert!(outcome.log.contains("(null calibration)"));
+        assert!(outcome.log.contains("0/5 positive"));
     }
 
+    /// Fallback median gate: an un-paired bench still fails when its
+    /// median crosses the fixed threshold.
     #[test]
-    fn median_at_threshold_fails() {
-        let reports = [
-            report(5.00000, 1.0),
-            report(5.00000, 1.0),
-            report(1.00000, 1.0),
-        ];
+    fn unpaired_bench_falls_back_to_median_gate() {
+        let reports: Vec<String> = [10.0, 11.0, 9.5, 12.0, 10.5]
+            .into_iter()
+            .map(|t| report(&[line("encaps", t)]))
+            .collect();
 
         let outcome = Benches::from_reports(&reports).gate();
 
-        assert!(outcome.failed);
-        assert!(outcome.log.contains("FAIL: decaps median |t| >= 5"));
+        assert!(outcome.failed, "log:\n{}", outcome.log);
+        assert!(outcome.log.contains("no null pair"));
+        assert!(outcome.log.contains("encaps median |t| >="));
     }
 
     #[test]
     fn missing_reading_fails() {
         let reports = [
-            report(1.0, 1.0),
-            report(1.0, 1.0),
-            "bench encaps ... : n == +0.026M, max t = +1.00000, max tau = +0.01237, (5/tau)^2 = 163303\n"
-                .to_string(),
+            report(&[line("decaps", 1.0), line("decaps_null", 1.0)]),
+            report(&[line("decaps", 1.0), line("decaps_null", 1.0)]),
+            report(&[line("decaps_null", 1.0)]),
         ];
 
         let outcome = Benches::from_reports(&reports).gate();
