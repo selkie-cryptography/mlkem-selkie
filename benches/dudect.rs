@@ -24,7 +24,7 @@
 use std::hint::black_box;
 
 use dudect_bencher::{BenchRng, Class, CtRunner, ctbench_main};
-use mlkem_selkie::{Ciphertext, KeyPair, MLKEM512};
+use mlkem_selkie::{Ciphertext, KeyPair, MLKEM512, PKE, ParameterSet};
 use rand_chacha::ChaCha8Rng;
 use rand_core::{RngCore, SeedableRng};
 
@@ -114,4 +114,43 @@ fn decaps_null(runner: &mut CtRunner, _rng: &mut BenchRng) {
     }
 }
 
-ctbench_main!(encaps, decaps, decaps_null);
+/// Isolated `K-PKE.Decrypt`: valid (Left) vs malleated (Right) ciphertext under
+/// a fixed key, with no re-encryption, no FO comparison, and no
+/// `conditional_select` on top. Pairs with [`decaps`]:
+///
+/// - If `|t|` here matches `decaps` (~9), the leak sits inside K-PKE.Decrypt
+///   proper (`ByteDecode` / `Decompress` / `s_hat . NTT(u)` /
+///   `compress_message`).
+/// - If `|t|` drops toward the null (~3), the leak is in the re-encrypt path,
+///   the `ct_eq` comparison, or emerges from state carried across those steps.
+///
+/// The isolated encrypt case is already exercised by [`encaps`] (fixed vs
+/// random `m` produces the same class-dependent internal state that a decaps
+/// re-encryption would), so no separate `pke_encrypt` bench is added.
+fn pke_decrypt(runner: &mut CtRunner, _rng: &mut BenchRng) {
+    let mut rng = ChaCha8Rng::from_seed([0x77; 32]);
+
+    let keypair = KeyPair::<MLKEM512>::generate_derand(&[0x42; 64]);
+    let (_, ciphertext) = keypair.encapsulation_key.encapsulate_derand(&[0x55; 32]);
+    let valid = ciphertext.as_bytes().to_vec();
+    let mut malleated = valid.clone();
+    malleated[0] ^= 1;
+
+    let dk_bytes = keypair.decapsulation_key.to_bytes();
+    let dk_pke = PKE::DecryptionKey::<MLKEM512>::from_bytes(
+        &dk_bytes.as_ref()[..MLKEM512::PKE_DECRYPTION_KEY_SIZE],
+    );
+
+    for _ in 0..100_000 {
+        let class = random_class(&mut rng);
+        let bytes = match class {
+            Class::Left => &valid,
+            Class::Right => &malleated,
+        };
+        let ciphertext = PKE::Ciphertext::<MLKEM512>::from_bytes(bytes);
+
+        runner.run_one(class, || black_box(dk_pke.decrypt(black_box(&ciphertext))));
+    }
+}
+
+ctbench_main!(encaps, decaps, decaps_null, pke_decrypt);
