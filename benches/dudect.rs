@@ -27,6 +27,7 @@ use dudect_bencher::{BenchRng, Class, CtRunner, ctbench_main};
 use mlkem_selkie::{Ciphertext, KeyPair, MLKEM512, PKE, ParameterSet};
 use rand_chacha::ChaCha8Rng;
 use rand_core::{RngCore, SeedableRng};
+use subtle::{ConditionallySelectable, ConstantTimeEq};
 
 /// A random class selector.
 fn random_class(rng: &mut ChaCha8Rng) -> Class {
@@ -153,4 +154,187 @@ fn pke_decrypt(runner: &mut CtRunner, _rng: &mut BenchRng) {
     }
 }
 
-ctbench_main!(encaps, decaps, decaps_null, pke_decrypt);
+/// `K-PKE.Decrypt` immediately followed by `K-PKE.Encrypt` inside one timed
+/// closure, using the recovered `m'` (class-dependent) and a fixed `r`. Runs
+/// the same code both PKE halves' isolated benches ran, but *in sequence*, so
+/// any cache / branch-predictor state seeded by `decrypt` colours the
+/// subsequent `encrypt`. Catches a leak that only appears when the two
+/// halves are executed back-to-back on the same call — the diagnostic gap
+/// [`pke_decrypt`] and [`encaps`] cannot fill on their own.
+///
+/// Diverges from real decaps by omitting `G(m' || h_ek)` for the randomness
+/// derivation: `r` is fixed across classes so the timed closure exercises
+/// only the two PKE calls and the cache handoff between them, not SHAKE.
+fn decrypt_then_encrypt(runner: &mut CtRunner, _rng: &mut BenchRng) {
+    let mut rng = ChaCha8Rng::from_seed([0xAA; 32]);
+
+    let keypair = KeyPair::<MLKEM512>::generate_derand(&[0x42; 64]);
+    let (_, ciphertext) = keypair.encapsulation_key.encapsulate_derand(&[0x55; 32]);
+    let valid = ciphertext.as_bytes().to_vec();
+    let mut malleated = valid.clone();
+    malleated[0] ^= 1;
+
+    let dk_bytes = keypair.decapsulation_key.to_bytes();
+    let dk_pke_end = MLKEM512::PKE_DECRYPTION_KEY_SIZE;
+    let ek_pke_end = dk_pke_end + MLKEM512::PKE_ENCRYPTION_KEY_SIZE;
+    let dk_pke =
+        PKE::DecryptionKey::<MLKEM512>::from_bytes(&dk_bytes.as_ref()[..dk_pke_end]);
+    let ek_pke =
+        PKE::EncryptionKey::<MLKEM512>::from_bytes(&dk_bytes.as_ref()[dk_pke_end..ek_pke_end]);
+    let fixed_r = [0u8; 32];
+
+    for _ in 0..100_000 {
+        let class = random_class(&mut rng);
+        let bytes = match class {
+            Class::Left => &valid,
+            Class::Right => &malleated,
+        };
+        let ct = PKE::Ciphertext::<MLKEM512>::from_bytes(bytes);
+
+        runner.run_one(class, || {
+            let m_prime = dk_pke.decrypt(black_box(&ct));
+            black_box(ek_pke.encrypt(black_box(&m_prime), black_box(&fixed_r)))
+        });
+    }
+}
+
+/// The Fujisaki–Okamoto tail alone: `ct_eq(c, c') + conditional_select(K_bar,
+/// K', matches)`. `c` and `c'` are pre-computed per class so the timed closure
+/// exercises only the `subtle` primitives — no NTT, no compress, no SHAKE.
+/// The Left class has `c == c'` (valid ciphertext round-trips exactly); the
+/// Right class has `c != c'` (malleated bytes cause re-encryption divergence).
+/// If this bench alone reproduces the decaps signal, the leak is in `subtle`'s
+/// slice comparison or byte-select loop on our compiler / µarch. If it sits
+/// at the null floor, the leak is elsewhere in decaps.
+fn fo_tail_only(runner: &mut CtRunner, _rng: &mut BenchRng) {
+    let mut rng = ChaCha8Rng::from_seed([0xBB; 32]);
+
+    let keypair = KeyPair::<MLKEM512>::generate_derand(&[0x42; 64]);
+    let (_, ciphertext) = keypair.encapsulation_key.encapsulate_derand(&[0x55; 32]);
+    let valid = ciphertext.as_bytes().to_vec();
+    let mut malleated = valid.clone();
+    malleated[0] ^= 1;
+
+    let dk_bytes = keypair.decapsulation_key.to_bytes();
+    let dk_pke_end = MLKEM512::PKE_DECRYPTION_KEY_SIZE;
+    let ek_pke_end = dk_pke_end + MLKEM512::PKE_ENCRYPTION_KEY_SIZE;
+    let dk_pke =
+        PKE::DecryptionKey::<MLKEM512>::from_bytes(&dk_bytes.as_ref()[..dk_pke_end]);
+    let ek_pke =
+        PKE::EncryptionKey::<MLKEM512>::from_bytes(&dk_bytes.as_ref()[dk_pke_end..ek_pke_end]);
+    let fixed_r = [0u8; 32];
+
+    // Pre-compute the (c, c') pair for each class outside the timed region.
+    let ct_valid = PKE::Ciphertext::<MLKEM512>::from_bytes(&valid);
+    let ct_malleated = PKE::Ciphertext::<MLKEM512>::from_bytes(&malleated);
+    let m_valid = dk_pke.decrypt(&ct_valid);
+    let m_malleated = dk_pke.decrypt(&ct_malleated);
+    let cprime_valid = ek_pke.encrypt(&m_valid, &fixed_r).as_bytes().to_vec();
+    let cprime_malleated = ek_pke.encrypt(&m_malleated, &fixed_r).as_bytes().to_vec();
+
+    // Fake `K'` / `K_bar` — the select never branches, so their contents don't
+    // affect timing; distinct values guard against the optimizer eliding the loop.
+    let k_prime = [0xEEu8; 32];
+    let k_bar = [0xFFu8; 32];
+
+    for _ in 0..100_000 {
+        let class = random_class(&mut rng);
+        let (ct_bytes, cprime_bytes) = match class {
+            Class::Left => (&valid, &cprime_valid),
+            Class::Right => (&malleated, &cprime_malleated),
+        };
+
+        runner.run_one(class, || {
+            let matches = black_box(ct_bytes.as_slice())
+                .ct_eq(black_box(cprime_bytes.as_slice()));
+            let mut secret = [0u8; 32];
+            for (out, (kp, kb)) in secret.iter_mut().zip(k_prime.iter().zip(k_bar.iter())) {
+                *out = u8::conditional_select(kb, kp, matches);
+            }
+            black_box(secret)
+        });
+    }
+}
+
+/// Null for [`decrypt_then_encrypt`]: byte-identical ciphertext for both
+/// classes. Same `m'`, same `c'`, same decrypt→encrypt work. Any signal
+/// here is runner noise; the paired diagnostic against
+/// `decrypt_then_encrypt` catches a leak whose median `|t|` would slip
+/// under the standalone 5.0 threshold (as decaps' 3.35 did).
+fn decrypt_then_encrypt_null(runner: &mut CtRunner, _rng: &mut BenchRng) {
+    let mut rng = ChaCha8Rng::from_seed([0xAA; 32]);
+
+    let keypair = KeyPair::<MLKEM512>::generate_derand(&[0x42; 64]);
+    let (_, ciphertext) = keypair.encapsulation_key.encapsulate_derand(&[0x55; 32]);
+    let valid = ciphertext.as_bytes().to_vec();
+
+    let dk_bytes = keypair.decapsulation_key.to_bytes();
+    let dk_pke_end = MLKEM512::PKE_DECRYPTION_KEY_SIZE;
+    let ek_pke_end = dk_pke_end + MLKEM512::PKE_ENCRYPTION_KEY_SIZE;
+    let dk_pke =
+        PKE::DecryptionKey::<MLKEM512>::from_bytes(&dk_bytes.as_ref()[..dk_pke_end]);
+    let ek_pke =
+        PKE::EncryptionKey::<MLKEM512>::from_bytes(&dk_bytes.as_ref()[dk_pke_end..ek_pke_end]);
+    let fixed_r = [0u8; 32];
+
+    for _ in 0..100_000 {
+        let class = random_class(&mut rng);
+        let ct = PKE::Ciphertext::<MLKEM512>::from_bytes(&valid);
+
+        runner.run_one(class, || {
+            let m_prime = dk_pke.decrypt(black_box(&ct));
+            black_box(ek_pke.encrypt(black_box(&m_prime), black_box(&fixed_r)))
+        });
+    }
+}
+
+/// Null for [`fo_tail_only`]: byte-identical `(c, c')` pair for both classes.
+/// Same `ct_eq` input, same select input. Any signal is runner noise.
+fn fo_tail_only_null(runner: &mut CtRunner, _rng: &mut BenchRng) {
+    let mut rng = ChaCha8Rng::from_seed([0xBB; 32]);
+
+    let keypair = KeyPair::<MLKEM512>::generate_derand(&[0x42; 64]);
+    let (_, ciphertext) = keypair.encapsulation_key.encapsulate_derand(&[0x55; 32]);
+    let valid = ciphertext.as_bytes().to_vec();
+
+    let dk_bytes = keypair.decapsulation_key.to_bytes();
+    let dk_pke_end = MLKEM512::PKE_DECRYPTION_KEY_SIZE;
+    let ek_pke_end = dk_pke_end + MLKEM512::PKE_ENCRYPTION_KEY_SIZE;
+    let dk_pke =
+        PKE::DecryptionKey::<MLKEM512>::from_bytes(&dk_bytes.as_ref()[..dk_pke_end]);
+    let ek_pke =
+        PKE::EncryptionKey::<MLKEM512>::from_bytes(&dk_bytes.as_ref()[dk_pke_end..ek_pke_end]);
+    let fixed_r = [0u8; 32];
+
+    let ct = PKE::Ciphertext::<MLKEM512>::from_bytes(&valid);
+    let m_valid = dk_pke.decrypt(&ct);
+    let cprime = ek_pke.encrypt(&m_valid, &fixed_r).as_bytes().to_vec();
+
+    let k_prime = [0xEEu8; 32];
+    let k_bar = [0xFFu8; 32];
+
+    for _ in 0..100_000 {
+        let class = random_class(&mut rng);
+
+        runner.run_one(class, || {
+            let matches =
+                black_box(valid.as_slice()).ct_eq(black_box(cprime.as_slice()));
+            let mut secret = [0u8; 32];
+            for (out, (kp, kb)) in secret.iter_mut().zip(k_prime.iter().zip(k_bar.iter())) {
+                *out = u8::conditional_select(kb, kp, matches);
+            }
+            black_box(secret)
+        });
+    }
+}
+
+ctbench_main!(
+    encaps,
+    decaps,
+    decaps_null,
+    pke_decrypt,
+    decrypt_then_encrypt,
+    decrypt_then_encrypt_null,
+    fo_tail_only,
+    fo_tail_only_null
+);
