@@ -63,6 +63,25 @@ fn encaps(runner: &mut CtRunner, _rng: &mut BenchRng) {
     }
 }
 
+/// Null for [`encaps`]: byte-identical `m` for both classes. Same encapsulation
+/// randomness → same internal state → same work. Any signal is runner noise.
+/// The paired diagnostic against `encaps` catches an encrypt-side leak whose
+/// median `|t|` would slip under the standalone 5.0 threshold.
+fn encaps_null(runner: &mut CtRunner, _rng: &mut BenchRng) {
+    let mut rng = ChaCha8Rng::from_seed([0x55; 32]);
+    let keypair = KeyPair::<MLKEM512>::generate_derand(&[0x42; 64]);
+    let encapsulation_key = keypair.encapsulation_key;
+    let fixed_m = [0x55u8; 32];
+
+    for _ in 0..100_000 {
+        let class = random_class(&mut rng);
+
+        runner.run_one(class, || {
+            black_box(encapsulation_key.encapsulate_derand(black_box(&fixed_m)))
+        });
+    }
+}
+
 /// Decapsulation: valid (Left) vs malleated (Right) ciphertext under a fixed
 /// key — the implicit-rejection path must be constant-time.
 fn decaps(runner: &mut CtRunner, _rng: &mut BenchRng) {
@@ -177,8 +196,7 @@ fn decrypt_then_encrypt(runner: &mut CtRunner, _rng: &mut BenchRng) {
     let dk_bytes = keypair.decapsulation_key.to_bytes();
     let dk_pke_end = MLKEM512::PKE_DECRYPTION_KEY_SIZE;
     let ek_pke_end = dk_pke_end + MLKEM512::PKE_ENCRYPTION_KEY_SIZE;
-    let dk_pke =
-        PKE::DecryptionKey::<MLKEM512>::from_bytes(&dk_bytes.as_ref()[..dk_pke_end]);
+    let dk_pke = PKE::DecryptionKey::<MLKEM512>::from_bytes(&dk_bytes.as_ref()[..dk_pke_end]);
     let ek_pke =
         PKE::EncryptionKey::<MLKEM512>::from_bytes(&dk_bytes.as_ref()[dk_pke_end..ek_pke_end]);
     let fixed_r = [0u8; 32];
@@ -218,8 +236,7 @@ fn fo_tail_only(runner: &mut CtRunner, _rng: &mut BenchRng) {
     let dk_bytes = keypair.decapsulation_key.to_bytes();
     let dk_pke_end = MLKEM512::PKE_DECRYPTION_KEY_SIZE;
     let ek_pke_end = dk_pke_end + MLKEM512::PKE_ENCRYPTION_KEY_SIZE;
-    let dk_pke =
-        PKE::DecryptionKey::<MLKEM512>::from_bytes(&dk_bytes.as_ref()[..dk_pke_end]);
+    let dk_pke = PKE::DecryptionKey::<MLKEM512>::from_bytes(&dk_bytes.as_ref()[..dk_pke_end]);
     let ek_pke =
         PKE::EncryptionKey::<MLKEM512>::from_bytes(&dk_bytes.as_ref()[dk_pke_end..ek_pke_end]);
     let fixed_r = [0u8; 32];
@@ -245,8 +262,7 @@ fn fo_tail_only(runner: &mut CtRunner, _rng: &mut BenchRng) {
         };
 
         runner.run_one(class, || {
-            let matches = black_box(ct_bytes.as_slice())
-                .ct_eq(black_box(cprime_bytes.as_slice()));
+            let matches = black_box(ct_bytes.as_slice()).ct_eq(black_box(cprime_bytes.as_slice()));
             let mut secret = [0u8; 32];
             for (out, (kp, kb)) in secret.iter_mut().zip(k_prime.iter().zip(k_bar.iter())) {
                 *out = u8::conditional_select(kb, kp, matches);
@@ -271,8 +287,7 @@ fn decrypt_then_encrypt_null(runner: &mut CtRunner, _rng: &mut BenchRng) {
     let dk_bytes = keypair.decapsulation_key.to_bytes();
     let dk_pke_end = MLKEM512::PKE_DECRYPTION_KEY_SIZE;
     let ek_pke_end = dk_pke_end + MLKEM512::PKE_ENCRYPTION_KEY_SIZE;
-    let dk_pke =
-        PKE::DecryptionKey::<MLKEM512>::from_bytes(&dk_bytes.as_ref()[..dk_pke_end]);
+    let dk_pke = PKE::DecryptionKey::<MLKEM512>::from_bytes(&dk_bytes.as_ref()[..dk_pke_end]);
     let ek_pke =
         PKE::EncryptionKey::<MLKEM512>::from_bytes(&dk_bytes.as_ref()[dk_pke_end..ek_pke_end]);
     let fixed_r = [0u8; 32];
@@ -300,8 +315,7 @@ fn fo_tail_only_null(runner: &mut CtRunner, _rng: &mut BenchRng) {
     let dk_bytes = keypair.decapsulation_key.to_bytes();
     let dk_pke_end = MLKEM512::PKE_DECRYPTION_KEY_SIZE;
     let ek_pke_end = dk_pke_end + MLKEM512::PKE_ENCRYPTION_KEY_SIZE;
-    let dk_pke =
-        PKE::DecryptionKey::<MLKEM512>::from_bytes(&dk_bytes.as_ref()[..dk_pke_end]);
+    let dk_pke = PKE::DecryptionKey::<MLKEM512>::from_bytes(&dk_bytes.as_ref()[..dk_pke_end]);
     let ek_pke =
         PKE::EncryptionKey::<MLKEM512>::from_bytes(&dk_bytes.as_ref()[dk_pke_end..ek_pke_end]);
     let fixed_r = [0u8; 32];
@@ -317,8 +331,7 @@ fn fo_tail_only_null(runner: &mut CtRunner, _rng: &mut BenchRng) {
         let class = random_class(&mut rng);
 
         runner.run_one(class, || {
-            let matches =
-                black_box(valid.as_slice()).ct_eq(black_box(cprime.as_slice()));
+            let matches = black_box(valid.as_slice()).ct_eq(black_box(cprime.as_slice()));
             let mut secret = [0u8; 32];
             for (out, (kp, kb)) in secret.iter_mut().zip(k_prime.iter().zip(k_bar.iter())) {
                 *out = u8::conditional_select(kb, kp, matches);
@@ -330,6 +343,7 @@ fn fo_tail_only_null(runner: &mut CtRunner, _rng: &mut BenchRng) {
 
 ctbench_main!(
     encaps,
+    encaps_null,
     decaps,
     decaps_null,
     pke_decrypt,
