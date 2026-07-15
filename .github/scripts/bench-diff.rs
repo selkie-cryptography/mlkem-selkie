@@ -1,9 +1,9 @@
-//! Emit a markdown perf-diff between two directories of dashboard payloads.
+//! Emit a markdown bench-diff between two directories of dashboard payloads.
 //!
-//! Usage: `perf-diff <baseline-dir> <head-dir> <baseline-sha>`
+//! Usage: `bench-diff <baseline-dir> <head-dir> <baseline-sha>`
 //!
 //! Reads `{baseline,head}/{cycles,instructions,bench}-{backend}.json` for
-//! every payload kind the [`perf.yml`] workflow produces. A missing file for
+//! every payload kind the [`bench.yml`] workflow produces. A missing file for
 //! any (kind, backend) pair is silently skipped so a stale baseline (e.g.
 //! before neon divan was added) still renders a partial table instead of
 //! failing the job.
@@ -13,7 +13,7 @@
 //! so it lives in a collapsed `<details>` block that reviewers can open when
 //! they want the reference.
 //!
-//! Compile: `rustc -O perf-diff.rs -o perf-diff`
+//! Compile: `rustc -O bench-diff.rs -o bench-diff`
 
 use std::env;
 use std::fs;
@@ -24,7 +24,7 @@ use std::process::ExitCode;
 /// kind covers every backend — see [`Kind::backends`].
 type Backend = &'static str;
 
-/// A payload kind produced by the [`perf.yml`] workflow.
+/// A payload kind produced by the [`bench.yml`] workflow.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
     /// `cycles-{backend}.json`, dashboard `cycles` kind. rdtsc medians.
@@ -441,10 +441,10 @@ impl Report {
     }
 
     /// Renders the report as markdown, bracketed by the sticky HTML-comment
-    /// marker so `perf.yml`'s `github-script` step updates the same comment
+    /// marker so `bench.yml`'s `github-script` step updates the same comment
     /// on subsequent PR pushes.
     fn to_markdown(&self) -> String {
-        let mut out = String::from("<!-- perf-diff-marker -->\n");
+        let mut out = String::from("<!-- bench-diff-marker -->\n");
 
         if self.sections.is_empty() {
             out.push_str("### Benchmarks · no baseline\n\n");
@@ -638,7 +638,7 @@ fn short_sha(sha: &str) -> String {
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
     let [_, baseline_dir, head_dir, baseline_sha] = args.as_slice() else {
-        eprintln!("Usage: perf-diff <baseline-dir> <head-dir> <baseline-sha>");
+        eprintln!("Usage: bench-diff <baseline-dir> <head-dir> <baseline-sha>");
         return ExitCode::from(2);
     };
 
