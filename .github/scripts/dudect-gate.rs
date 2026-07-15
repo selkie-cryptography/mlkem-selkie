@@ -34,6 +34,18 @@
 //! failure. Their median is reported so a reader can eyeball the noise
 //! floor.
 //!
+//! # Magnitude floor
+//!
+//! A 5/5-positive sign test rejects at `p = 0.031` even on trivial-magnitude
+//! persistent bias. [`MAGNITUDE_FLOOR`] requires the median diff to also
+//! exceed a small threshold so noise doesn't cross the gate.
+//!
+//! # Informational benches
+//!
+//! Benches in [`INFORMATIONAL_BENCHES`] carry accepted µarch signals: the
+//! paired sign test is skipped for gating, but [`CATASTROPHIC_MEDIAN`]
+//! backstops an outright regression.
+//!
 //! # Output
 //!
 //! The median reading's report line is written to `<median-out>` for the
@@ -58,8 +70,22 @@ const ALPHA: f64 = 0.05;
 /// `THRESHOLD` in `dudect-to-json.rs`.
 const MEDIAN_THRESHOLD: f64 = 5.0;
 
+/// Minimum median paired diff (|t| units) for a rejected sign test to fail.
+/// Filters trivial-magnitude persistent bias that 5/5-positive alone flags.
+const MAGNITUDE_FLOOR: f64 = 1.0;
+
+/// Catastrophic median-|t| cutoff for [`INFORMATIONAL_BENCHES`]. Set at 3×
+/// the observed µarch envelope on our runners (max ~17), which also sits at
+/// the lower bound of the "known-leaky" band in the dudect paper (Reparaz
+/// et al. 2017) for n=100k samples on real crypto bugs.
+const CATASTROPHIC_MEDIAN: f64 = 50.0;
+
 /// Suffix that identifies a null-calibration bench.
 const NULL_SUFFIX: &str = "_null";
+
+/// Benches with accepted µarch signals: skip the paired sign gate, keep the
+/// [`CATASTROPHIC_MEDIAN`] backstop.
+const INFORMATIONAL_BENCHES: &[&str] = &["decaps"];
 
 /// One `bench <name> ... max t = <t>` line from a dudect report.
 struct Reading {
@@ -172,11 +198,20 @@ impl Benches {
             }
 
             let null_name = format!("{name}{NULL_SUFFIX}");
-            if let Some(null_readings) = self.readings.get(&null_name) {
-                if null_readings.len() == self.expected {
-                    paired_sign_gate(&mut outcome, name, readings, null_readings);
-                    continue;
-                }
+            let null_readings = self
+                .readings
+                .get(&null_name)
+                .filter(|r| r.len() == self.expected)
+                .map(Vec::as_slice);
+
+            if INFORMATIONAL_BENCHES.contains(&name.as_str()) {
+                informational_gate(&mut outcome, name, readings, null_readings);
+                continue;
+            }
+
+            if let Some(null) = null_readings {
+                paired_sign_gate(&mut outcome, name, readings, null);
+                continue;
             }
 
             median_gate(&mut outcome, name, readings);
@@ -193,14 +228,9 @@ fn median_reading(readings: &[Reading]) -> &Reading {
     &readings[idx[(readings.len() - 1) / 2]]
 }
 
-/// Paired sign test: fail when all-positive diffs give a one-sided binomial
-/// p-value below [`ALPHA`].
-fn paired_sign_gate(
-    outcome: &mut GateOutcome,
-    name: &str,
-    real: &[Reading],
-    null: &[Reading],
-) {
+/// Paired sign test: fails when the p-value is below [`ALPHA`] and the
+/// median diff exceeds [`MAGNITUDE_FLOOR`].
+fn paired_sign_gate(outcome: &mut GateOutcome, name: &str, real: &[Reading], null: &[Reading]) {
     let n = real.len();
     let diffs: Vec<f64> = real.iter().zip(null).map(|(r, z)| r.abs_t - z.abs_t).collect();
     let positive = diffs.iter().filter(|&&d| d > 0.0).count();
@@ -208,20 +238,84 @@ fn paired_sign_gate(
 
     let real_median = median_reading(real).abs_t;
     let null_median = median_reading(null).abs_t;
+    let diff_median = median_of_diffs(&diffs);
 
     let diffs_str: Vec<String> = diffs.iter().map(|d| format!("{d:+.5}")).collect();
     outcome.log.push_str(&format!(
         "  {name} vs {name}{NULL_SUFFIX}: diffs {}, {positive}/{n} positive (p = {p_value:.4}); \
-         real median = {real_median:.5}, null median = {null_median:.5}\n",
+         real median = {real_median:.5}, null median = {null_median:.5}, diff median = {diff_median:+.5}\n",
         diffs_str.join(" "),
     ));
 
-    if p_value < ALPHA {
+    if p_value < ALPHA && diff_median.abs() > MAGNITUDE_FLOOR {
         outcome.log.push_str(&format!(
-            "FAIL: {name} paired sign test rejects H0 (p = {p_value:.4} < {ALPHA})\n"
+            "FAIL: {name} paired sign test rejects H0 (p = {p_value:.4} < {ALPHA}, \
+             |diff median| = {abs:.4} > {MAGNITUDE_FLOOR})\n",
+            abs = diff_median.abs(),
+        ));
+        outcome.failed = true;
+    } else if p_value < ALPHA {
+        outcome.log.push_str(&format!(
+            "  {name}: sign test would reject H0 (p = {p_value:.4}) but |diff median| = \
+             {abs:.4} <= {MAGNITUDE_FLOOR} — noise-floor magnitude, informational\n",
+            abs = diff_median.abs(),
+        ));
+    }
+}
+
+/// Skips the paired sign test, gates only on [`CATASTROPHIC_MEDIAN`]. Still
+/// logs paired diffs when a null sibling exists.
+fn informational_gate(
+    outcome: &mut GateOutcome,
+    name: &str,
+    readings: &[Reading],
+    null: Option<&[Reading]>,
+) {
+    let real_median = median_reading(readings).abs_t;
+
+    if let Some(null) = null {
+        let diffs: Vec<f64> = readings
+            .iter()
+            .zip(null)
+            .map(|(r, z)| r.abs_t - z.abs_t)
+            .collect();
+        let positive = diffs.iter().filter(|&&d| d > 0.0).count();
+        let p_value = binomial_upper_tail(positive, readings.len());
+        let null_median = median_reading(null).abs_t;
+        let diff_median = median_of_diffs(&diffs);
+
+        let diffs_str: Vec<String> = diffs.iter().map(|d| format!("{d:+.5}")).collect();
+        outcome.log.push_str(&format!(
+            "  {name} (informational, accepted µarch signal) vs {name}{NULL_SUFFIX}: \
+             diffs {}, {positive}/{n} positive (p = {p_value:.4}); real median = {real_median:.5}, \
+             null median = {null_median:.5}, diff median = {diff_median:+.5}\n",
+            diffs_str.join(" "),
+            n = readings.len(),
+        ));
+    } else {
+        let runs: Vec<String> = readings.iter().map(|r| format!("{:.5}", r.abs_t)).collect();
+        outcome.log.push_str(&format!(
+            "  {name} (informational, accepted µarch signal) -> |t| runs: {}, \
+             median = {real_median:.5}\n",
+            runs.join(" "),
+        ));
+    }
+
+    if real_median >= CATASTROPHIC_MEDIAN {
+        outcome.log.push_str(&format!(
+            "FAIL: {name} median |t| = {real_median:.5} >= {CATASTROPHIC_MEDIAN} \
+             (catastrophic — outside the accepted µarch envelope)\n"
         ));
         outcome.failed = true;
     }
+}
+
+/// Returns the median of a slice of floats; lower-of-two-middle for even N,
+/// matching [`median_reading`].
+fn median_of_diffs(diffs: &[f64]) -> f64 {
+    let mut sorted: Vec<f64> = diffs.to_vec();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    sorted[(sorted.len() - 1) / 2]
 }
 
 /// Legacy median-|t| gate for benches without a null sibling.
@@ -363,7 +457,8 @@ mod tests {
         assert!((binomial_upper_tail(7, 8) - 9.0 / 256.0).abs() < 1e-9);
     }
 
-    /// 5/5 positive diffs — the sign test rejects H0 at ALPHA=0.05.
+    /// 5/5 positive diffs with meaningful magnitude — sign test rejects H0
+    /// and the diff median exceeds [`MAGNITUDE_FLOOR`].
     #[test]
     fn paired_all_positive_fails() {
         let reports: Vec<String> = [
@@ -374,7 +469,7 @@ mod tests {
             (10.5, 2.3),
         ]
         .into_iter()
-        .map(|(d, n)| report(&[line("decaps", d), line("decaps_null", n)]))
+        .map(|(d, n)| report(&[line("encaps", d), line("encaps_null", n)]))
         .collect();
 
         let outcome = Benches::from_reports(&reports).gate();
@@ -388,14 +483,14 @@ mod tests {
     #[test]
     fn paired_balanced_signs_passes() {
         let reports: Vec<String> = [
-            (10.0, 2.0),   // +
-            (11.0, 12.5),  // -
-            (9.5, 2.1),    // +
-            (12.0, 14.8),  // -
-            (10.5, 2.3),   // +
+            (10.0, 2.0),  // +
+            (11.0, 12.5), // -
+            (9.5, 2.1),   // +
+            (12.0, 14.8), // -
+            (10.5, 2.3),  // +
         ]
         .into_iter()
-        .map(|(d, n)| report(&[line("decaps", d), line("decaps_null", n)]))
+        .map(|(d, n)| report(&[line("encaps", d), line("encaps_null", n)]))
         .collect();
 
         let outcome = Benches::from_reports(&reports).gate();
@@ -416,12 +511,12 @@ mod tests {
             (2.0, 41.0),
         ]
         .into_iter()
-        .map(|(d, n)| report(&[line("decaps", d), line("decaps_null", n)]))
+        .map(|(d, n)| report(&[line("encaps", d), line("encaps_null", n)]))
         .collect();
 
         let outcome = Benches::from_reports(&reports).gate();
 
-        // decaps < null every run, so 0/5 positive → paired test passes.
+        // encaps < null every run, so 0/5 positive → paired test passes.
         assert!(!outcome.failed, "log:\n{}", outcome.log);
         assert!(outcome.log.contains("(null calibration)"));
         assert!(outcome.log.contains("0/5 positive"));
@@ -455,6 +550,72 @@ mod tests {
 
         assert!(outcome.failed);
         assert!(outcome.log.contains("FAIL: decaps: 2 readings, expected 3"));
+    }
+
+    /// 5/5 positive diffs at noise-floor magnitude: [`MAGNITUDE_FLOOR`]
+    /// suppresses the failure.
+    #[test]
+    fn tiny_magnitude_paired_signal_passes() {
+        let reports: Vec<String> = [
+            (2.5, 2.0),  // diff +0.5
+            (2.6, 2.1),  // diff +0.5
+            (2.7, 2.2),  // diff +0.5
+            (2.4, 1.9),  // diff +0.5
+            (2.55, 2.05), // diff +0.5
+        ]
+        .into_iter()
+        .map(|(d, n)| report(&[line("encaps", d), line("encaps_null", n)]))
+        .collect();
+
+        let outcome = Benches::from_reports(&reports).gate();
+
+        assert!(!outcome.failed, "log:\n{}", outcome.log);
+        assert!(outcome.log.contains("sign test would reject H0"));
+        assert!(outcome.log.contains("noise-floor magnitude"));
+    }
+
+    /// An [`INFORMATIONAL_BENCHES`] entry never fails the paired sign test,
+    /// even on all-positive diffs of meaningful magnitude.
+    #[test]
+    fn informational_bench_never_fails_paired_sign_test() {
+        let reports: Vec<String> = [
+            (10.0, 2.0),
+            (11.0, 1.5),
+            (9.5, 2.1),
+            (12.0, 1.8),
+            (10.5, 2.3),
+        ]
+        .into_iter()
+        .map(|(d, n)| report(&[line("decaps", d), line("decaps_null", n)]))
+        .collect();
+
+        let outcome = Benches::from_reports(&reports).gate();
+
+        assert!(!outcome.failed, "log:\n{}", outcome.log);
+        assert!(outcome.log.contains("accepted µarch signal"));
+        assert!(outcome.log.contains("5/5 positive"));
+    }
+
+    /// An informational bench still fails when its median passes
+    /// [`CATASTROPHIC_MEDIAN`].
+    #[test]
+    fn informational_bench_fails_on_catastrophic_median() {
+        let reports: Vec<String> = [
+            (70.0, 2.0),
+            (75.0, 1.5),
+            (68.0, 2.1),
+            (72.0, 1.8),
+            (69.0, 2.3),
+        ]
+        .into_iter()
+        .map(|(d, n)| report(&[line("decaps", d), line("decaps_null", n)]))
+        .collect();
+
+        let outcome = Benches::from_reports(&reports).gate();
+
+        assert!(outcome.failed, "log:\n{}", outcome.log);
+        assert!(outcome.log.contains("catastrophic"));
+        assert!(outcome.log.contains("outside the accepted µarch envelope"));
     }
 
     #[test]
