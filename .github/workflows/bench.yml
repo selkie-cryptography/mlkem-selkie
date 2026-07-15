@@ -1,4 +1,4 @@
-name: Perf
+name: Benchmarks
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
     paths:
       - "src/**"
       - "benches/**"
-      - ".github/workflows/perf.yml"
+      - ".github/workflows/bench.yml"
   workflow_dispatch:
 
 concurrency:
@@ -17,7 +17,7 @@ concurrency:
 permissions:
   contents: read
 
-# `perf-diff-comment` opens a sticky comment on the PR that owns the run, so
+# `bench-diff-comment` opens a sticky comment on the PR that owns the run, so
 # the workflow needs write access to pull requests. The dashboard-upload leg
 # only writes to Fly, not to GitHub, so it stays on the default `contents:
 # read`.
@@ -100,8 +100,8 @@ jobs:
             cat bench.json >&2 || true
             exit 1
           fi
-      - name: Stage payload for perf-diff
-        # Rename to include the backend so the perf-diff aggregator can drop
+      - name: Stage payload for bench-diff
+        # Rename to include the backend so the bench-diff aggregator can drop
         # every leg's payload into one flat directory without name collisions.
         run: |
           mkdir -p payload
@@ -161,7 +161,7 @@ jobs:
           /tmp/instructions-report target/gungraun "${{ github.sha }}" > instructions.json
       - name: Verify instructions payload has data
         run: jq -e '.total > 0 and (.results | length > 0)' instructions.json > /dev/null || { echo "::error::instructions.json has no benchmark results"; cat instructions.json >&2; exit 1; }
-      - name: Stage payload for perf-diff
+      - name: Stage payload for bench-diff
         run: |
           mkdir -p payload
           cp instructions.json payload/instructions-${{ matrix.backend }}.json
@@ -213,7 +213,7 @@ jobs:
           /tmp/cycles-to-json target/criterion "${{ github.sha }}" > cycles.json
       - name: Verify cycles payload has data
         run: jq -e '.results | length > 0' cycles.json > /dev/null || { echo "::error::cycles.json has no benchmark results"; cat cycles.json >&2; exit 1; }
-      - name: Stage payload for perf-diff
+      - name: Stage payload for bench-diff
         run: |
           mkdir -p payload
           cp cycles.json payload/cycles-${{ matrix.backend }}.json
@@ -240,8 +240,8 @@ jobs:
   # PR-only aggregator: joins the current run's payloads against the newest
   # cached main-branch baselines and posts one sticky comment per PR with the
   # combined diff. Independent of the dashboard-upload path.
-  perf-diff-comment:
-    name: Perf diff (PR comment)
+  bench-diff-comment:
+    name: Benchmarks (PR comment)
     if: github.event_name == 'pull_request'
     needs: [benchmarks, instructions, cycles]
     runs-on: ubuntu-latest
@@ -261,7 +261,7 @@ jobs:
       # One cache entry per (kind, backend), each keyed on the baseline sha we
       # want to compare against. `restore-keys` walks back to the newest match
       # for the prefix so a PR gets a diff on any recent main-branch build.
-      # A miss on one leg is not fatal — perf-diff.rs simply omits its row.
+      # A miss on one leg is not fatal — bench-diff.rs simply omits its row.
       - name: Restore baseline (bench, generic)
         uses: actions/cache/restore@v4
         with:
@@ -307,17 +307,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Build markdown diff
         run: |
-          rustc -O --edition 2021 .github/scripts/perf-diff.rs -o /tmp/perf-diff
+          rustc -O --edition 2021 .github/scripts/bench-diff.rs -o /tmp/bench-diff
           mkdir -p baseline  # in case every restore missed
-          /tmp/perf-diff baseline head "${{ github.event.pull_request.base.sha }}" > perf-diff.md
-          cat perf-diff.md
+          /tmp/bench-diff baseline head "${{ github.event.pull_request.base.sha }}" > bench-diff.md
+          cat bench-diff.md
       - name: Post sticky PR comment
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const body = fs.readFileSync('perf-diff.md', 'utf8');
-            const marker = '<!-- perf-diff-marker -->';
+            const body = fs.readFileSync('bench-diff.md', 'utf8');
+            const marker = '<!-- bench-diff-marker -->';
 
             const {owner, repo} = context.repo;
             const issue_number = context.issue.number;
