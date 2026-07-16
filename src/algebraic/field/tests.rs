@@ -130,7 +130,50 @@ fn montgomery_table_matches_element_wise() {
     }
 }
 
+/// Exercises [`FieldElement`]'s reduction path across a fixed set of i16
+/// boundary values that proptest can miss.
+#[test]
+fn field_element_boundary_values_no_overflow() {
+    let q = parameters::Q as i16;
+    let boundary = [
+        i16::MIN,
+        i16::MIN + 1,
+        i16::MIN / 2,
+        -q - 1,
+        -q,
+        -q + 1,
+        -1,
+        0,
+        1,
+        q - 1,
+        q,
+        q + 1,
+        i16::MAX / 2,
+        i16::MAX - 1,
+        i16::MAX,
+    ];
+    for &raw in &boundary {
+        let fe = FieldElement::from_montgomery_table(raw);
+        let canonical = fe.value();
+
+        assert!(
+            u32::from(canonical) < u32::from(parameters::Q),
+            "value = {canonical} not in [0, Q) for raw = {raw}",
+        );
+        assert_eq!(
+            fe.reduce().reduce(),
+            fe.reduce(),
+            "reduce not idempotent at raw = {raw}",
+        );
+    }
+}
+
 proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 4096,
+        .. ProptestConfig::default()
+    })]
+
     /// [`FieldElement::barrett_const_mul`] with `b_bar = round(b · 2^15 / q)`
     /// computes `a · b mod q` for every canonical `(a, b)` pair, matching the
     /// reference u32 modular multiply. Covers the whole NTT butterfly input

@@ -9,8 +9,9 @@
 //!
 //! The shared zeta tables live here so every backend reads the same constants.
 //! [`ZETA_RAW`] holds the canonical values from FIPS 203 Appendix A;
-//! [`ZETA_MONT`] and [`GAMMA_MONT`] are Montgomery-form derivations of those
-//! (the vector backends reinterpret them as `[i16]`).
+//! [`ZETA_BARRETT`] pairs each with `round(zeta · 2^15 / q)`, consumed by the
+//! Barrett-with-constant butterflies in every backend. [`GAMMA_MONT`] holds
+//! the base-multiplication tweaks in Montgomery form.
 
 use crate::algebraic::field::FieldElement;
 
@@ -41,10 +42,6 @@ pub(super) const ZETA_RAW: [u16; 128] = [
     3220, 375, 2549, 2090, 1645, 1063, 319, 2773, 757, 2099, 561, 2466, 2594, 2804, 1092, 403,
     1026, 1143, 2150, 2775, 886, 1722, 1212, 1874, 1029, 2110, 2935, 885, 2154,
 ];
-
-/// The Montgomery-form values `ζ^BitRev7(i) * R mod q`, derived from
-/// [`ZETA_RAW`].
-const ZETA_MONT: [FieldElement; 128] = FieldElement::montgomery_table(ZETA_RAW);
 
 /// Barrett multipliers `round(zeta * 2^15 / q)` paired with [`ZETA_RAW`],
 /// consumed by the SIMD backends' Barrett-with-constant NTT butterflies
