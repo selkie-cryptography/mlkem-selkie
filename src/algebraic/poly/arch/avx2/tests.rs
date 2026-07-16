@@ -36,6 +36,15 @@ fn canonical_poly() -> impl Strategy<Value = [FieldElement; parameters::N]> {
 }
 
 proptest! {
+    // 4096 cases × 256 coefficients per poly hits the i16 boundary reliably
+    // and covers a wider input distribution than proptest's default 256.
+    // Failing inputs are persisted to `proptest-regressions/` and replayed on
+    // subsequent runs (proptest's built-in `FileFailurePersistence`).
+    #![proptest_config(ProptestConfig {
+        cases: 4096,
+        .. ProptestConfig::default()
+    })]
+
     /// `multiply` matches the scalar backend on arbitrary Montgomery-domain
     /// inputs.
     #[test]

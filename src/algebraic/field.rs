@@ -128,7 +128,12 @@ impl FieldElement {
     const fn barrett(a: i16) -> i16 {
         let t = ((BARRETT_V * a as i32 + (1 << 25)) >> 26) as i16;
 
-        a - t.wrapping_mul(Q)
+        // Correct mod 2^16 either way; `wrapping_sub` avoids a spurious
+        // overflow panic for `a` near i16::{MIN,MAX} where `t * Q` itself
+        // wraps into an i16 whose subtract from `a` would cross the i16
+        // boundary. The true remainder fits in i16 and equals the wrapping
+        // value.
+        a.wrapping_sub(t.wrapping_mul(Q))
     }
 
     /// Montgomery reduction: returns `a * R^-1 mod q` in `(-q, q)`, with
@@ -234,7 +239,9 @@ impl Add for FieldElement {
 
     #[inline]
     fn add(self, rhs: Self) -> Self {
-        Self(self.0 + rhs.0)
+        // Wrapping: matches the SIMD backends' vector adds and stays correct
+        // mod 2^16, which is all the downstream reduction requires.
+        Self(self.0.wrapping_add(rhs.0))
     }
 }
 
@@ -243,7 +250,7 @@ impl Sub for FieldElement {
 
     #[inline]
     fn sub(self, rhs: Self) -> Self {
-        Self(self.0 - rhs.0)
+        Self(self.0.wrapping_sub(rhs.0))
     }
 }
 
@@ -264,6 +271,6 @@ impl Neg for FieldElement {
 
     #[inline]
     fn neg(self) -> Self {
-        Self(-self.0)
+        Self(self.0.wrapping_neg())
     }
 }

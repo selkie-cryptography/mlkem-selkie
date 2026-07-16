@@ -213,11 +213,12 @@ pub(crate) fn ntt(coefficients: &mut [FieldElement; parameters::N]) {
     for len in [4usize, 2] {
         let mut start = 0;
         while start < 256 {
-            let zeta = super::ZETA_MONT[k];
+            let zeta = super::ZETA_RAW[k] as i16;
+            let zeta_bar = super::ZETA_BARRETT[k];
             k += 1;
 
             for j in start..start + len {
-                let t = zeta * coefficients[j + len];
+                let t = coefficients[j + len].barrett_const_mul(zeta, zeta_bar);
                 coefficients[j + len] = coefficients[j] - t;
                 coefficients[j] = coefficients[j] + t;
             }
@@ -248,13 +249,15 @@ pub(crate) fn ntt_inverse(coefficients: &mut [FieldElement; parameters::N]) {
     for len in [2usize, 4] {
         let mut start = 0;
         while start < 256 {
-            let zeta = super::ZETA_MONT[k];
+            let zeta = super::ZETA_RAW[k] as i16;
+            let zeta_bar = super::ZETA_BARRETT[k];
             k -= 1;
 
             for j in start..start + len {
                 let t = coefficients[j];
                 coefficients[j] = (t + coefficients[j + len]).reduce();
-                coefficients[j + len] = zeta * (coefficients[j + len] - t);
+                coefficients[j + len] =
+                    (coefficients[j + len] - t).barrett_const_mul(zeta, zeta_bar);
             }
 
             start += 2 * len;
