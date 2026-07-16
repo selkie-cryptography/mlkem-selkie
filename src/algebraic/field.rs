@@ -140,6 +140,21 @@ impl FieldElement {
         ((a - (m as i32) * (Q as i32)) >> 16) as i16
     }
 
+    /// Multiplies by a canonical zeta constant `b` using precomputed Barrett
+    /// multiplier `b_bar = round(b · 2^15 / q)`. Scalar analog of the NTT
+    /// butterfly path in the SIMD backends (NEON's `vqrdmulhq_s16`, AVX2's
+    /// `_mm256_mulhrs_epi16`). Output range `(-q, q)`, matching
+    /// [`Self::mul`].
+    #[inline]
+    #[must_use]
+    pub(super) const fn barrett_const_mul(self, b: i16, b_bar: i16) -> Self {
+        let a = self.0 as i32;
+        let c_low = a.wrapping_mul(b as i32) as i16;
+        let t = ((a * b_bar as i32 + 0x4000) >> 15) as i16;
+
+        Self(c_low.wrapping_sub(t.wrapping_mul(Q)))
+    }
+
     /// `Compress_d`: maps this element to a `d`-bit value in `{0, ..., 2^d -
     /// 1}` via `round((2^d / q) * x) mod 2^d`.
     ///

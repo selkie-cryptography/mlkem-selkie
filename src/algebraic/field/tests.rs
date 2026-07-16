@@ -1,5 +1,7 @@
 //! Unit tests for prime-field arithmetic.
 
+use proptest::prelude::*;
+
 use super::*;
 
 /// Field subtraction is the additive inverse of addition.
@@ -125,5 +127,32 @@ fn montgomery_table_matches_element_wise() {
             FieldElement::new(*source).to_montgomery(),
             "i = {i}"
         );
+    }
+}
+
+proptest! {
+    /// [`FieldElement::barrett_const_mul`] with `b_bar = round(b · 2^15 / q)`
+    /// computes `a · b mod q` for every canonical `(a, b)` pair, matching the
+    /// reference u32 modular multiply. Covers the whole NTT butterfly input
+    /// space (`a` grows past `q` across stages, so the input range extends
+    /// well beyond canonical).
+    #[test]
+    fn barrett_const_mul_matches_reference(
+        a in -4 * (parameters::Q as i16)..=4 * (parameters::Q as i16),
+        b in 0u16..parameters::Q,
+    ) {
+        let b_bar = ((u32::from(b) * 32_768 + u32::from(parameters::Q) / 2)
+            / u32::from(parameters::Q)) as i16;
+
+        let got = FieldElement::from_montgomery_table(a)
+            .barrett_const_mul(b as i16, b_bar)
+            .reduce()
+            .value();
+
+        // Reference: reduce `a` to canonical [0, q) first, then modular multiply.
+        let a_canonical = a.rem_euclid(parameters::Q as i16) as u32;
+        let want = ((a_canonical * u32::from(b)) % u32::from(parameters::Q)) as u16;
+
+        prop_assert_eq!(got, want);
     }
 }

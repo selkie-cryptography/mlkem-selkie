@@ -18,7 +18,8 @@
 use core::arch::x86_64::{
     __m256i, _mm256_add_epi16, _mm256_loadu_si256, _mm256_mulhi_epi16, _mm256_mulhrs_epi16,
     _mm256_mullo_epi16, _mm256_permute2x128_si256, _mm256_permute4x64_epi64, _mm256_set1_epi16,
-    _mm256_setr_epi8, _mm256_shuffle_epi8, _mm256_srai_epi16, _mm256_storeu_si256, _mm256_sub_epi16,
+    _mm256_setr_epi8, _mm256_shuffle_epi8, _mm256_srai_epi16, _mm256_storeu_si256,
+    _mm256_sub_epi16,
 };
 
 use crate::{algebraic::field::FieldElement, parameters};

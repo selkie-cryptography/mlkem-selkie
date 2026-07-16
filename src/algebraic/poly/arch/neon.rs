@@ -81,7 +81,7 @@ fn fqmul(a: int16x8_t, b: int16x8_t) -> int16x8_t {
 /// `b` must be a canonical (non-Montgomery) representative for the result to
 /// preserve the Montgomery-domain convention: given `a = a_true * R`,
 /// `a * b mod q = (a_true * b) * R`. For NTT butterflies with zeta table
-/// [`ZETA_BARRETT`] paired with [`super::ZETA_RAW`], this replaces the
+/// [`super::ZETA_BARRETT`] paired with [`super::ZETA_RAW`], this replaces the
 /// [`fqmul`] path (~12 intrinsics per lane) with 3.
 #[inline]
 fn barrett_const_mul(a: int16x8_t, b: int16x8_t, b_bar: int16x8_t) -> int16x8_t {
