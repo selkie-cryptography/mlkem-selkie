@@ -16,7 +16,7 @@
 //! unused in any single build.
 #![allow(dead_code)]
 
-use super::{GAMMA_MONT, ZETA_MONT};
+use super::{GAMMA_MONT, ZETA_BARRETT, ZETA_RAW};
 use crate::{algebraic::field::FieldElement, parameters};
 
 /// The loop strides taken by the NTT (and NTT⁻¹) butterfly stages, in [NTT]
@@ -44,11 +44,12 @@ pub(crate) fn ntt(coefficients: &mut [FieldElement; parameters::N]) {
 
     for len in NTT_SERIES {
         for start in (0..256).step_by(2 * len) {
-            let zeta = ZETA_MONT[k];
+            let zeta = ZETA_RAW[k] as i16;
+            let zeta_bar = ZETA_BARRETT[k];
             k += 1;
 
             for j in start..(start + len) {
-                let t = zeta * coefficients[j + len];
+                let t = coefficients[j + len].barrett_const_mul(zeta, zeta_bar);
                 coefficients[j + len] = coefficients[j] - t;
                 coefficients[j] = coefficients[j] + t;
             }
@@ -73,13 +74,15 @@ pub(crate) fn ntt_inverse(coefficients: &mut [FieldElement; parameters::N]) {
 
     for len in NTT_SERIES.into_iter().rev() {
         for start in (0..256).step_by(2 * len) {
-            let zeta = ZETA_MONT[k];
+            let zeta = ZETA_RAW[k] as i16;
+            let zeta_bar = ZETA_BARRETT[k];
             k -= 1;
 
             for j in start..(start + len) {
                 let t = coefficients[j];
                 coefficients[j] = (t + coefficients[j + len]).reduce();
-                coefficients[j + len] = zeta * (coefficients[j + len] - t);
+                coefficients[j + len] =
+                    (coefficients[j + len] - t).barrett_const_mul(zeta, zeta_bar);
             }
         }
     }
