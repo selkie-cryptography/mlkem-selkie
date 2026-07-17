@@ -5,21 +5,17 @@ Rust ML-KEM (FIPS 203) implementation for beautiful, secure code.
 ### Example
 
 Each parameter set has its own module of type aliases — `mlkem512`, `mlkem768`,
-and `mlkem1024` — so the generic `KeyPair<MLKEM768>` reads as `mlkem768::KeyPair`:
+and `mlkem1024` — so the generic `DecapsulationKey<MLKEM768>` reads as `mlkem768::DecapsulationKey`:
 
 ```rust
 use mlkem_selkie::mlkem768;
 
-// Generate an ML-KEM-768 key pair. The module sources its own randomness via
-// `getrandom` + an internal SP 800-90A AES-256-CTR-DRBG.
-let mlkem768::KeyPair {
-    encapsulation_key: encaps_key,
-    decapsulation_key: decaps_key,
-} = mlkem768::KeyPair::generate();
+// Generate an ML-KEM-768 decapsulation key from OS entropy (`getrandom`).
+let decaps_key = mlkem768::DecapsulationKey::generate();
 
-// The sender encapsulates a fresh shared secret under the encapsulation key,
-// and transmits the ciphertext.
-let (sender_secret, ciphertext) = encaps_key.encapsulate();
+// The sender borrows the corresponding encapsulation key and encapsulates
+// a fresh shared secret; the ciphertext travels to the decapsulator.
+let (sender_secret, ciphertext) = decaps_key.encapsulation_key().encapsulate();
 
 // The holder of the decapsulation key recovers the same shared secret.
 let receiver_secret = decaps_key.decapsulate(&ciphertext);

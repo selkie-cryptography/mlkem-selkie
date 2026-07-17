@@ -5,8 +5,7 @@
 
 use divan::{Bencher, black_box};
 use mlkem_selkie::{
-    Ciphertext, DecapsulationKey, EncapsulationKey, KeyPair, MLKEM512, MLKEM768, MLKEM1024,
-    ParameterSet,
+    Ciphertext, DecapsulationKey, EncapsulationKey, MLKEM512, MLKEM768, MLKEM1024, ParameterSet,
 };
 
 fn main() {
@@ -25,24 +24,25 @@ const MESSAGE: [u8; 32] = [0x17; 32];
 fn keygen_derand<P: ParameterSet>(bencher: Bencher<'_, '_>) {
     bencher
         .counter(1u32)
-        .bench(|| KeyPair::<P>::generate_derand(black_box(&SEED)));
+        .bench(|| DecapsulationKey::<P>::generate_derand(black_box(&SEED)));
 }
 
 /// `ML-KEM.KeyGen` with OS entropy — [`keygen_derand`] plus `getrandom`.
 /// The delta against [`keygen_derand`] is the getrandom overhead.
 #[divan::bench(types = [MLKEM512, MLKEM768, MLKEM1024], sample_count = 100)]
 fn keygen_rand<P: ParameterSet>(bencher: Bencher<'_, '_>) {
-    bencher.counter(1u32).bench(|| KeyPair::<P>::generate());
+    bencher
+        .counter(1u32)
+        .bench(|| DecapsulationKey::<P>::generate());
 }
 
 /// `ML-KEM.Encaps_internal` under a fixed key from a fixed message.
 #[divan::bench(types = [MLKEM512, MLKEM768, MLKEM1024])]
 fn encaps_derand<P: ParameterSet>(bencher: Bencher<'_, '_>) {
-    let keypair = KeyPair::<P>::generate_derand(&SEED);
+    let dk = DecapsulationKey::<P>::generate_derand(&SEED);
 
     bencher.counter(1u32).bench(|| {
-        keypair
-            .encapsulation_key
+        dk.encapsulation_key()
             .encapsulate_derand(black_box(&MESSAGE))
     });
 }
@@ -51,31 +51,31 @@ fn encaps_derand<P: ParameterSet>(bencher: Bencher<'_, '_>) {
 /// the fresh message.
 #[divan::bench(types = [MLKEM512, MLKEM768, MLKEM1024])]
 fn encaps_rand<P: ParameterSet>(bencher: Bencher<'_, '_>) {
-    let keypair = KeyPair::<P>::generate_derand(&SEED);
+    let dk = DecapsulationKey::<P>::generate_derand(&SEED);
 
     bencher
         .counter(1u32)
-        .bench(|| keypair.encapsulation_key.encapsulate());
+        .bench(|| dk.encapsulation_key().encapsulate());
 }
 
 /// `ML-KEM.Decaps` of a valid ciphertext (the common, no-rejection path).
 #[divan::bench(types = [MLKEM512, MLKEM768, MLKEM1024])]
 fn decaps<P: ParameterSet>(bencher: Bencher<'_, '_>) {
-    let keypair = KeyPair::<P>::generate_derand(&SEED);
-    let (_, ciphertext) = keypair.encapsulation_key.encapsulate_derand(&MESSAGE);
+    let dk = DecapsulationKey::<P>::generate_derand(&SEED);
+    let (_, ciphertext) = dk.encapsulation_key().encapsulate_derand(&MESSAGE);
 
-    bencher.counter(1u32).bench(|| {
-        keypair
-            .decapsulation_key
-            .decapsulate(black_box(&ciphertext))
-    });
+    bencher
+        .counter(1u32)
+        .bench(|| dk.decapsulate(black_box(&ciphertext)));
 }
 
 /// `EncapsulationKey::to_bytes` — pack the `t_hat` NTT-domain key and `rho`
 /// seed into `384*K + 32` bytes.
 #[divan::bench(types = [MLKEM512, MLKEM768, MLKEM1024])]
 fn serialize_encapsulation_key<P: ParameterSet>(bencher: Bencher<'_, '_>) {
-    let ek = KeyPair::<P>::generate_derand(&SEED).encapsulation_key;
+    let ek = DecapsulationKey::<P>::generate_derand(&SEED)
+        .encapsulation_key()
+        .clone();
 
     bencher.counter(1u32).bench(|| black_box(&ek).to_bytes());
 }
@@ -84,7 +84,7 @@ fn serialize_encapsulation_key<P: ParameterSet>(bencher: Bencher<'_, '_>) {
 /// `768*K + 96` bytes.
 #[divan::bench(types = [MLKEM512, MLKEM768, MLKEM1024])]
 fn serialize_decapsulation_key<P: ParameterSet>(bencher: Bencher<'_, '_>) {
-    let dk = KeyPair::<P>::generate_derand(&SEED).decapsulation_key;
+    let dk = DecapsulationKey::<P>::generate_derand(&SEED);
 
     bencher.counter(1u32).bench(|| black_box(&dk).to_bytes());
 }
@@ -92,8 +92,8 @@ fn serialize_decapsulation_key<P: ParameterSet>(bencher: Bencher<'_, '_>) {
 /// `EncapsulationKey::from_bytes`, including the section 7.2 modulus check.
 #[divan::bench(types = [MLKEM512, MLKEM768, MLKEM1024])]
 fn parse_encapsulation_key<P: ParameterSet>(bencher: Bencher<'_, '_>) {
-    let bytes = KeyPair::<P>::generate_derand(&SEED)
-        .encapsulation_key
+    let bytes = DecapsulationKey::<P>::generate_derand(&SEED)
+        .encapsulation_key()
         .to_bytes();
 
     bencher
@@ -107,8 +107,7 @@ fn parse_encapsulation_key<P: ParameterSet>(bencher: Bencher<'_, '_>) {
 fn parse_decapsulation_key<P: ParameterSet>(bencher: Bencher<'_, '_>) {
     // to_vec: divan's closure captures need `Sync`, which the
     // `P::DecapsKeySerialization` associated type doesn't itself guarantee.
-    let bytes: Vec<u8> = KeyPair::<P>::generate_derand(&SEED)
-        .decapsulation_key
+    let bytes: Vec<u8> = DecapsulationKey::<P>::generate_derand(&SEED)
         .to_bytes()
         .as_ref()
         .to_vec();
@@ -121,8 +120,8 @@ fn parse_decapsulation_key<P: ParameterSet>(bencher: Bencher<'_, '_>) {
 /// `Ciphertext::from_bytes` length validation.
 #[divan::bench(types = [MLKEM512, MLKEM768, MLKEM1024])]
 fn parse_ciphertext<P: ParameterSet>(bencher: Bencher<'_, '_>) {
-    let keypair = KeyPair::<P>::generate_derand(&SEED);
-    let (_, ciphertext) = keypair.encapsulation_key.encapsulate_derand(&MESSAGE);
+    let dk = DecapsulationKey::<P>::generate_derand(&SEED);
+    let (_, ciphertext) = dk.encapsulation_key().encapsulate_derand(&MESSAGE);
     let bytes = ciphertext.as_bytes().to_vec();
 
     bencher
@@ -136,8 +135,8 @@ fn parse_ciphertext<P: ParameterSet>(bencher: Bencher<'_, '_>) {
 /// decomposition.
 #[divan::bench(types = [MLKEM512, MLKEM768, MLKEM1024])]
 fn shared_secret_as_bytes<P: ParameterSet>(bencher: Bencher<'_, '_>) {
-    let keypair = KeyPair::<P>::generate_derand(&SEED);
-    let (shared_secret, _) = keypair.encapsulation_key.encapsulate_derand(&MESSAGE);
+    let dk = DecapsulationKey::<P>::generate_derand(&SEED);
+    let (shared_secret, _) = dk.encapsulation_key().encapsulate_derand(&MESSAGE);
 
     bencher
         .counter(1u32)
@@ -152,25 +151,21 @@ fn shared_secret_as_bytes<P: ParameterSet>(bencher: Bencher<'_, '_>) {
 #[divan::bench(types = [MLKEM512, MLKEM768, MLKEM1024], sample_count = 100)]
 fn combined<P: ParameterSet>(bencher: Bencher<'_, '_>) {
     bencher.counter(1u32).bench(|| {
-        let keypair = KeyPair::<P>::generate();
+        let dk = DecapsulationKey::<P>::generate();
 
-        let ek_wire = keypair.encapsulation_key.to_bytes();
+        let ek_wire = dk.encapsulation_key().to_bytes();
         let ek = EncapsulationKey::<P>::from_bytes(black_box(ek_wire.as_ref()))
             .expect("re-parsed key must be valid");
 
         let (_ss_bob, ciphertext) = ek.encapsulate();
 
-        black_box(
-            keypair
-                .decapsulation_key
-                .decapsulate(black_box(&ciphertext)),
-        )
+        black_box(dk.decapsulate(black_box(&ciphertext)))
     });
 }
 
 /// Full TLS 1.3-style KEM roundtrip per iteration:
 ///
-/// 1. Alice: `KeyPair::generate()` (OS entropy).
+/// 1. Alice: `DecapsulationKey::generate()` (OS entropy).
 /// 2. Alice → wire: `EncapsulationKey::to_bytes`.
 /// 3. Bob: `EncapsulationKey::from_bytes`.
 /// 4. Bob: `encapsulate` (OS entropy).
@@ -184,9 +179,9 @@ fn combined<P: ParameterSet>(bencher: Bencher<'_, '_>) {
 #[divan::bench(types = [MLKEM512, MLKEM768, MLKEM1024], sample_count = 100)]
 fn roundtrip<P: ParameterSet>(bencher: Bencher<'_, '_>) {
     bencher.counter(1u32).bench(|| {
-        let keypair = KeyPair::<P>::generate();
+        let dk = DecapsulationKey::<P>::generate();
 
-        let ek_wire = keypair.encapsulation_key.to_bytes();
+        let ek_wire = dk.encapsulation_key().to_bytes();
         let ek = EncapsulationKey::<P>::from_bytes(black_box(ek_wire.as_ref()))
             .expect("re-parsed key must be valid");
 
@@ -196,7 +191,7 @@ fn roundtrip<P: ParameterSet>(bencher: Bencher<'_, '_>) {
         let ct = Ciphertext::<P>::from_bytes(black_box(&ct_wire))
             .expect("re-parsed ciphertext must be valid");
 
-        let ss_alice = keypair.decapsulation_key.decapsulate(&ct);
+        let ss_alice = dk.decapsulate(&ct);
 
         // Consume the SS bytes as an HKDF-like caller would, so the
         // compiler can't DCE the chain. Explicit `drop` folds the

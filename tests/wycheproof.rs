@@ -19,8 +19,7 @@
 //! [C2SP/wycheproof]: https://github.com/C2SP/wycheproof
 
 use mlkem_selkie::{
-    Ciphertext, DecapsulationKey, EncapsulationKey, KeyPair, MLKEM512, MLKEM768, MLKEM1024,
-    ParameterSet,
+    Ciphertext, DecapsulationKey, EncapsulationKey, MLKEM512, MLKEM768, MLKEM1024, ParameterSet,
 };
 use serde::Deserialize;
 
@@ -127,16 +126,16 @@ fn run_keygen<P: ParameterSet>(json: &str, expected_set: &str) {
             );
 
             let seed = hex_array::<64>(&test.seed);
-            let keypair = KeyPair::<P>::generate_derand(&seed);
+            let keypair = DecapsulationKey::<P>::generate_derand(&seed);
 
             assert_eq!(
-                keypair.encapsulation_key.to_bytes().as_ref(),
+                keypair.encapsulation_key().to_bytes().as_ref(),
                 hex::decode(&test.ek).expect("ek hex"),
                 "tc {}: ek mismatch",
                 test.tc_id
             );
             assert_eq!(
-                keypair.decapsulation_key.to_bytes().as_ref(),
+                keypair.to_bytes().as_ref(),
                 hex::decode(&test.dk).expect("dk hex"),
                 "tc {}: dk mismatch",
                 test.tc_id
@@ -206,11 +205,11 @@ fn run_decaps_from_seed<P: ParameterSet>(json: &str, expected_set: &str) {
             match test.result.as_str() {
                 "valid" => {
                     let seed = hex_array::<64>(&test.seed);
-                    let keypair = KeyPair::<P>::generate_derand(&seed);
+                    let keypair = DecapsulationKey::<P>::generate_derand(&seed);
 
                     if !test.ek.is_empty() {
                         assert_eq!(
-                            keypair.encapsulation_key.to_bytes().as_ref(),
+                            keypair.encapsulation_key().to_bytes().as_ref(),
                             hex::decode(&test.ek).expect("ek hex"),
                             "tc {}: ek mismatch",
                             test.tc_id
@@ -220,7 +219,7 @@ fn run_decaps_from_seed<P: ParameterSet>(json: &str, expected_set: &str) {
                     let ciphertext =
                         Ciphertext::<P>::from_bytes(&hex::decode(&test.c).expect("c hex"))
                             .expect("valid ciphertext");
-                    let shared = keypair.decapsulation_key.decapsulate(&ciphertext);
+                    let shared = keypair.decapsulate(&ciphertext);
 
                     assert_eq!(
                         shared.as_bytes().as_slice(),

@@ -193,7 +193,9 @@ impl From<[u8; 32]> for RejectionSeed {
 /// An ML-KEM encapsulation (public) key.
 ///
 /// Identical to the underlying K-PKE encryption key; see [FIPS 203 section
-/// 6.1].
+/// 6.1]. Callers usually reach one via
+/// [`DecapsulationKey::encapsulation_key`] or by parsing the on-wire bytes
+/// through [`Self::from_bytes`].
 ///
 /// [FIPS 203 section 6.1]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.6.1
 ///
@@ -304,13 +306,6 @@ impl<P: ParameterSet> EncapsulationKey<P> {
     }
 }
 
-impl<P: ParameterSet> From<&DecapsulationKey<P>> for EncapsulationKey<P> {
-    /// Clones the encapsulation key embedded in `dk`.
-    fn from(dk: &DecapsulationKey<P>) -> Self {
-        dk.ek.clone()
-    }
-}
-
 impl<P: ParameterSet> TryFrom<&[u8]> for EncapsulationKey<P> {
     type Error = Error;
 
@@ -371,6 +366,78 @@ pub struct DecapsulationKey<P: ParameterSet> {
 }
 
 impl<P: ParameterSet> DecapsulationKey<P> {
+    /// `ML-KEM.KeyGen`: generates a fresh decapsulation key.
+    ///
+    /// Implements [Algorithm 19] of FIPS 203. The 64-byte `d ‖ z` keygen seed
+    /// is drawn from the OS via [`getrandom`], optionally through the
+    /// userspace [`crate::drbg`] under `--features fips`. Recover the
+    /// corresponding public key with [`Self::encapsulation_key`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the OS entropy source is unavailable.
+    ///
+    /// [Algorithm 19]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.19
+    /// [`getrandom`]: getrandom::getrandom
+    #[must_use]
+    pub fn generate() -> Self {
+        let mut seed = [0u8; 64];
+
+        #[cfg(feature = "fips")]
+        P::fill_from_fips_drbg(&mut seed);
+        #[cfg(not(feature = "fips"))]
+        getrandom::getrandom(&mut seed)
+            .expect("ML-KEM.KeyGen: OS entropy source (`getrandom`) unavailable");
+
+        let dk = Self::generate_derand(&seed);
+        seed.zeroize();
+
+        dk
+    }
+
+    /// `ML-KEM.KeyGen_internal`: the derandomized core of [`Self::generate`],
+    /// taking the 64-byte seed `d ‖ z` explicitly.
+    ///
+    /// Specified by [Algorithm 16] of FIPS 203 §6. The seed concatenates the
+    /// K-PKE key-generation seed `d` (first 32 bytes) and the
+    /// implicit-rejection seed `z` (last 32 bytes). Exposed for KAT replay
+    /// **and** for hybrid-KEM constructions like [X-Wing] that derive
+    /// `d ‖ z` deterministically from a combined seed and call this
+    /// directly; both halves must come from an SP 800-90A/B/C RBG of the
+    /// parameter set's security strength (FIPS 203 §3.3).
+    ///
+    /// [Algorithm 16]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.16
+    /// [X-Wing]: https://datatracker.ietf.org/doc/draft-connolly-cfrg-xwing-kem/
+    #[must_use]
+    pub fn generate_derand(seed: &[u8; 64]) -> Self {
+        let (d, z) = seed.split_at(32);
+
+        let mut d_seed = [0u8; 32];
+        d_seed.copy_from_slice(d);
+        let mut z_seed = [0u8; 32];
+        z_seed.copy_from_slice(z);
+
+        let PKE::KeyPair { dk_pke, ek_pke } =
+            PKE::KeyPair::new_derand(PKE::KeyGenRandomnessSeed::<P>::new(d_seed));
+
+        let ek = EncapsulationKey { ek_pke };
+        let h_ek = EncapsulationKeyHash::from(&ek);
+
+        Self {
+            dk_pke,
+            ek,
+            h_ek,
+            z: RejectionSeed::from(z_seed),
+        }
+    }
+
+    /// Returns a reference to the encapsulation key derived from this
+    /// decapsulation key. Clone if you need ownership.
+    #[must_use]
+    pub fn encapsulation_key(&self) -> &EncapsulationKey<P> {
+        &self.ek
+    }
+
     /// Serializes the decapsulation key to its `768 * K + 96` bytes
     /// (`P::DecapsKeySerialization`), as `dk_PKE ‖ ek ‖ H(ek) ‖ z`, assembled
     /// on the stack with no heap allocation.
@@ -510,100 +577,15 @@ impl<P: ParameterSet> TryFrom<&[u8]> for DecapsulationKey<P> {
     }
 }
 
-/// An ML-KEM key pair: an encapsulation key and its decapsulation key.
-///
-/// See [FIPS 203 section 6.1].
-///
-/// [FIPS 203 section 6.1]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.6.1
-pub struct KeyPair<P: ParameterSet> {
-    /// The secret decapsulation key.
-    pub decapsulation_key: DecapsulationKey<P>,
-    /// The public encapsulation key.
-    pub encapsulation_key: EncapsulationKey<P>,
-}
-
-impl<P: ParameterSet> KeyPair<P> {
-    /// `ML-KEM.KeyGen`: generates a fresh key pair.
-    ///
-    /// Implements [Algorithm 19] of FIPS 203. The 64-byte `d ‖ z` keygen seed
-    /// is drawn from the OS via [`getrandom`], optionally through the
-    /// userspace [`crate::drbg`] under `--features fips`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the OS entropy source is unavailable.
-    ///
-    /// [Algorithm 19]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.19
-    /// [`getrandom`]: getrandom::getrandom
-    #[must_use]
-    pub fn generate() -> Self {
-        let mut seed = [0u8; 64];
-
-        #[cfg(feature = "fips")]
-        P::fill_from_fips_drbg(&mut seed);
-        #[cfg(not(feature = "fips"))]
-        getrandom::getrandom(&mut seed)
-            .expect("ML-KEM.KeyGen: OS entropy source (`getrandom`) unavailable");
-
-        let keypair = Self::generate_derand(&seed);
-        seed.zeroize();
-
-        keypair
-    }
-
-    /// `ML-KEM.KeyGen_internal`: the derandomized core of [`Self::generate`],
-    /// taking the 64-byte seed `d ‖ z` explicitly.
-    ///
-    /// Specified by [Algorithm 16] of FIPS 203 §6. The seed concatenates the
-    /// K-PKE key-generation seed `d` (first 32 bytes) and the
-    /// implicit-rejection seed `z` (last 32 bytes). Exposed for KAT replay
-    /// **and** for hybrid-KEM constructions like [X-Wing] that derive
-    /// `d ‖ z` deterministically from a combined seed and call this
-    /// directly; both halves must come from an SP 800-90A/B/C RBG of the
-    /// parameter set's security strength (FIPS 203 §3.3).
-    ///
-    /// [Algorithm 16]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.16
-    /// [X-Wing]: https://datatracker.ietf.org/doc/draft-connolly-cfrg-xwing-kem/
-    #[must_use]
-    pub fn generate_derand(seed: &[u8; 64]) -> Self {
-        let (d, z) = seed.split_at(32);
-
-        let mut d_seed = [0u8; 32];
-        d_seed.copy_from_slice(d);
-        let mut z_seed = [0u8; 32];
-        z_seed.copy_from_slice(z);
-
-        let PKE::KeyPair { dk_pke, ek_pke } =
-            PKE::KeyPair::new_derand(PKE::KeyGenRandomnessSeed::<P>::new(d_seed));
-
-        let encapsulation_key = EncapsulationKey { ek_pke };
-        let h_ek = EncapsulationKeyHash::from(&encapsulation_key);
-
-        let decapsulation_key = DecapsulationKey {
-            dk_pke,
-            ek: encapsulation_key.clone(),
-            h_ek,
-            z: RejectionSeed::from(z_seed),
-        };
-
-        Self {
-            decapsulation_key,
-            encapsulation_key,
-        }
-    }
-}
-
 /// ML-KEM-512 type aliases.
 ///
 /// Convenience specializations of the generic API for the [`MLKEM512`]
-/// parameter set, so callers can write `mlkem512::KeyPair` rather than
-/// `KeyPair<MLKEM512>`. Gated behind the `mlkem512` feature.
+/// parameter set, so callers can write `mlkem512::DecapsulationKey` rather than
+/// `DecapsulationKey<MLKEM512>`. Gated behind the `mlkem512` feature.
 #[cfg(feature = "mlkem512")]
 pub mod mlkem512 {
     pub use crate::{Error, SharedSecret};
 
-    /// An ML-KEM-512 key pair.
-    pub type KeyPair = crate::KeyPair<crate::MLKEM512>;
     /// An ML-KEM-512 encapsulation (public) key.
     pub type EncapsulationKey = crate::EncapsulationKey<crate::MLKEM512>;
     /// An ML-KEM-512 decapsulation (secret) key.
@@ -615,14 +597,12 @@ pub mod mlkem512 {
 /// ML-KEM-768 type aliases.
 ///
 /// Convenience specializations of the generic API for the [`MLKEM768`]
-/// parameter set, so callers can write `mlkem768::KeyPair` rather than
-/// `KeyPair<MLKEM768>`. Gated behind the `mlkem768` feature.
+/// parameter set, so callers can write `mlkem768::DecapsulationKey` rather than
+/// `DecapsulationKey<MLKEM768>`. Gated behind the `mlkem768` feature.
 #[cfg(feature = "mlkem768")]
 pub mod mlkem768 {
     pub use crate::{Error, SharedSecret};
 
-    /// An ML-KEM-768 key pair.
-    pub type KeyPair = crate::KeyPair<crate::MLKEM768>;
     /// An ML-KEM-768 encapsulation (public) key.
     pub type EncapsulationKey = crate::EncapsulationKey<crate::MLKEM768>;
     /// An ML-KEM-768 decapsulation (secret) key.
@@ -634,14 +614,12 @@ pub mod mlkem768 {
 /// ML-KEM-1024 type aliases.
 ///
 /// Convenience specializations of the generic API for the [`MLKEM1024`]
-/// parameter set, so callers can write `mlkem1024::KeyPair` rather than
-/// `KeyPair<MLKEM1024>`. Gated behind the `mlkem1024` feature.
+/// parameter set, so callers can write `mlkem1024::DecapsulationKey` rather
+/// than `DecapsulationKey<MLKEM1024>`. Gated behind the `mlkem1024` feature.
 #[cfg(feature = "mlkem1024")]
 pub mod mlkem1024 {
     pub use crate::{Error, SharedSecret};
 
-    /// An ML-KEM-1024 key pair.
-    pub type KeyPair = crate::KeyPair<crate::MLKEM1024>;
     /// An ML-KEM-1024 encapsulation (public) key.
     pub type EncapsulationKey = crate::EncapsulationKey<crate::MLKEM1024>;
     /// An ML-KEM-1024 decapsulation (secret) key.

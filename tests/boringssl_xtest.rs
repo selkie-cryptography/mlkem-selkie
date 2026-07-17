@@ -27,7 +27,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-use mlkem_selkie::{KeyPair, MLKEM768};
+use mlkem_selkie::{DecapsulationKey, MLKEM768};
 use rand_chacha::ChaCha8Rng;
 use rand_core::{RngCore, SeedableRng};
 
@@ -57,8 +57,8 @@ fn interop_boringssl_mlkem768() {
         drbg.fill_bytes(&mut seed);
         drbg.fill_bytes(&mut message);
 
-        let keypair = KeyPair::<MLKEM768>::generate_derand(&seed);
-        let (shared, ciphertext) = keypair.encapsulation_key.encapsulate_derand(&message);
+        let keypair = DecapsulationKey::<MLKEM768>::generate_derand(&seed);
+        let (shared, ciphertext) = keypair.encapsulation_key().encapsulate_derand(&message);
 
         input.push_str(&hex::encode(seed));
         input.push(' ');
@@ -113,7 +113,7 @@ fn interop_boringssl_mlkem768() {
 
         // 1. Keygen byte-identity.
         assert_eq!(
-            keypair.encapsulation_key.to_bytes().as_ref(),
+            keypair.encapsulation_key().to_bytes().as_ref(),
             ek,
             "iter {i}: ek mismatch"
         );
@@ -121,7 +121,7 @@ fn interop_boringssl_mlkem768() {
         // 2. Their encaps, our decaps.
         let ciphertext = mlkem_selkie::Ciphertext::<MLKEM768>::from_bytes(&bssl_ct)
             .expect("valid BoringSSL ciphertext");
-        let recovered = keypair.decapsulation_key.decapsulate(&ciphertext);
+        let recovered = keypair.decapsulate(&ciphertext);
         assert_eq!(
             recovered.as_bytes().as_slice(),
             bssl_ss.as_slice(),

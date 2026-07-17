@@ -24,7 +24,7 @@
 use std::hint::black_box;
 
 use dudect_bencher::{BenchRng, Class, CtRunner, ctbench_main};
-use mlkem_selkie::{Ciphertext, KeyPair, MLKEM512};
+use mlkem_selkie::{Ciphertext, DecapsulationKey, MLKEM512};
 use rand_chacha::ChaCha8Rng;
 use rand_core::{RngCore, SeedableRng};
 
@@ -43,8 +43,8 @@ fn random_class(rng: &mut ChaCha8Rng) -> Class {
 /// no `m`-dependent timing variance.
 fn encaps(runner: &mut CtRunner, _rng: &mut BenchRng) {
     let mut rng = ChaCha8Rng::from_seed([0x55; 32]);
-    let keypair = KeyPair::<MLKEM512>::generate_derand(&[0x42; 64]);
-    let encapsulation_key = keypair.encapsulation_key;
+    let keypair = DecapsulationKey::<MLKEM512>::generate_derand(&[0x42; 64]);
+    let encapsulation_key = keypair.encapsulation_key();
     let fixed_m = [0x55u8; 32];
 
     for _ in 0..100_000 {
@@ -67,8 +67,8 @@ fn encaps(runner: &mut CtRunner, _rng: &mut BenchRng) {
 /// leak has to raise `encaps` above the noise floor to fire the gate.
 fn encaps_null(runner: &mut CtRunner, _rng: &mut BenchRng) {
     let mut rng = ChaCha8Rng::from_seed([0x55; 32]);
-    let keypair = KeyPair::<MLKEM512>::generate_derand(&[0x42; 64]);
-    let encapsulation_key = keypair.encapsulation_key;
+    let keypair = DecapsulationKey::<MLKEM512>::generate_derand(&[0x42; 64]);
+    let encapsulation_key = keypair.encapsulation_key().clone();
     let fixed_m = [0x55u8; 32];
 
     for _ in 0..100_000 {
@@ -85,12 +85,12 @@ fn encaps_null(runner: &mut CtRunner, _rng: &mut BenchRng) {
 fn decaps(runner: &mut CtRunner, _rng: &mut BenchRng) {
     let mut rng = ChaCha8Rng::from_seed([0x33; 32]);
 
-    let keypair = KeyPair::<MLKEM512>::generate_derand(&[0x42; 64]);
-    let (_, ciphertext) = keypair.encapsulation_key.encapsulate_derand(&[0x55; 32]);
+    let keypair = DecapsulationKey::<MLKEM512>::generate_derand(&[0x42; 64]);
+    let (_, ciphertext) = keypair.encapsulation_key().encapsulate_derand(&[0x55; 32]);
     let valid = ciphertext.as_bytes().to_vec();
     let mut malleated = valid.clone();
     malleated[0] ^= 1;
-    let decapsulation_key = keypair.decapsulation_key;
+    let decapsulation_key = keypair;
 
     for _ in 0..100_000 {
         let class = random_class(&mut rng);
@@ -117,10 +117,10 @@ fn decaps(runner: &mut CtRunner, _rng: &mut BenchRng) {
 fn decaps_null(runner: &mut CtRunner, _rng: &mut BenchRng) {
     let mut rng = ChaCha8Rng::from_seed([0x33; 32]);
 
-    let keypair = KeyPair::<MLKEM512>::generate_derand(&[0x42; 64]);
-    let (_, ciphertext) = keypair.encapsulation_key.encapsulate_derand(&[0x55; 32]);
+    let keypair = DecapsulationKey::<MLKEM512>::generate_derand(&[0x42; 64]);
+    let (_, ciphertext) = keypair.encapsulation_key().encapsulate_derand(&[0x55; 32]);
     let valid = ciphertext.as_bytes().to_vec();
-    let decapsulation_key = keypair.decapsulation_key;
+    let decapsulation_key = keypair;
 
     for _ in 0..100_000 {
         let class = random_class(&mut rng);

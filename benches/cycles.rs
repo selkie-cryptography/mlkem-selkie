@@ -14,7 +14,7 @@ mod imp {
 
     use criterion::{Criterion, criterion_group};
     use criterion_cycles_per_byte::CyclesPerByte;
-    use mlkem_selkie::{KeyPair, MLKEM768};
+    use mlkem_selkie::{DecapsulationKey, MLKEM768};
 
     /// A fixed `d ‖ z` key-generation seed.
     const SEED: [u8; 64] = [0x42; 64];
@@ -28,25 +28,21 @@ mod imp {
         group.sample_size(50);
 
         group.bench_function("keygen", |b| {
-            b.iter(|| KeyPair::<MLKEM768>::generate_derand(black_box(&SEED)))
+            b.iter(|| DecapsulationKey::<MLKEM768>::generate_derand(black_box(&SEED)))
         });
 
-        let keypair = KeyPair::<MLKEM768>::generate_derand(&SEED);
+        let keypair = DecapsulationKey::<MLKEM768>::generate_derand(&SEED);
         group.bench_function("encaps", |b| {
             b.iter(|| {
                 keypair
-                    .encapsulation_key
+                    .encapsulation_key()
                     .encapsulate_derand(black_box(&MESSAGE))
             })
         });
 
-        let (_, ciphertext) = keypair.encapsulation_key.encapsulate_derand(&MESSAGE);
+        let (_, ciphertext) = keypair.encapsulation_key().encapsulate_derand(&MESSAGE);
         group.bench_function("decaps", |b| {
-            b.iter(|| {
-                keypair
-                    .decapsulation_key
-                    .decapsulate(black_box(&ciphertext))
-            })
+            b.iter(|| keypair.decapsulate(black_box(&ciphertext)))
         });
 
         group.finish();

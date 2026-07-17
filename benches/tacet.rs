@@ -10,7 +10,7 @@
 //! requires) and converted inside the closure so both classes pay the same
 //! conversion cost.
 
-use mlkem_selkie::{Ciphertext, KeyPair, MLKEM512, algebraic::FieldElement};
+use mlkem_selkie::{Ciphertext, DecapsulationKey, MLKEM512, algebraic::FieldElement};
 use rand_core::RngCore;
 use tacet::{AttackerModel, Outcome, TimingOracle, helpers::InputPair};
 
@@ -103,12 +103,12 @@ fn main() {
     // Decapsulation: a valid ciphertext (no rejection) vs a malleated one
     // (implicit rejection). Under a fixed key the timing must not distinguish
     // the two paths.
-    let keypair = KeyPair::<MLKEM512>::generate_derand(&[0x42; 64]);
-    let (_, ciphertext) = keypair.encapsulation_key.encapsulate_derand(&[0x55; 32]);
+    let keypair = DecapsulationKey::<MLKEM512>::generate_derand(&[0x42; 64]);
+    let (_, ciphertext) = keypair.encapsulation_key().encapsulate_derand(&[0x55; 32]);
     let valid = ciphertext.as_bytes().to_vec();
     let mut malleated = valid.clone();
     malleated[0] ^= 1;
-    let decapsulation_key = keypair.decapsulation_key;
+    let decapsulation_key = keypair;
 
     for &(model_name, model) in MODELS {
         let outcome = TimingOracle::for_attacker(model).test(
