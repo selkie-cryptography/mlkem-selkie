@@ -46,7 +46,7 @@ fn interop_boringssl_mlkem768() {
 
     // Deterministic inputs: derive a key pair from each seed, encapsulate `m`,
     // and remember the resulting (shared secret, ciphertext) per iteration.
-    let mut drbg = ChaCha8Rng::from_seed([0xB5; 32]);
+    let mut rng = ChaCha8Rng::from_seed([0xB5; 32]);
     let mut keypairs = Vec::with_capacity(ITERATIONS);
     let mut our_secrets = Vec::with_capacity(ITERATIONS);
     let mut input = String::new();
@@ -54,8 +54,8 @@ fn interop_boringssl_mlkem768() {
     for _ in 0..ITERATIONS {
         let mut seed = [0u8; 64];
         let mut message = [0u8; 32];
-        drbg.fill_bytes(&mut seed);
-        drbg.fill_bytes(&mut message);
+        rng.fill_bytes(&mut seed);
+        rng.fill_bytes(&mut message);
 
         let keypair = DecapsulationKey::<MLKEM768>::generate_derand(&seed);
         let (shared, ciphertext) = keypair.encapsulation_key().encapsulate_derand(&message);

@@ -25,22 +25,18 @@ copy_target = true
 # Run mutants with the internals exposed so the white-box property and unit
 # tests (algebraic_properties, field/NTT/encoding) can kill arithmetic mutants,
 # under the release-checked profile (debug-assertions + overflow-checks).
-# `fips` is added so the userspace SP 800-90A Hash_DRBG-SHA3 code path
-# (`src/drbg.rs`, `ParameterSet::fill_from_fips_drbg`) is compiled in and
-# reachable by the drbg unit tests + downstream keygen/encaps flows —
-# otherwise every mutant against fips-gated code is invisible.
 #
 # Do not repeat `--cargo-profile` here — `profile = "mutants"` above already
 # forwards it; passing it again makes nextest reject the build with
 # `'--cargo-profile <NAME>' cannot be used multiple times`.
-additional_cargo_test_args = ["--features", "expose-internals,fips", "--profile", "mutants"]
+additional_cargo_test_args = ["--features", "expose-internals", "--profile", "mutants"]
 
-# Timeout: 2x baseline with a 90s floor. The NTT rejection-sampling and DRBG
-# loops can spin on a mutated bound; the build/test timeouts cap those rather
-# than annotating every loop predicate with `mutants::skip`. Baseline test
-# runs finish in ~20s once opt-level=1 kicked in, and mutants that get killed
-# by an assertion fire within a few seconds — so 90s is enough for slow
-# proptests while cutting per-timeout dead time in half vs the prior 180s.
+# Timeout: 2x baseline with a 90s floor. The NTT rejection-sampling loops can
+# spin on a mutated bound; the build/test timeouts cap those rather than
+# annotating every loop predicate with `mutants::skip`. Baseline test runs
+# finish in ~20s once opt-level=1 kicked in, and mutants that get killed by an
+# assertion fire within a few seconds — so 90s is enough for slow proptests
+# while cutting per-timeout dead time in half vs the prior 180s.
 timeout_multiplier = 2.0
 minimum_test_timeout = 90
 build_timeout_multiplier = 3.0
