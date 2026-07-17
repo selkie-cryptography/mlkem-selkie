@@ -25,9 +25,7 @@
 use core::ffi::c_void;
 
 use crabgrind::memcheck::{self, MemState};
-use mlkem_selkie::{
-    Ciphertext, DecapsulationKey, KeyPair, MLKEM512, ParameterSet, algebraic::FieldElement,
-};
+use mlkem_selkie::{Ciphertext, DecapsulationKey, MLKEM512, ParameterSet, algebraic::FieldElement};
 
 /// Marks a byte slice as "secret" (undefined) for Valgrind. A no-op when not
 /// running under Valgrind.
@@ -93,11 +91,11 @@ fn keygen_secret_independent() {
     let mut seed = [0x42u8; 64];
     mark_secret(&seed);
 
-    let keypair = KeyPair::<MLKEM512>::generate_derand(&seed);
+    let keypair = DecapsulationKey::<MLKEM512>::generate_derand(&seed);
 
     // The encapsulation key is public output; declassify it. The secret
     // decapsulation key is dropped silently.
-    let ek_bytes = keypair.encapsulation_key.to_bytes();
+    let ek_bytes = keypair.encapsulation_key().to_bytes();
     mark_public(&ek_bytes);
 
     seed.fill(0);
@@ -107,8 +105,8 @@ fn keygen_secret_independent() {
 #[test]
 fn encapsulate_secret_independent() {
     // Public encapsulation key.
-    let keypair = KeyPair::<MLKEM512>::generate_derand(&[0x42; 64]);
-    let encapsulation_key = keypair.encapsulation_key;
+    let keypair = DecapsulationKey::<MLKEM512>::generate_derand(&[0x42; 64]);
+    let encapsulation_key = keypair.encapsulation_key();
 
     // The 32-byte encapsulation randomness `m` is secret: the shared secret
     // and the ciphertext are both derived from it, so a branch anywhere in
@@ -134,14 +132,14 @@ fn encapsulate_secret_independent() {
 #[test]
 fn decapsulate_secret_independent() {
     // Public key pair and ciphertext.
-    let keypair = KeyPair::<MLKEM512>::generate_derand(&[0x42; 64]);
-    let (_, ciphertext) = keypair.encapsulation_key.encapsulate_derand(&[0x55; 32]);
+    let keypair = DecapsulationKey::<MLKEM512>::generate_derand(&[0x42; 64]);
+    let (_, ciphertext) = keypair.encapsulation_key().encapsulate_derand(&[0x55; 32]);
     let ciphertext_bytes = ciphertext.as_bytes().to_vec();
 
     // Serialize the decapsulation key and taint only its secret portions: the
     // K-PKE decryption key `s_hat` (the prefix) and the rejection seed `z` (the
     // suffix). The embedded encapsulation key and its hash are public.
-    let mut dk_bytes = keypair.decapsulation_key.to_bytes();
+    let mut dk_bytes = keypair.to_bytes();
     mark_secret(&dk_bytes[..MLKEM512::PKE_DECRYPTION_KEY_SIZE]);
     mark_secret(&dk_bytes[MLKEM512::DECAPS_KEY_SIZE - 32..]);
 

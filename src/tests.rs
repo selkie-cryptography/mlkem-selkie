@@ -5,10 +5,10 @@ use super::*;
 /// A generated key pair encapsulates and decapsulates to the same shared
 /// secret.
 fn encaps_decaps_agree<P: ParameterSet>() {
-    let keypair = KeyPair::<P>::generate();
+    let keypair = DecapsulationKey::<P>::generate();
 
-    let (sender_secret, ciphertext) = keypair.encapsulation_key.encapsulate();
-    let receiver_secret = keypair.decapsulation_key.decapsulate(&ciphertext);
+    let (sender_secret, ciphertext) = keypair.encapsulation_key().encapsulate();
+    let receiver_secret = keypair.decapsulate(&ciphertext);
 
     assert_eq!(sender_secret.as_bytes(), receiver_secret.as_bytes());
 }
@@ -24,11 +24,11 @@ fn roundtrip_all_parameter_sets() {
 /// The per-parameter-set aliased API resolves and round-trips.
 #[test]
 fn aliased_module_roundtrip() {
-    let keypair: mlkem768::KeyPair = mlkem768::KeyPair::generate();
+    let keypair: mlkem768::DecapsulationKey = mlkem768::DecapsulationKey::generate();
 
-    let (sender, ciphertext) = keypair.encapsulation_key.encapsulate();
+    let (sender, ciphertext) = keypair.encapsulation_key().encapsulate();
     let parsed = mlkem768::Ciphertext::from_bytes(ciphertext.as_bytes()).expect("valid ct");
-    let receiver = keypair.decapsulation_key.decapsulate(&parsed);
+    let receiver = keypair.decapsulate(&parsed);
 
     assert_eq!(sender.as_bytes(), receiver.as_bytes());
 }
@@ -45,12 +45,12 @@ fn generate_is_randomized() {
     check::<MLKEM1024>();
 
     fn check<P: ParameterSet>() {
-        let a = KeyPair::<P>::generate();
-        let b = KeyPair::<P>::generate();
+        let a = DecapsulationKey::<P>::generate();
+        let b = DecapsulationKey::<P>::generate();
 
         assert_ne!(
-            a.encapsulation_key.to_bytes().as_ref(),
-            b.encapsulation_key.to_bytes().as_ref(),
+            a.encapsulation_key().to_bytes().as_ref(),
+            b.encapsulation_key().to_bytes().as_ref(),
         );
     }
 }
@@ -61,34 +61,28 @@ fn generate_is_randomized() {
 fn derand_keygen_is_deterministic() {
     let seed = [0x33u8; 64];
 
-    let first = KeyPair::<MLKEM768>::generate_derand(&seed);
-    let second = KeyPair::<MLKEM768>::generate_derand(&seed);
+    let first = DecapsulationKey::<MLKEM768>::generate_derand(&seed);
+    let second = DecapsulationKey::<MLKEM768>::generate_derand(&seed);
 
     assert_eq!(
-        first.encapsulation_key.to_bytes(),
-        second.encapsulation_key.to_bytes()
+        first.encapsulation_key().to_bytes(),
+        second.encapsulation_key().to_bytes()
     );
+    assert_eq!(first.to_bytes(), second.to_bytes());
     assert_eq!(
-        first.decapsulation_key.to_bytes(),
-        second.decapsulation_key.to_bytes()
-    );
-    assert_eq!(
-        first.encapsulation_key.to_bytes().len(),
+        first.encapsulation_key().to_bytes().len(),
         MLKEM768::ENCAPS_KEY_SIZE
     );
-    assert_eq!(
-        first.decapsulation_key.to_bytes().len(),
-        MLKEM768::DECAPS_KEY_SIZE
-    );
+    assert_eq!(first.to_bytes().len(), MLKEM768::DECAPS_KEY_SIZE);
 }
 
 /// Key and ciphertext serialization round-trips through the public parsers.
 #[test]
 fn public_serialization_roundtrip() {
-    let keypair = KeyPair::<MLKEM512>::generate_derand(&[1u8; 64]);
+    let keypair = DecapsulationKey::<MLKEM512>::generate_derand(&[1u8; 64]);
 
-    let ek_bytes = keypair.encapsulation_key.to_bytes();
-    let dk_bytes = keypair.decapsulation_key.to_bytes();
+    let ek_bytes = keypair.encapsulation_key().to_bytes();
+    let dk_bytes = keypair.to_bytes();
 
     let ek = EncapsulationKey::<MLKEM512>::from_bytes(&ek_bytes).expect("valid ek");
     let dk = DecapsulationKey::<MLKEM512>::from_bytes(&dk_bytes).expect("valid dk");

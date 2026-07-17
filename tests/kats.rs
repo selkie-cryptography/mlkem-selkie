@@ -17,8 +17,7 @@
 //! Same hand-rolled serde + `include_str!` approach as `wycheproof.rs`.
 
 use mlkem_selkie::{
-    Ciphertext, DecapsulationKey, EncapsulationKey, KeyPair, MLKEM512, MLKEM768, MLKEM1024,
-    ParameterSet,
+    Ciphertext, DecapsulationKey, EncapsulationKey, MLKEM512, MLKEM768, MLKEM1024, ParameterSet,
 };
 use serde::Deserialize;
 
@@ -93,16 +92,16 @@ fn keygen_case<P: ParameterSet>(test: &TestCase) {
     seed[..32].copy_from_slice(&hex_array::<32>(&test.d));
     seed[32..].copy_from_slice(&hex_array::<32>(&test.z));
 
-    let keypair = KeyPair::<P>::generate_derand(&seed);
+    let keypair = DecapsulationKey::<P>::generate_derand(&seed);
 
     assert_eq!(
-        keypair.encapsulation_key.to_bytes().as_ref(),
+        keypair.encapsulation_key().to_bytes().as_ref(),
         hex::decode(&test.ek).expect("ek hex"),
         "tc {}: ek mismatch",
         test.tc_id
     );
     assert_eq!(
-        keypair.decapsulation_key.to_bytes().as_ref(),
+        keypair.to_bytes().as_ref(),
         hex::decode(&test.dk).expect("dk hex"),
         "tc {}: dk mismatch",
         test.tc_id

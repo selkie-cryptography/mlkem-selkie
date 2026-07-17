@@ -8,7 +8,7 @@
 use std::hint::black_box;
 
 use gungraun::{library_benchmark, library_benchmark_group, main};
-use mlkem_selkie::{EncapsulationKey, KeyPair, MLKEM768, algebraic::FieldElement};
+use mlkem_selkie::{DecapsulationKey, EncapsulationKey, MLKEM768, algebraic::FieldElement};
 
 /// A fixed `d ‖ z` key-generation seed.
 const SEED: [u8; 64] = [0x42; 64];
@@ -30,20 +30,25 @@ fn fe_add(a: FieldElement, b: FieldElement) -> FieldElement {
 
 /// Builds the ML-KEM-768 encapsulation key used by the `encaps` bench.
 fn encapsulation_key() -> EncapsulationKey<MLKEM768> {
-    KeyPair::<MLKEM768>::generate_derand(&SEED).encapsulation_key
+    DecapsulationKey::<MLKEM768>::generate_derand(&SEED)
+        .encapsulation_key()
+        .clone()
 }
 
 /// Builds an ML-KEM-768 key pair and a valid ciphertext for the `decaps` bench.
-fn keypair_and_ciphertext() -> (KeyPair<MLKEM768>, mlkem_selkie::Ciphertext<MLKEM768>) {
-    let keypair = KeyPair::<MLKEM768>::generate_derand(&SEED);
-    let (_, ciphertext) = keypair.encapsulation_key.encapsulate_derand(&MESSAGE);
+fn keypair_and_ciphertext() -> (
+    DecapsulationKey<MLKEM768>,
+    mlkem_selkie::Ciphertext<MLKEM768>,
+) {
+    let keypair = DecapsulationKey::<MLKEM768>::generate_derand(&SEED);
+    let (_, ciphertext) = keypair.encapsulation_key().encapsulate_derand(&MESSAGE);
 
     (keypair, ciphertext)
 }
 
 #[library_benchmark]
-fn keygen() -> KeyPair<MLKEM768> {
-    KeyPair::<MLKEM768>::generate_derand(black_box(&SEED))
+fn keygen() -> DecapsulationKey<MLKEM768> {
+    DecapsulationKey::<MLKEM768>::generate_derand(black_box(&SEED))
 }
 
 #[library_benchmark]
@@ -54,13 +59,14 @@ fn encaps(ek: EncapsulationKey<MLKEM768>) {
 
 #[library_benchmark]
 #[bench::case(keypair_and_ciphertext())]
-fn decaps(input: (KeyPair<MLKEM768>, mlkem_selkie::Ciphertext<MLKEM768>)) {
+fn decaps(
+    input: (
+        DecapsulationKey<MLKEM768>,
+        mlkem_selkie::Ciphertext<MLKEM768>,
+    ),
+) {
     let (keypair, ciphertext) = input;
-    black_box(
-        keypair
-            .decapsulation_key
-            .decapsulate(black_box(&ciphertext)),
-    );
+    black_box(keypair.decapsulate(black_box(&ciphertext)));
 }
 
 library_benchmark_group!(name = field; benchmarks = fe_mul, fe_add);

@@ -21,7 +21,7 @@
 //!
 //! [libcrux]: https://github.com/cryspen/libcrux
 
-use mlkem_selkie::{Ciphertext, KeyPair, MLKEM512, MLKEM768, MLKEM1024};
+use mlkem_selkie::{Ciphertext, DecapsulationKey, MLKEM512, MLKEM768, MLKEM1024};
 use rand_chacha::ChaCha8Rng;
 use rand_core::{RngCore, SeedableRng};
 
@@ -49,32 +49,31 @@ fn interop_mlkem512() {
     for i in 0..ITERATIONS {
         let (seed, message) = next_inputs(&mut drbg);
 
-        let ours = KeyPair::<MLKEM512>::generate_derand(&seed);
+        let ours = DecapsulationKey::<MLKEM512>::generate_derand(&seed);
         let theirs = libcrux_ml_kem::mlkem512::generate_key_pair(seed);
 
         assert_eq!(
-            ours.encapsulation_key.to_bytes().as_ref(),
+            ours.encapsulation_key().to_bytes().as_ref(),
             theirs.public_key().as_slice(),
             "iter {i}: ek mismatch",
         );
         assert_eq!(
-            ours.decapsulation_key.to_bytes().as_ref(),
+            ours.to_bytes().as_ref(),
             theirs.private_key().as_slice(),
             "iter {i}: dk mismatch",
         );
 
         let (their_ct, their_ss) =
             libcrux_ml_kem::mlkem512::encapsulate(theirs.public_key(), message);
-        let our_ss = ours
-            .decapsulation_key
-            .decapsulate(&Ciphertext::<MLKEM512>::from_bytes(their_ct.as_slice()).unwrap());
+        let our_ss =
+            ours.decapsulate(&Ciphertext::<MLKEM512>::from_bytes(their_ct.as_slice()).unwrap());
         assert_eq!(
             our_ss.as_bytes(),
             &their_ss,
             "iter {i}: their-encaps/our-decaps"
         );
 
-        let (our_ss2, our_ct) = ours.encapsulation_key.encapsulate_derand(&message);
+        let (our_ss2, our_ct) = ours.encapsulation_key().encapsulate_derand(&message);
         let their_ct2 = libcrux_ml_kem::mlkem512::MlKem512Ciphertext::from(
             <[u8; 768]>::try_from(our_ct.as_bytes()).unwrap(),
         );
@@ -94,32 +93,31 @@ fn interop_mlkem768() {
     for i in 0..ITERATIONS {
         let (seed, message) = next_inputs(&mut drbg);
 
-        let ours = KeyPair::<MLKEM768>::generate_derand(&seed);
+        let ours = DecapsulationKey::<MLKEM768>::generate_derand(&seed);
         let theirs = libcrux_ml_kem::mlkem768::generate_key_pair(seed);
 
         assert_eq!(
-            ours.encapsulation_key.to_bytes().as_ref(),
+            ours.encapsulation_key().to_bytes().as_ref(),
             theirs.public_key().as_slice(),
             "iter {i}: ek mismatch",
         );
         assert_eq!(
-            ours.decapsulation_key.to_bytes().as_ref(),
+            ours.to_bytes().as_ref(),
             theirs.private_key().as_slice(),
             "iter {i}: dk mismatch",
         );
 
         let (their_ct, their_ss) =
             libcrux_ml_kem::mlkem768::encapsulate(theirs.public_key(), message);
-        let our_ss = ours
-            .decapsulation_key
-            .decapsulate(&Ciphertext::<MLKEM768>::from_bytes(their_ct.as_slice()).unwrap());
+        let our_ss =
+            ours.decapsulate(&Ciphertext::<MLKEM768>::from_bytes(their_ct.as_slice()).unwrap());
         assert_eq!(
             our_ss.as_bytes(),
             &their_ss,
             "iter {i}: their-encaps/our-decaps"
         );
 
-        let (our_ss2, our_ct) = ours.encapsulation_key.encapsulate_derand(&message);
+        let (our_ss2, our_ct) = ours.encapsulation_key().encapsulate_derand(&message);
         let their_ct2 = libcrux_ml_kem::mlkem768::MlKem768Ciphertext::from(
             <[u8; 1088]>::try_from(our_ct.as_bytes()).unwrap(),
         );
@@ -139,32 +137,31 @@ fn interop_mlkem1024() {
     for i in 0..ITERATIONS {
         let (seed, message) = next_inputs(&mut drbg);
 
-        let ours = KeyPair::<MLKEM1024>::generate_derand(&seed);
+        let ours = DecapsulationKey::<MLKEM1024>::generate_derand(&seed);
         let theirs = libcrux_ml_kem::mlkem1024::generate_key_pair(seed);
 
         assert_eq!(
-            ours.encapsulation_key.to_bytes().as_ref(),
+            ours.encapsulation_key().to_bytes().as_ref(),
             theirs.public_key().as_slice(),
             "iter {i}: ek mismatch",
         );
         assert_eq!(
-            ours.decapsulation_key.to_bytes().as_ref(),
+            ours.to_bytes().as_ref(),
             theirs.private_key().as_slice(),
             "iter {i}: dk mismatch",
         );
 
         let (their_ct, their_ss) =
             libcrux_ml_kem::mlkem1024::encapsulate(theirs.public_key(), message);
-        let our_ss = ours
-            .decapsulation_key
-            .decapsulate(&Ciphertext::<MLKEM1024>::from_bytes(their_ct.as_slice()).unwrap());
+        let our_ss =
+            ours.decapsulate(&Ciphertext::<MLKEM1024>::from_bytes(their_ct.as_slice()).unwrap());
         assert_eq!(
             our_ss.as_bytes(),
             &their_ss,
             "iter {i}: their-encaps/our-decaps"
         );
 
-        let (our_ss2, our_ct) = ours.encapsulation_key.encapsulate_derand(&message);
+        let (our_ss2, our_ct) = ours.encapsulation_key().encapsulate_derand(&message);
         let their_ct2 = libcrux_ml_kem::mlkem1024::MlKem1024Ciphertext::from(
             <[u8; 1568]>::try_from(our_ct.as_bytes()).unwrap(),
         );

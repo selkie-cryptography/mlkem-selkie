@@ -4,8 +4,7 @@
 //! across all three parameter sets.
 
 use mlkem_selkie::{
-    Ciphertext, DecapsulationKey, EncapsulationKey, KeyPair, MLKEM512, MLKEM768, MLKEM1024,
-    ParameterSet,
+    Ciphertext, DecapsulationKey, EncapsulationKey, MLKEM512, MLKEM768, MLKEM1024, ParameterSet,
 };
 use proptest::{array::uniform32, prelude::*};
 
@@ -21,17 +20,17 @@ fn seed(d: [u8; 32], z: [u8; 32]) -> [u8; 64] {
 
 /// Encaps then Decaps agree, and every serialization round-trips, for `P`.
 fn check_roundtrip<P: ParameterSet>(seed: &[u8; 64], message: &[u8; 32]) {
-    let keypair = KeyPair::<P>::generate_derand(seed);
+    let keypair = DecapsulationKey::<P>::generate_derand(seed);
 
-    let (sender, ciphertext) = keypair.encapsulation_key.encapsulate_derand(message);
-    let receiver = keypair.decapsulation_key.decapsulate(&ciphertext);
+    let (sender, ciphertext) = keypair.encapsulation_key().encapsulate_derand(message);
+    let receiver = keypair.decapsulate(&ciphertext);
     assert_eq!(sender.as_bytes(), receiver.as_bytes());
 
-    let ek_bytes = keypair.encapsulation_key.to_bytes();
+    let ek_bytes = keypair.encapsulation_key().to_bytes();
     let ek = EncapsulationKey::<P>::from_bytes(ek_bytes.as_ref()).expect("valid ek");
     assert_eq!(ek.to_bytes().as_ref(), ek_bytes.as_ref());
 
-    let dk_bytes = keypair.decapsulation_key.to_bytes();
+    let dk_bytes = keypair.to_bytes();
     let dk = DecapsulationKey::<P>::from_bytes(dk_bytes.as_ref()).expect("valid dk");
     assert_eq!(dk.to_bytes().as_ref(), dk_bytes.as_ref());
 
@@ -61,15 +60,15 @@ proptest! {
         index in 0usize..(32 * (10 * 2 + 4)),
         bit in 0u8..8,
     ) {
-        let keypair = KeyPair::<MLKEM512>::generate_derand(&seed(d, z));
-        let (_, ciphertext) = keypair.encapsulation_key.encapsulate_derand(&m);
+        let keypair = DecapsulationKey::<MLKEM512>::generate_derand(&seed(d, z));
+        let (_, ciphertext) = keypair.encapsulation_key().encapsulate_derand(&m);
 
         let mut bytes = ciphertext.as_bytes().to_vec();
         bytes[index] ^= 1 << bit;
         let malleated = Ciphertext::<MLKEM512>::from_bytes(&bytes).expect("same-length ct");
 
-        let first = keypair.decapsulation_key.decapsulate(&malleated);
-        let second = keypair.decapsulation_key.decapsulate(&malleated);
+        let first = keypair.decapsulate(&malleated);
+        let second = keypair.decapsulate(&malleated);
 
         prop_assert_eq!(first.as_bytes(), second.as_bytes());
     }

@@ -14,7 +14,7 @@
 
 use std::hint::black_box;
 
-use mlkem_selkie::{KeyPair, MLKEM768};
+use mlkem_selkie::{DecapsulationKey, MLKEM768};
 
 // dhat replaces the global allocator only when explicitly profiling the heap,
 // so CPU/time profiles keep the real allocator and its costs.
@@ -43,35 +43,29 @@ fn main() {
     for _ in 0..iters {
         match mode {
             "keygen" => {
-                black_box(KeyPair::<MLKEM768>::generate_derand(black_box(&SEED)));
+                black_box(DecapsulationKey::<MLKEM768>::generate_derand(black_box(
+                    &SEED,
+                )));
             }
             "encaps" => {
-                let keypair = KeyPair::<MLKEM768>::generate_derand(&SEED);
+                let keypair = DecapsulationKey::<MLKEM768>::generate_derand(&SEED);
                 black_box(
                     keypair
-                        .encapsulation_key
+                        .encapsulation_key()
                         .encapsulate_derand(black_box(&MESSAGE)),
                 );
             }
             "decaps" => {
-                let keypair = KeyPair::<MLKEM768>::generate_derand(&SEED);
-                let (_, ciphertext) = keypair.encapsulation_key.encapsulate_derand(&MESSAGE);
-                black_box(
-                    keypair
-                        .decapsulation_key
-                        .decapsulate(black_box(&ciphertext)),
-                );
+                let keypair = DecapsulationKey::<MLKEM768>::generate_derand(&SEED);
+                let (_, ciphertext) = keypair.encapsulation_key().encapsulate_derand(&MESSAGE);
+                black_box(keypair.decapsulate(black_box(&ciphertext)));
             }
             _ => {
-                let keypair = KeyPair::<MLKEM768>::generate_derand(black_box(&SEED));
+                let keypair = DecapsulationKey::<MLKEM768>::generate_derand(black_box(&SEED));
                 let (_, ciphertext) = keypair
-                    .encapsulation_key
+                    .encapsulation_key()
                     .encapsulate_derand(black_box(&MESSAGE));
-                black_box(
-                    keypair
-                        .decapsulation_key
-                        .decapsulate(black_box(&ciphertext)),
-                );
+                black_box(keypair.decapsulate(black_box(&ciphertext)));
             }
         }
     }
