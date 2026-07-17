@@ -62,6 +62,24 @@ fn encaps(runner: &mut CtRunner, _rng: &mut BenchRng) {
     }
 }
 
+/// Null for [`encaps`]: byte-identical `m` for both classes. Any signal is
+/// runner noise; the paired sign test against `encaps` cancels it, so a
+/// leak has to raise `encaps` above the noise floor to fire the gate.
+fn encaps_null(runner: &mut CtRunner, _rng: &mut BenchRng) {
+    let mut rng = ChaCha8Rng::from_seed([0x55; 32]);
+    let keypair = KeyPair::<MLKEM512>::generate_derand(&[0x42; 64]);
+    let encapsulation_key = keypair.encapsulation_key;
+    let fixed_m = [0x55u8; 32];
+
+    for _ in 0..100_000 {
+        let class = random_class(&mut rng);
+
+        runner.run_one(class, || {
+            black_box(encapsulation_key.encapsulate_derand(black_box(&fixed_m)))
+        });
+    }
+}
+
 /// Decapsulation: valid (Left) vs malleated (Right) ciphertext under a fixed
 /// key — the implicit-rejection path must be constant-time.
 fn decaps(runner: &mut CtRunner, _rng: &mut BenchRng) {
@@ -114,4 +132,4 @@ fn decaps_null(runner: &mut CtRunner, _rng: &mut BenchRng) {
     }
 }
 
-ctbench_main!(encaps, decaps, decaps_null);
+ctbench_main!(encaps, encaps_null, decaps, decaps_null);
