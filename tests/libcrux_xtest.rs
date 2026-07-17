@@ -33,21 +33,21 @@ use rand_core::{RngCore, SeedableRng};
 const ITERATIONS: usize = 1000;
 
 /// Draws a fresh `(seed, message)` pair from the deterministic DRBG.
-fn next_inputs(drbg: &mut ChaCha8Rng) -> ([u8; 64], [u8; 32]) {
+fn next_inputs(rng: &mut ChaCha8Rng) -> ([u8; 64], [u8; 32]) {
     let mut seed = [0u8; 64];
     let mut message = [0u8; 32];
-    drbg.fill_bytes(&mut seed);
-    drbg.fill_bytes(&mut message);
+    rng.fill_bytes(&mut seed);
+    rng.fill_bytes(&mut message);
 
     (seed, message)
 }
 
 #[test]
 fn interop_mlkem512() {
-    let mut drbg = ChaCha8Rng::from_seed([0x51; 32]);
+    let mut rng = ChaCha8Rng::from_seed([0x51; 32]);
 
     for i in 0..ITERATIONS {
-        let (seed, message) = next_inputs(&mut drbg);
+        let (seed, message) = next_inputs(&mut rng);
 
         let ours = DecapsulationKey::<MLKEM512>::generate_derand(&seed);
         let theirs = libcrux_ml_kem::mlkem512::generate_key_pair(seed);
@@ -88,10 +88,10 @@ fn interop_mlkem512() {
 
 #[test]
 fn interop_mlkem768() {
-    let mut drbg = ChaCha8Rng::from_seed([0x76; 32]);
+    let mut rng = ChaCha8Rng::from_seed([0x76; 32]);
 
     for i in 0..ITERATIONS {
-        let (seed, message) = next_inputs(&mut drbg);
+        let (seed, message) = next_inputs(&mut rng);
 
         let ours = DecapsulationKey::<MLKEM768>::generate_derand(&seed);
         let theirs = libcrux_ml_kem::mlkem768::generate_key_pair(seed);
@@ -132,10 +132,10 @@ fn interop_mlkem768() {
 
 #[test]
 fn interop_mlkem1024() {
-    let mut drbg = ChaCha8Rng::from_seed([0x10; 32]);
+    let mut rng = ChaCha8Rng::from_seed([0x10; 32]);
 
     for i in 0..ITERATIONS {
-        let (seed, message) = next_inputs(&mut drbg);
+        let (seed, message) = next_inputs(&mut rng);
 
         let ours = DecapsulationKey::<MLKEM1024>::generate_derand(&seed);
         let theirs = libcrux_ml_kem::mlkem1024::generate_key_pair(seed);

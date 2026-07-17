@@ -17,9 +17,6 @@ mlkem1024 = []
 expose-internals = []
 # Enables `tests/ctgrind.rs` only under the dedicated Constant-time workflow.
 ctgrind = ["expose-internals"]
-# Interposes a userspace SP 800-90A Hash_DRBG-SHA3 between OS entropy and
-# ML-KEM's derand entry points. Off by default (kernel CSPRNG).
-fips = []
 dhat-heap = []
 
 [dependencies]

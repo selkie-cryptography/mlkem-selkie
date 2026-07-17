@@ -73,7 +73,7 @@ if [ "${DEV_VERIFY_FEATURES:-0}" = "1" ]; then
     cargo build --no-default-features
 
     for set in "mlkem512" "mlkem768" "mlkem1024" \
-               "mlkem768,expose-internals" "mlkem768,fips"; do
+               "mlkem768,expose-internals"; do
         step "cargo build --no-default-features --features $set"
         cargo build --no-default-features --features "$set"
     done

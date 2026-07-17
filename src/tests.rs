@@ -35,9 +35,7 @@ fn aliased_module_roundtrip() {
 
 /// Consecutive `generate()` calls produce distinct key pairs — the public
 /// randomized entry point actually consumes randomness. Kills mutants that
-/// no-op the internal entropy path (default: `getrandom` direct; `--features
-/// fips`: `P::fill_from_fips_drbg`). Covers all three parameter sets so the
-/// per-P impls and their strength-matched DRBG free functions are all hit.
+/// no-op the `getrandom` call. Covers all three parameter sets.
 #[test]
 fn generate_is_randomized() {
     check::<MLKEM512>();

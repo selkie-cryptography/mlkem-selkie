@@ -40,11 +40,6 @@ mod sampling;
 #[cfg(feature = "expose-internals")]
 pub mod sampling;
 
-#[cfg(all(feature = "fips", not(feature = "expose-internals")))]
-mod drbg;
-#[cfg(all(feature = "fips", feature = "expose-internals"))]
-pub mod drbg;
-
 #[cfg(not(feature = "expose-internals"))]
 mod parameters;
 #[cfg(feature = "expose-internals")]
@@ -233,8 +228,7 @@ impl<P: ParameterSet> EncapsulationKey<P> {
     ///
     /// Implements [Algorithm 20] of FIPS 203 (its [Algorithm 17] internal
     /// core). The encapsulation randomness `m` is drawn from the OS via
-    /// [`getrandom`], optionally through the userspace [`crate::drbg`] under
-    /// `--features fips`.
+    /// [`getrandom`].
     ///
     /// # Panics
     ///
@@ -247,9 +241,6 @@ impl<P: ParameterSet> EncapsulationKey<P> {
     pub fn encapsulate(&self) -> (SharedSecret, Ciphertext<P>) {
         let mut m = [0u8; 32];
 
-        #[cfg(feature = "fips")]
-        P::fill_from_fips_drbg(&mut m);
-        #[cfg(not(feature = "fips"))]
         getrandom::getrandom(&mut m)
             .expect("ML-KEM.Encaps: OS entropy source (`getrandom`) unavailable");
 
@@ -369,9 +360,8 @@ impl<P: ParameterSet> DecapsulationKey<P> {
     /// `ML-KEM.KeyGen`: generates a fresh decapsulation key.
     ///
     /// Implements [Algorithm 19] of FIPS 203. The 64-byte `d ‖ z` keygen seed
-    /// is drawn from the OS via [`getrandom`], optionally through the
-    /// userspace [`crate::drbg`] under `--features fips`. Recover the
-    /// corresponding public key with [`Self::encapsulation_key`].
+    /// is drawn from the OS via [`getrandom`]. Recover the corresponding
+    /// public key with [`Self::encapsulation_key`].
     ///
     /// # Panics
     ///
@@ -383,9 +373,6 @@ impl<P: ParameterSet> DecapsulationKey<P> {
     pub fn generate() -> Self {
         let mut seed = [0u8; 64];
 
-        #[cfg(feature = "fips")]
-        P::fill_from_fips_drbg(&mut seed);
-        #[cfg(not(feature = "fips"))]
         getrandom::getrandom(&mut seed)
             .expect("ML-KEM.KeyGen: OS entropy source (`getrandom`) unavailable");
 
