@@ -26,24 +26,24 @@ dhat-heap = []
 getrandom = "0.2"
 rand_core = "0.6"
 # Pinned to `=0.0.9`: pre-1.0 crate on the crypto-critical path.
-libcrux-sha3 = { version = "=0.0.9", default-features = false }
+libcrux-sha3 = { version = "=0.0.10", default-features = false }
 subtle = "2"
 zeroize = { version = "1.7.0", features = ["derive"] }
 
 # Batched SIMD Keccak for parallel SHAKE streams; layered on top of the scalar
 # `libcrux-sha3` above.
 [target.'cfg(all(target_arch = "aarch64", target_feature = "neon"))'.dependencies]
-libcrux-sha3 = { version = "=0.0.9", default-features = false, features = ["simd128"] }
+libcrux-sha3 = { version = "=0.0.10", default-features = false, features = ["simd128"] }
 
 [target.'cfg(all(target_arch = "x86_64", target_feature = "avx2"))'.dependencies]
-libcrux-sha3 = { version = "=0.0.9", default-features = false, features = ["simd256"] }
+libcrux-sha3 = { version = "=0.0.10", default-features = false, features = ["simd256"] }
 
 [dev-dependencies]
 # Self dev-dep so `expose-internals` is active for tests/benches/examples
 # without leaking into the default public build.
 mlkem-selkie = { path = ".", version = "0.1.0", features = ["expose-internals"] }
 hex = "0.4"
-libcrux-ml-kem = { version = "0.0.9", default-features = false, features = [
+libcrux-ml-kem = { version = "0.0.10", default-features = false, features = [
     "mlkem512",
     "mlkem768",
     "mlkem1024",
