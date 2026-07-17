@@ -107,6 +107,11 @@ jobs:
           mkdir -p payload
           cp bench.json payload/bench-${{ matrix.backend }}.json
       - name: Upload head payload artifact
+        # PR-only: the `bench-diff-comment` aggregator consumes these to
+        # produce the sticky comment. On main-push the baseline goes to
+        # actions/cache and the dashboard payload to Fly directly, so the
+        # artifact is pure waste.
+        if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: perf-payload-bench-${{ matrix.backend }}
@@ -166,6 +171,11 @@ jobs:
           mkdir -p payload
           cp instructions.json payload/instructions-${{ matrix.backend }}.json
       - name: Upload head payload artifact
+        # PR-only: the `bench-diff-comment` aggregator consumes these to
+        # produce the sticky comment. On main-push the baseline goes to
+        # actions/cache and the dashboard payload to Fly directly, so the
+        # artifact is pure waste.
+        if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: perf-payload-instructions-${{ matrix.backend }}
@@ -218,6 +228,11 @@ jobs:
           mkdir -p payload
           cp cycles.json payload/cycles-${{ matrix.backend }}.json
       - name: Upload head payload artifact
+        # PR-only: the `bench-diff-comment` aggregator consumes these to
+        # produce the sticky comment. On main-push the baseline goes to
+        # actions/cache and the dashboard payload to Fly directly, so the
+        # artifact is pure waste.
+        if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: perf-payload-cycles-${{ matrix.backend }}
