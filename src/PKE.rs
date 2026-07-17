@@ -36,8 +36,14 @@ impl<P: ParameterSet> KeyGenRandomnessSeed<P> {
     }
 }
 
-/// A K-PKE encryption key: the NTT-domain vector `t_hat` and the matrix seed
-/// `rho` (section 5 of FIPS 203).
+/// A K-PKE encryption key: the NTT-domain vector `t_hat`, the matrix seed
+/// `rho`, and the expanded transpose `A^T` cached for encryption (section 5 of
+/// FIPS 203).
+///
+/// Caching `A^T` moves the SampleNTT matrix expansion off the hot
+/// `K-PKE.Encrypt` path (which runs once per encapsulation) and onto key
+/// construction (which runs once per key). `rho` is retained because it, not
+/// the expanded matrix, is what serializes.
 ///
 /// Public material; `Zeroize` only so embedding containers can zeroize it.
 #[derive(Clone, Zeroize)]
@@ -46,6 +52,10 @@ pub struct EncryptionKey<P: ParameterSet> {
     t_hat: TqVector<P>,
     /// The 32-byte seed from which the public matrix `A` is regenerated.
     rho: [u8; 32],
+    /// `A^T`, expanded once from `rho` so `encrypt` need not re-run SampleNTT.
+    /// Skipped by `Zeroize`: public material, fully derivable from `rho`.
+    #[zeroize(skip)]
+    a_hat_transpose: TqMatrix<P>,
 }
 
 impl<P: ParameterSet> EncryptionKey<P> {
@@ -71,7 +81,15 @@ impl<P: ParameterSet> EncryptionKey<P> {
         let mut rho = [0u8; 32];
         rho.copy_from_slice(rho_bytes);
 
-        Self { t_hat, rho }
+        // Expand `A^T` once here so repeated `encrypt` calls under this parsed
+        // key skip SampleNTT entirely.
+        let a_hat_transpose = TqMatrix::<P>::expand(&rho).transpose();
+
+        Self {
+            t_hat,
+            rho,
+            a_hat_transpose,
+        }
     }
 
     /// `K-PKE.Encrypt`: encrypts a 32-byte message under explicit encryption
@@ -81,8 +99,6 @@ impl<P: ParameterSet> EncryptionKey<P> {
     ///
     /// [Algorithm 14]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.14
     pub fn encrypt(&self, message: &[u8; 32], randomness: &[u8; 32]) -> Ciphertext<P> {
-        let a_hat = TqMatrix::<P>::expand(&self.rho);
-
         let mut n = 0u8;
         let y = RqVector::<P>::sample_cbd(P::ETA_1, randomness, &mut n);
         let e1 = RqVector::<P>::sample_cbd(P::ETA_2, randomness, &mut n);
@@ -90,8 +106,8 @@ impl<P: ParameterSet> EncryptionKey<P> {
 
         let y_hat = y.ntt();
 
-        // u = NTT⁻¹(A^T . y_hat) + e1
-        let u = (&a_hat.transpose() * &y_hat).ntt_inverse() + e1;
+        // u = NTT⁻¹(A^T . y_hat) + e1, using the `A^T` cached at key construction.
+        let u = (&self.a_hat_transpose * &y_hat).ntt_inverse() + e1;
 
         // mu = Decompress_1(ByteDecode_1(m))
         let mu = RqElement::from_message(message);
@@ -236,9 +252,17 @@ impl<P: ParameterSet> KeyPair<P> {
         // domain before adding the true NTT noise e_hat.
         let t_hat = (&a_hat * &s_hat).to_montgomery() + e_hat;
 
+        // `A` is now spent by `t_hat`; transpose it once for the cached encrypt
+        // matrix rather than re-expanding from `rho`.
+        let a_hat_transpose = a_hat.transpose();
+
         Self {
             dk_pke: DecryptionKey { s_hat },
-            ek_pke: EncryptionKey { t_hat, rho },
+            ek_pke: EncryptionKey {
+                t_hat,
+                rho,
+                a_hat_transpose,
+            },
         }
     }
 }
