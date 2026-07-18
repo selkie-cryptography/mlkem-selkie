@@ -1,0 +1,183 @@
+name: Release
+
+# Publishes to crates.io via trusted publishing (OIDC) on a v* tag.
+#
+# Versioning: pre-1.0 SemVer — 0.x minor may break API, patches don't.
+# Security fixes: patch on the latest minor. MSRV bumps: minor releases.
+#
+# One-time setup (before 0.1.0):
+#   [ ] repo public (secret-scan history first)
+#   [ ] secret scanning + push protection, Dependabot alerts, PVR on
+#   [ ] Actions default token read-only
+#   [ ] ruleset v* tags: restricted creation, immutable, signed
+#   [ ] ruleset main: required checks (CI, Constant-time, Audit)
+#   [ ] `release` environment with required reviewer
+#   [ ] bootstrap publish (trusted publishing needs an existing crate):
+#       fresh clone of signed tag, short-lived publish-new token,
+#       cargo publish --locked, revoke token
+#   [ ] configure trusted publishing: this repo + release.yml +
+#       `release` environment; add team owner
+#
+# Each release, beyond what the jobs below enforce:
+#   [ ] weekly full-tree Mutants run is green
+#   [ ] docs review: rustdoc, README, CHANGELOG
+#   [ ] prep PR: bump version, CHANGELOG entry, review
+#       cargo package --list; cargo semver-checks (post-0.1.0)
+#   [ ] git tag -s vX.Y.Z on the merge commit; push; approve `release`
+#   [ ] post: docs.rs build ok, crates.io page renders
+#
+# Security release: fix in the GHSA private fork; ship the release,
+# publish the GHSA (CVE), file RUSTSEC (the actual user alert:
+# https://github.com/rustsec/advisory-db), cargo yank --vers X.Y.Z.
+# Never delete tags or GitHub Releases.
+#
+# Drift guards: ci.yml `package` + `test-release-toolchain` jobs,
+# .github/scripts/toolchain-drift.rs (PR consistency, weekly staleness).
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  # Release gates run on this pinned toolchain; it is recorded in the
+  # GitHub Release notes. Bump deliberately, in its own PR.
+  RELEASE_TOOLCHAIN: "1.97.1"
+
+jobs:
+  # Refuses tags that don't point at a green, reviewed main commit, so a
+  # pushed tag alone can never ship unreviewed code.
+  preflight:
+    name: Tag provenance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Tag commit is on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - name: Tag matches Cargo.toml version
+        run: |
+          manifest=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          [ "${GITHUB_REF_NAME#v}" = "$manifest" ]
+      - name: CI, Constant-time, and Audit concluded green on this commit
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b  # v7
+        with:
+          script: |
+            const required = ['CI', 'Constant-time', 'Audit'];
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRunsForRepo,
+              { owner: context.repo.owner, repo: context.repo.repo,
+                head_sha: context.sha, per_page: 100 });
+            for (const name of required) {
+              const run = runs.find((r) => r.name === name);
+              if (!run || run.conclusion !== 'success') {
+                core.setFailed(`${name}: ${run ? run.conclusion ?? run.status : 'no run'} for ${context.sha}`);
+              }
+            }
+
+  # Full re-run of the merge gates on the exact tagged tree, with --locked
+  # so the committed Cargo.lock is what gets built.
+  gates:
+    name: Release gates
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
+        with:
+          toolchain: ${{ env.RELEASE_TOOLCHAIN }}
+      - uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b  # v2.83.4
+        with:
+          tool: nextest,cargo-deny
+      - name: Test (release-checked, locked)
+        run: |
+          cargo nextest run --cargo-profile release-checked --locked
+          cargo test --doc --profile release-checked --locked
+      - name: cargo-deny
+        run: cargo deny check
+      - name: Docs build clean
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --locked
+      - name: Package builds
+        run: cargo package --locked
+      # TODO: enable once a baseline release exists on crates.io.
+      # - name: SemVer check against latest published release
+      #   run: cargo semver-checks
+
+  publish:
+    name: Publish to crates.io
+    needs: [preflight, gates]
+    runs-on: ubuntu-latest
+    # Required-reviewer approval gate; trusted publishing on crates.io is
+    # bound to this repo + workflow + environment.
+    environment: release
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
+        with:
+          toolchain: ${{ env.RELEASE_TOOLCHAIN }}
+      - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18  # v1.0.5
+        id: auth
+      - run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  # Closes the loop as a three-way check: fresh local package of the tag
+  # == the CDN artifact == the sparse-index cksum (the value cargo
+  # verifies on every user download). The hash goes into the GitHub
+  # Release as a public, independent record.
+  verify:
+    name: Verify published artifact
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # creates the GitHub Release
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
+        with:
+          toolchain: ${{ env.RELEASE_TOOLCHAIN }}
+      - name: Repackage the tagged tree
+        run: cargo package --locked --no-verify
+      - name: Fetch the registry artifact (retry while the CDN catches up)
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          for _ in $(seq 1 30); do
+            curl -fsSL -o registry.crate \
+              "https://static.crates.io/crates/mlkem-selkie/mlkem-selkie-${version}.crate" && exit 0
+            sleep 10
+          done
+          exit 1
+      - name: Registry artifact and index checksum match our build
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          sha=$(sha256sum "target/package/mlkem-selkie-${version}.crate" | cut -d' ' -f1)
+          echo "$sha  registry.crate" | sha256sum -c -
+          cksum=$(curl -fsSL https://index.crates.io/ml/ke/mlkem-selkie \
+            | jq -r --arg v "$version" 'select(.vers == $v).cksum')
+          [ "$sha" = "$cksum" ]
+          echo "CRATE_SHA256=$sha" >> "$GITHUB_ENV"
+      - name: Create GitHub Release recording hash and toolchain
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag \
+            --title "mlkem-selkie ${GITHUB_REF_NAME}" \
+            --notes "\`.crate\` SHA-256: \`${CRATE_SHA256}\` (built and verified with Rust ${RELEASE_TOOLCHAIN})."
+      - name: cargo-add smoke test
+        run: |
+          cargo new "$RUNNER_TEMP/smoke" && cd "$RUNNER_TEMP/smoke"
+          cargo add mlkem-selkie@"${GITHUB_REF_NAME#v}"
+          cargo build

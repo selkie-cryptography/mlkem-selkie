@@ -43,14 +43,15 @@ jobs:
         arch: [x86_64, aarch64]
     runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-latest' || 'macos-latest' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
+          toolchain: nightly
           components: rustc-codegen-cranelift-preview
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b  # v2.83.4
         with:
           tool: cargo-mutants,cargo-nextest
       # Link with mold on x86_64: relinking is the per-mutant tail now codegen
@@ -58,8 +59,8 @@ jobs:
       # aarch64 uses the system linker.
       - if: matrix.arch == 'x86_64'
         run: sudo apt-get update && sudo apt-get install -y mold
-      - uses: mozilla-actions/sccache-action@v0.0.10
-      - uses: Swatinem/rust-cache@v2
+      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696  # v0.0.10
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
       - name: Mutate only the PR diff
         # `-j` matches each runner's actual vCPU count on the free plan
         # (ubuntu-latest = 2, macos-latest M1 = 3). Cranelift + mold are
@@ -84,7 +85,7 @@ jobs:
           fi
           git diff "origin/${{ github.base_ref }}" -- . "$EXCLUDE" > pr.diff
           $RUNNER cargo mutants -j ${{ matrix.arch == 'x86_64' && '2' || '3' }} --in-diff pr.diff
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         if: always()
         with:
           name: mutants-out-${{ matrix.arch }}
@@ -122,20 +123,21 @@ jobs:
     runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-latest' || 'macos-latest' }}
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
+          toolchain: nightly
           components: rustc-codegen-cranelift-preview
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b  # v2.83.4
         with:
           tool: cargo-mutants,cargo-nextest
       # mold is Linux-only; x86_64 shards only. aarch64 uses bundled lld (below).
       - if: matrix.arch == 'x86_64'
         run: sudo apt-get update && sudo apt-get install -y mold
-      - uses: mozilla-actions/sccache-action@v0.0.10
-      - uses: Swatinem/rust-cache@v2
+      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696  # v0.0.10
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
       - name: Run one mutation shard
         # `--shard i/N` splits the mutant set into N groups by index (N is
         # per-arch, see the matrix comment above); each shard's outputs are
@@ -159,7 +161,7 @@ jobs:
             export CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS="-Clink-arg=--ld-path=$(rustc --print sysroot)/lib/rustlib/aarch64-apple-darwin/bin/gcc-ld/ld64.lld"
             cargo mutants -j 3 --shard ${{ matrix.shard }}/8 || true
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         if: always()
         with:
           name: mutants-shard-${{ matrix.arch }}-${{ matrix.shard }}
@@ -186,10 +188,10 @@ jobs:
           - {arch: x86_64, dest: mutants}
           - {arch: aarch64, dest: mutants-aarch64}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           pattern: mutants-shard-${{ matrix.arch }}-*
           path: shards

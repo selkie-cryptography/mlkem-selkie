@@ -1,0 +1,13 @@
+# SHA-pinned actions go stale without automation; bumps arrive as PRs
+# showing the new SHA next to the version comment. Crate advisories are
+# covered by the weekly cargo-deny cron (audit.yml); dependency bumps
+# stay deliberate.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories:
+      - "/"
+      - "/.github/actions/ci-upload"
+      - "/.github/actions/ci-publish"
+    schedule:
+      interval: weekly
