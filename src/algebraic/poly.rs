@@ -15,7 +15,7 @@
 
 use core::ops::{Add, AddAssign, Index, Mul, Sub};
 
-use zeroize::Zeroize;
+use zeroize::DefaultIsZeroes;
 
 use crate::{algebraic::field::FieldElement, parameters};
 
@@ -46,8 +46,17 @@ pub trait PolynomialRingElement: Copy + Index<usize, Output = FieldElement> {
 /// representation [`TqElement`]. `Copy` is load-bearing for the NTT/poly
 /// arithmetic, so no `ZeroizeOnDrop` (mutually exclusive); secret bare-element
 /// locals live inside a `ZeroizeOnDrop` `RqVector`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Zeroize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RqElement([FieldElement; parameters::N]);
+
+impl Default for RqElement {
+    fn default() -> Self {
+        Self([FieldElement::ZERO; parameters::N])
+    }
+}
+
+// All-zeros is a valid `RqElement`, so it can be scrubbed as one bulk write.
+impl DefaultIsZeroes for RqElement {}
 
 impl RqElement {
     /// Transforms a polynomial `f` in Rq into its NTT representation `f_hat` in
@@ -129,8 +138,17 @@ impl From<TqElement> for RqElement {
 /// [section 4.3] of FIPS 203.
 ///
 /// [section 4.3]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.3
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Zeroize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TqElement([FieldElement; parameters::N]);
+
+impl Default for TqElement {
+    fn default() -> Self {
+        Self([FieldElement::ZERO; parameters::N])
+    }
+}
+
+// As [`RqElement`].
+impl DefaultIsZeroes for TqElement {}
 
 impl TqElement {
     /// Transforms a polynomial `f_hat` in Tq from its NTT representation back

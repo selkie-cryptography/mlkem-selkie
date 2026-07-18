@@ -45,16 +45,14 @@ impl<P: ParameterSet> KeyGenRandomnessSeed<P> {
 /// construction (which runs once per key). `rho` is retained because it, not
 /// the expanded matrix, is what serializes.
 ///
-/// Public material; `Zeroize` only so embedding containers can zeroize it.
-#[derive(Clone, Zeroize)]
+/// Public key material; contains no secrets, so it is not zeroized.
+#[derive(Clone)]
 pub struct EncryptionKey<P: ParameterSet> {
     /// `t_hat = A . s_hat + e_hat`, the public vector in Tq.
     t_hat: TqVector<P>,
     /// The 32-byte seed from which the public matrix `A` is regenerated.
     rho: [u8; 32],
     /// `A^T`, expanded once from `rho` so `encrypt` need not re-run SampleNTT.
-    /// Skipped by `Zeroize`: public material, fully derivable from `rho`.
-    #[zeroize(skip)]
     a_hat_transpose: TqMatrix<P>,
 }
 
