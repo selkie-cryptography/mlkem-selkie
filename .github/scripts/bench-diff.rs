@@ -304,6 +304,20 @@ enum Change {
     Removed,
 }
 
+impl Change {
+    /// Leading emoji marker for the row's Δ cell. Unchanged rows render blank
+    /// so the eye jumps to the movers.
+    fn marker(self) -> &'static str {
+        match self {
+            Change::Regressed => "🔴",
+            Change::Improved => "🟢",
+            Change::New => "🆕",
+            Change::Removed => "➖",
+            Change::Unchanged => "",
+        }
+    }
+}
+
 /// One rendered row: name, both values (option per side), the % delta and
 /// its propagated stdev (when the source payload carries one), and the
 /// classification. Rows sort by |delta| descending so the biggest movers
@@ -325,7 +339,7 @@ impl Row {
         self.delta_pct.map_or(f64::NEG_INFINITY, f64::abs)
     }
 
-    /// Formats the `| Δ | Bench | Baseline | Head |` markdown row.
+    /// Formats the `|   | Δ | Bench | Baseline | Head |` markdown row.
     fn to_markdown(&self) -> String {
         let delta_str = match (self.delta_pct, self.change) {
             (Some(d), _) => format_delta(d, self.delta_stdev_pct),
@@ -343,7 +357,8 @@ impl Row {
             .unwrap_or_else(|| String::from("—"));
 
         format!(
-            "| {delta_str} | `{}` | {baseline_str} | {head_str} |\n",
+            "| {} | {delta_str} | `{}` | {baseline_str} | {head_str} |\n",
+            self.change.marker(),
             self.name,
         )
     }
@@ -407,7 +422,7 @@ impl Section {
             return out;
         }
 
-        out.push_str("| Δ | Bench | Baseline | Head |\n|---:|---|---:|---:|\n");
+        out.push_str("|   | Δ | Bench | Baseline | Head |\n|:---:|---:|---|---:|---:|\n");
         for row in &self.rows {
             out.push_str(&row.to_markdown());
         }
@@ -466,8 +481,13 @@ impl Report {
         let total_unchanged: usize = self.sections.iter().map(|s| s.unchanged).sum();
         let total = total_regressed + total_improved + total_unchanged;
 
+        let title_marker = match (total_regressed, total_improved) {
+            (0, 0) => "",
+            (r, _) if r > 0 => "🔴 ",
+            _ => "🟢 ",
+        };
         out.push_str(&format!(
-            "### Benchmarks{}\n\n",
+            "### {title_marker}Benchmarks{}\n\n",
             title_verdict(total_regressed, total_improved),
         ));
 
