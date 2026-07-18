@@ -1,7 +1,5 @@
 # SHA-pinned actions go stale without automation; bumps arrive as PRs
-# showing the new SHA next to the version comment. Crate advisories are
-# covered by the weekly cargo-deny cron (audit.yml); dependency bumps
-# stay deliberate.
+# showing the new SHA next to the version comment.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -11,3 +9,19 @@ updates:
       - "/.github/actions/ci-publish"
     schedule:
       interval: weekly
+
+  # Compatible (minor/patch) crate bumps arrive grouped in one weekly PR.
+  # libcrux-sha3 is excluded from the group: it is exact-pinned on the
+  # crypto-critical path and every bump gets its own PR for an audit pass.
+  # Major bumps also get individual PRs.
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      cargo-compatible:
+        update-types:
+          - "minor"
+          - "patch"
+        exclude-patterns:
+          - "libcrux-sha3"
