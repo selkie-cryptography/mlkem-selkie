@@ -197,11 +197,27 @@ impl From<[u8; 32]> for RejectionSeed {
 pub struct EncapsulationKey<P: ParameterSet> {
     /// The K-PKE encryption key.
     ek_pke: PKE::EncryptionKey<P>,
+    /// Cached `H(ek)`, precomputed so `ML-KEM.Encaps` need not re-hash.
+    h_ek: EncapsulationKeyHash,
 }
 
-impl<P: ParameterSet> From<&EncapsulationKey<P>> for EncapsulationKeyHash {
-    fn from(ek: &EncapsulationKey<P>) -> Self {
-        Self(H(ek.to_bytes().as_ref()))
+impl<P: ParameterSet> From<PKE::EncryptionKey<P>> for EncapsulationKey<P> {
+    /// Wraps a K-PKE encryption key, caching `H(ek)`. Sole constructor, so
+    /// `h_ek == H(to_bytes())` holds by construction.
+    fn from(ek_pke: PKE::EncryptionKey<P>) -> Self {
+        let h_ek = EncapsulationKeyHash::from(&ek_pke);
+
+        Self { ek_pke, h_ek }
+    }
+}
+
+impl<P: ParameterSet> From<&PKE::EncryptionKey<P>> for EncapsulationKeyHash {
+    /// Computes `H(ek)` over the encryption key's serialized bytes.
+    fn from(ek_pke: &PKE::EncryptionKey<P>) -> Self {
+        let mut bytes = ek_pke.bytes();
+        let encoded = P::encaps_key_from_fn(|_| bytes.next().unwrap_or(0));
+
+        Self(H(encoded.as_ref()))
     }
 }
 
@@ -264,7 +280,7 @@ impl<P: ParameterSet> EncapsulationKey<P> {
         let mut g_input = [0u8; 64];
         let (m_part, h_part) = g_input.split_at_mut(32);
         m_part.copy_from_slice(m);
-        h_part.copy_from_slice(&H(self.to_bytes().as_ref()));
+        h_part.copy_from_slice(self.h_ek.as_bytes());
         let (k, mut r) = G(&g_input);
 
         let ciphertext = self.ek_pke.encrypt(m, &r);
@@ -313,7 +329,7 @@ impl<P: ParameterSet> TryFrom<&[u8]> for EncapsulationKey<P> {
             return Err(Error::EncapsulationKeyModulusCheckFailed);
         }
 
-        Ok(Self { ek_pke })
+        Ok(EncapsulationKey::from(ek_pke))
     }
 }
 
@@ -393,8 +409,8 @@ impl<P: ParameterSet> DecapsulationKey<P> {
         let PKE::KeyPair { dk_pke, ek_pke } =
             PKE::KeyPair::new_derand(PKE::KeyGenRandomnessSeed::<P>::new(d_seed));
 
-        let ek = EncapsulationKey { ek_pke };
-        let h_ek = EncapsulationKeyHash::from(&ek);
+        let ek = EncapsulationKey::from(ek_pke);
+        let h_ek = ek.h_ek;
 
         Self {
             dk_pke,
@@ -523,9 +539,7 @@ impl<P: ParameterSet> TryFrom<&[u8]> for DecapsulationKey<P> {
         let (h_ek_bytes, z_bytes) = rest.split_at(32);
 
         let dk_pke = PKE::DecryptionKey::<P>::from_bytes(dk_pke_bytes);
-        let ek = EncapsulationKey {
-            ek_pke: PKE::EncryptionKey::<P>::from_bytes(ek_bytes),
-        };
+        let ek = EncapsulationKey::from(PKE::EncryptionKey::<P>::from_bytes(ek_bytes));
 
         let mut h_ek_array = [0u8; 32];
         h_ek_array.copy_from_slice(h_ek_bytes);
@@ -533,8 +547,9 @@ impl<P: ParameterSet> TryFrom<&[u8]> for DecapsulationKey<P> {
 
         // Hash check (FIPS 203 section 7.3, decapsulation input check 3,
         // equation 7.2): the stored H(ek) must equal a fresh hash of the
-        // embedded ek, else `DecapsulationKeyHashMismatch`.
-        if EncapsulationKeyHash::from(&ek) != h_ek {
+        // embedded ek, else `DecapsulationKeyHashMismatch`. `ek.h_ek` is that
+        // fresh hash, computed by the constructor from the parsed ek bytes.
+        if ek.h_ek != h_ek {
             return Err(Error::DecapsulationKeyHashMismatch);
         }
 
