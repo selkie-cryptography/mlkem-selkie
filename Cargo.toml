@@ -5,8 +5,12 @@ edition = "2021"
 authors = ["Deirdre Connolly <durumcrustulum@gmail.com>"]
 description = "Rust ML-KEM (FIPS 203) implementation for beautiful, secure code."
 license = "Apache-2.0 OR MIT"
-keywords = ["cryptography", "post-quantum", "quantum-resistant",
-            "quantum-resilient", "mlkem", "ml-kem", "fips203", "kyber"]
+repository = "https://github.com/selkie-cryptography/mlkem-selkie"
+homepage = "https://selkiecryptography.com"
+documentation = "https://docs.rs/mlkem-selkie"
+# crates.io caps keywords at five.
+keywords = ["cryptography", "post-quantum", "ml-kem", "kyber", "fips203"]
+categories = ["cryptography"]
 
 [features]
 default = ["mlkem512", "mlkem768", "mlkem1024"]
@@ -22,7 +26,7 @@ dhat-heap = []
 [dependencies]
 getrandom = "0.2"
 rand_core = "0.6"
-# Pinned to `=0.0.9`: pre-1.0 crate on the crypto-critical path.
+# Pinned to `=0.0.10`: pre-1.0 crate on the crypto-critical path.
 libcrux-sha3 = { version = "=0.0.10", default-features = false }
 subtle = "2"
 zeroize = { version = "1.7.0", features = ["derive"] }
@@ -37,8 +41,10 @@ libcrux-sha3 = { version = "=0.0.10", default-features = false, features = ["sim
 
 [dev-dependencies]
 # Self dev-dep so `expose-internals` is active for tests/benches/examples
-# without leaking into the default public build.
-mlkem-selkie = { path = ".", version = "0.1.0", features = ["expose-internals"] }
+# without leaking into the default public build. Path-only, no `version`:
+# cargo strips it from the published manifest (a versioned self dev-dep
+# can't resolve during a first-of-its-version publish).
+mlkem-selkie = { path = ".", features = ["expose-internals"] }
 hex = "0.4"
 libcrux-ml-kem = { version = "0.0.10", default-features = false, features = [
     "mlkem512",
