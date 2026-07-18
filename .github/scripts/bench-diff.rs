@@ -448,10 +448,16 @@ impl Report {
 
         if self.sections.is_empty() {
             out.push_str("### Benchmarks · no baseline\n\n");
-            out.push_str(&format!(
-                "_No matching baseline payloads for `{}` — first run on this branch, or the baseline cache expired._\n",
-                short_sha(&self.baseline_sha),
-            ));
+            if self.baseline_sha.is_empty() {
+                out.push_str(
+                    "_No baseline available — bench.yml has not yet run to success on `main`._\n",
+                );
+            } else {
+                out.push_str(&format!(
+                    "_No matching baseline payloads for `{}` — the baseline artifact expired or the download step failed._\n",
+                    short_sha(&self.baseline_sha),
+                ));
+            }
             return out;
         }
 
