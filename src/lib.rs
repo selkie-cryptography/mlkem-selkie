@@ -193,9 +193,7 @@ impl From<[u8; 32]> for RejectionSeed {
 /// through [`Self::from_bytes`].
 ///
 /// [FIPS 203 section 6.1]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.6.1
-///
-/// Public material; `Zeroize` only so embedding containers can zeroize it.
-#[derive(Clone, Zeroize)]
+#[derive(Clone)]
 pub struct EncapsulationKey<P: ParameterSet> {
     /// The K-PKE encryption key.
     ek_pke: PKE::EncryptionKey<P>,
@@ -349,8 +347,12 @@ pub struct DecapsulationKey<P: ParameterSet> {
     /// The K-PKE decryption key.
     dk_pke: PKE::DecryptionKey<P>,
     /// The encapsulation key, needed to re-encrypt during decapsulation.
+    /// Public, `Zeroize` not needed.
+    #[zeroize(skip)]
     ek: EncapsulationKey<P>,
-    /// `H(ek)`, mixed into the shared-secret derivation.
+    /// `H(ek)`, mixed into the shared-secret derivation. Public, `Zeroize` not
+    /// needed.
+    #[zeroize(skip)]
     h_ek: EncapsulationKeyHash,
     /// The implicit-rejection seed `z`.
     z: RejectionSeed,
