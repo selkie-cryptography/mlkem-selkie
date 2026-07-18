@@ -252,12 +252,12 @@ impl<P: ParameterSet> EncapsulationKey<P> {
     /// [`Self::encapsulate`], taking the 32 bytes of encapsulation
     /// randomness `m` explicitly.
     ///
-    /// Specified by [Algorithm 17] of FIPS 203 §6. `pub` only under the
-    /// `expose-internals` feature (for KAT replay); `pub(crate)` otherwise,
-    /// since [`Self::encapsulate`] calls it.
+    /// Specified by [Algorithm 17] of FIPS 203 §6. `#[doc(hidden)]`: exposed
+    /// for KAT replay and hybrid-KEM constructions, not part of the primary
+    /// API.
     ///
     /// [Algorithm 17]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.17
-    #[cfg(feature = "expose-internals")]
+    #[doc(hidden)]
     #[must_use]
     pub fn encapsulate_derand(&self, m: &[u8; 32]) -> (SharedSecret, Ciphertext<P>) {
         // (K, r) <- G(m || H(ek)); preimage assembled in a 64-byte stack buffer.
@@ -271,23 +271,6 @@ impl<P: ParameterSet> EncapsulationKey<P> {
 
         // `m` is borrowed (caller's responsibility); `g_input` and `r` are
         // ours to zeroize.
-        g_input.zeroize();
-        r.zeroize();
-
-        (SharedSecret(k), Ciphertext(ciphertext))
-    }
-
-    #[cfg(not(feature = "expose-internals"))]
-    #[must_use]
-    pub(crate) fn encapsulate_derand(&self, m: &[u8; 32]) -> (SharedSecret, Ciphertext<P>) {
-        let mut g_input = [0u8; 64];
-        let (m_part, h_part) = g_input.split_at_mut(32);
-        m_part.copy_from_slice(m);
-        h_part.copy_from_slice(&H(self.to_bytes().as_ref()));
-        let (k, mut r) = G(&g_input);
-
-        let ciphertext = self.ek_pke.encrypt(m, &r);
-
         g_input.zeroize();
         r.zeroize();
 
@@ -397,6 +380,7 @@ impl<P: ParameterSet> DecapsulationKey<P> {
     ///
     /// [Algorithm 16]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.16
     /// [X-Wing]: https://datatracker.ietf.org/doc/draft-connolly-cfrg-xwing-kem/
+    #[doc(hidden)]
     #[must_use]
     pub fn generate_derand(seed: &[u8; 64]) -> Self {
         let (d, z) = seed.split_at(32);
