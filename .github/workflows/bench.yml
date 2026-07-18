@@ -106,23 +106,15 @@ jobs:
         run: |
           mkdir -p payload
           cp bench.json payload/bench-${{ matrix.backend }}.json
-      - name: Upload head payload artifact
-        # PR-only: the `bench-diff-comment` aggregator consumes these to
-        # produce the sticky comment. On main-push the baseline goes to
-        # actions/cache and the dashboard payload to Fly directly, so the
-        # artifact is pure waste.
-        if: github.event_name == 'pull_request'
+      - name: Upload payload artifact
+        # Same file both ways; the name distinguishes the role. `perf-baseline-*`
+        # from main-push is what future PR aggregators download; `perf-payload-*`
+        # from the current PR run is what its own aggregator diffs against.
         uses: actions/upload-artifact@v4
         with:
-          name: perf-payload-bench-${{ matrix.backend }}
+          name: ${{ github.event_name == 'push' && 'perf-baseline' || 'perf-payload' }}-bench-${{ matrix.backend }}
           path: payload/bench-${{ matrix.backend }}.json
-          retention-days: 3
-      - name: Save baseline cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v4
-        with:
-          path: payload/bench-${{ matrix.backend }}.json
-          key: perf-baseline-bench-${{ matrix.backend }}-${{ github.sha }}
+          retention-days: ${{ github.event_name == 'push' && 30 || 3 }}
       - name: Upload to dashboard
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/ci-upload
@@ -170,23 +162,12 @@ jobs:
         run: |
           mkdir -p payload
           cp instructions.json payload/instructions-${{ matrix.backend }}.json
-      - name: Upload head payload artifact
-        # PR-only: the `bench-diff-comment` aggregator consumes these to
-        # produce the sticky comment. On main-push the baseline goes to
-        # actions/cache and the dashboard payload to Fly directly, so the
-        # artifact is pure waste.
-        if: github.event_name == 'pull_request'
+      - name: Upload payload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: perf-payload-instructions-${{ matrix.backend }}
+          name: ${{ github.event_name == 'push' && 'perf-baseline' || 'perf-payload' }}-instructions-${{ matrix.backend }}
           path: payload/instructions-${{ matrix.backend }}.json
-          retention-days: 3
-      - name: Save baseline cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v4
-        with:
-          path: payload/instructions-${{ matrix.backend }}.json
-          key: perf-baseline-instructions-${{ matrix.backend }}-${{ github.sha }}
+          retention-days: ${{ github.event_name == 'push' && 30 || 3 }}
       - name: Upload to dashboard
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/ci-upload
@@ -227,23 +208,12 @@ jobs:
         run: |
           mkdir -p payload
           cp cycles.json payload/cycles-${{ matrix.backend }}.json
-      - name: Upload head payload artifact
-        # PR-only: the `bench-diff-comment` aggregator consumes these to
-        # produce the sticky comment. On main-push the baseline goes to
-        # actions/cache and the dashboard payload to Fly directly, so the
-        # artifact is pure waste.
-        if: github.event_name == 'pull_request'
+      - name: Upload payload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: perf-payload-cycles-${{ matrix.backend }}
+          name: ${{ github.event_name == 'push' && 'perf-baseline' || 'perf-payload' }}-cycles-${{ matrix.backend }}
           path: payload/cycles-${{ matrix.backend }}.json
-          retention-days: 3
-      - name: Save baseline cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v4
-        with:
-          path: payload/cycles-${{ matrix.backend }}.json
-          key: perf-baseline-cycles-${{ matrix.backend }}-${{ github.sha }}
+          retention-days: ${{ github.event_name == 'push' && 30 || 3 }}
       - name: Upload to dashboard
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/ci-upload
@@ -253,8 +223,8 @@ jobs:
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}
 
   # PR-only aggregator: joins the current run's payloads against the newest
-  # cached main-branch baselines and posts one sticky comment per PR with the
-  # combined diff. Independent of the dashboard-upload path.
+  # main-branch baseline artifacts and posts one sticky comment per PR with
+  # the combined diff. Independent of the dashboard-upload path.
   bench-diff-comment:
     name: Benchmarks (PR comment)
     if: github.event_name == 'pull_request'
@@ -263,6 +233,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      # `Find baseline run` lists workflow runs via the Actions API.
+      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -273,58 +245,48 @@ jobs:
           pattern: perf-payload-*
           path: head/
           merge-multiple: true
-      # One cache entry per (kind, backend), each keyed on the baseline sha we
-      # want to compare against. `restore-keys` walks back to the newest match
-      # for the prefix so a PR gets a diff on any recent main-branch build.
-      # A miss on one leg is not fatal — bench-diff.rs simply omits its row.
-      - name: Restore baseline (bench, generic)
-        uses: actions/cache/restore@v4
+      - name: Find baseline run
+        # Newest successful main-push bench.yml run; the diff compares against
+        # its `perf-baseline-*` artifacts.
+        id: baseline-run
+        uses: actions/github-script@v7
         with:
-          path: baseline/bench-generic.json
-          key: perf-baseline-bench-generic-${{ github.event.pull_request.base.sha }}
-          restore-keys: perf-baseline-bench-generic-
-      - name: Restore baseline (bench, avx2)
-        uses: actions/cache/restore@v4
+          script: |
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRuns,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'bench.yml',
+                branch: 'main',
+                event: 'push',
+                status: 'success',
+                per_page: 20,
+              },
+            );
+            if (!runs.length) {
+              core.warning('No successful main-push bench run found; posting no-baseline comment.');
+              return;
+            }
+            const run = runs[0];
+            core.setOutput('run-id', run.id);
+            core.setOutput('sha', run.head_sha);
+            core.info(`Baseline run ${run.id} at ${run.head_sha} (${run.created_at}).`);
+      - name: Download baseline payloads
+        if: steps.baseline-run.outputs.run-id != ''
+        uses: actions/download-artifact@v4
         with:
-          path: baseline/bench-avx2.json
-          key: perf-baseline-bench-avx2-${{ github.event.pull_request.base.sha }}
-          restore-keys: perf-baseline-bench-avx2-
-      - name: Restore baseline (bench, neon)
-        uses: actions/cache/restore@v4
-        with:
-          path: baseline/bench-neon.json
-          key: perf-baseline-bench-neon-${{ github.event.pull_request.base.sha }}
-          restore-keys: perf-baseline-bench-neon-
-      - name: Restore baseline (instructions, generic)
-        uses: actions/cache/restore@v4
-        with:
-          path: baseline/instructions-generic.json
-          key: perf-baseline-instructions-generic-${{ github.event.pull_request.base.sha }}
-          restore-keys: perf-baseline-instructions-generic-
-      - name: Restore baseline (instructions, avx2)
-        uses: actions/cache/restore@v4
-        with:
-          path: baseline/instructions-avx2.json
-          key: perf-baseline-instructions-avx2-${{ github.event.pull_request.base.sha }}
-          restore-keys: perf-baseline-instructions-avx2-
-      - name: Restore baseline (cycles, generic)
-        uses: actions/cache/restore@v4
-        with:
-          path: baseline/cycles-generic.json
-          key: perf-baseline-cycles-generic-${{ github.event.pull_request.base.sha }}
-          restore-keys: perf-baseline-cycles-generic-
-      - name: Restore baseline (cycles, avx2)
-        uses: actions/cache/restore@v4
-        with:
-          path: baseline/cycles-avx2.json
-          key: perf-baseline-cycles-avx2-${{ github.event.pull_request.base.sha }}
-          restore-keys: perf-baseline-cycles-avx2-
+          pattern: perf-baseline-*
+          path: baseline/
+          merge-multiple: true
+          run-id: ${{ steps.baseline-run.outputs.run-id }}
+          github-token: ${{ github.token }}
       - uses: dtolnay/rust-toolchain@stable
       - name: Build markdown diff
         run: |
           rustc -O --edition 2021 .github/scripts/bench-diff.rs -o /tmp/bench-diff
-          mkdir -p baseline  # in case every restore missed
-          /tmp/bench-diff baseline head "${{ github.event.pull_request.base.sha }}" > bench-diff.md
+          mkdir -p baseline  # in case the download step was skipped
+          /tmp/bench-diff baseline head "${{ steps.baseline-run.outputs.sha }}" > bench-diff.md
           cat bench-diff.md
       - name: Post sticky PR comment
         uses: actions/github-script@v7
