@@ -159,15 +159,19 @@ impl RqElement {
         const MASK: u32 = 0x5555_5555;
 
         let mut coefficients = [FieldElement::ZERO; parameters::N];
+
         for (word, out) in bytes.chunks_exact(4).zip(coefficients.chunks_exact_mut(8)) {
             let t = u32::from_le_bytes(word.try_into().expect("chunks_exact(4)"));
             let sums = (t & MASK) + ((t >> 1) & MASK);
+
             for (j, coeff) in out.iter_mut().enumerate() {
                 let a = (sums >> (4 * j)) & 0x3;
                 let b = (sums >> (4 * j + 2)) & 0x3;
+
                 *coeff = FieldElement::from(a as u16) - FieldElement::from(b as u16);
             }
         }
+
         Self::new(coefficients)
     }
 
@@ -179,18 +183,23 @@ impl RqElement {
         const MASK: u32 = 0x0024_9249;
 
         let mut coefficients = [FieldElement::ZERO; parameters::N];
+
         for (word, out) in bytes.chunks_exact(3).zip(coefficients.chunks_exact_mut(4)) {
             let &[b0, b1, b2] = word else {
                 unreachable!("chunks_exact(3)")
             };
+
             let t = u32::from_le_bytes([b0, b1, b2, 0]);
             let sums = (t & MASK) + ((t >> 1) & MASK) + ((t >> 2) & MASK);
+
             for (j, coeff) in out.iter_mut().enumerate() {
                 let a = (sums >> (6 * j)) & 0x7;
                 let b = (sums >> (6 * j + 3)) & 0x7;
+
                 *coeff = FieldElement::from(a as u16) - FieldElement::from(b as u16);
             }
         }
+
         Self::new(coefficients)
     }
 }
