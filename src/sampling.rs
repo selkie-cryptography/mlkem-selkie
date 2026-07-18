@@ -135,22 +135,62 @@ impl RqElement {
     ///
     /// Implements [Algorithm 8] of FIPS 203.
     ///
+    /// The two `eta`-bit sums are computed word-parallel rather than bit by
+    /// bit: masking and adding shifted copies of an input word sums each group
+    /// of `eta` adjacent bits in place (a bitfield popcount), so one word load
+    /// yields several coefficients. This is branch-free and data-independent —
+    /// required, since `bytes` is secret PRF output for the noise/secret polys.
+    ///
     /// [Algorithm 8]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.8
     pub fn sample_cbd(eta: Eta, bytes: &[u8]) -> Self {
-        let eta = usize::from(eta);
-        debug_assert_eq!(bytes.len(), 64 * eta);
+        debug_assert_eq!(bytes.len(), 64 * usize::from(eta));
 
-        let mut bits = bytes
-            .iter()
-            .flat_map(|byte| (0..8).map(move |k| (byte >> k) & 1));
+        match eta {
+            Eta::Two => Self::sample_cbd_eta2(bytes),
+            Eta::Three => Self::sample_cbd_eta3(bytes),
+        }
+    }
 
-        let coefficients = core::array::from_fn(|_| {
-            let x: u16 = bits.by_ref().take(eta).map(u16::from).sum();
-            let y: u16 = bits.by_ref().take(eta).map(u16::from).sum();
+    /// `SamplePolyCBD_2`: each 4-byte word yields 8 coefficients. `(t & M) +
+    /// ((t >> 1) & M)` with `M = 0x5555_5555` sums every adjacent bit-pair into
+    /// its own 2-bit field; coefficient `j` differences the fields at `4j`
+    /// (its `a`) and `4j + 2` (its `b`).
+    fn sample_cbd_eta2(bytes: &[u8]) -> Self {
+        const MASK: u32 = 0x5555_5555;
 
-            FieldElement::from(x) - FieldElement::from(y)
-        });
+        let mut coefficients = [FieldElement::ZERO; parameters::N];
+        for (word, out) in bytes.chunks_exact(4).zip(coefficients.chunks_exact_mut(8)) {
+            let t = u32::from_le_bytes(word.try_into().expect("chunks_exact(4)"));
+            let sums = (t & MASK) + ((t >> 1) & MASK);
+            for (j, coeff) in out.iter_mut().enumerate() {
+                let a = (sums >> (4 * j)) & 0x3;
+                let b = (sums >> (4 * j + 2)) & 0x3;
+                *coeff = FieldElement::from(a as u16) - FieldElement::from(b as u16);
+            }
+        }
+        Self::new(coefficients)
+    }
 
+    /// `SamplePolyCBD_3`: each 3-byte (24-bit) word yields 4 coefficients.
+    /// Three masked shifts with `M = 0x0024_9249` sum every group of 3 adjacent
+    /// bits into its own 3-bit field; coefficient `j` differences the fields at
+    /// `6j` and `6j + 3`.
+    fn sample_cbd_eta3(bytes: &[u8]) -> Self {
+        const MASK: u32 = 0x0024_9249;
+
+        let mut coefficients = [FieldElement::ZERO; parameters::N];
+        for (word, out) in bytes.chunks_exact(3).zip(coefficients.chunks_exact_mut(4)) {
+            let &[b0, b1, b2] = word else {
+                unreachable!("chunks_exact(3)")
+            };
+            let t = u32::from_le_bytes([b0, b1, b2, 0]);
+            let sums = (t & MASK) + ((t >> 1) & MASK) + ((t >> 2) & MASK);
+            for (j, coeff) in out.iter_mut().enumerate() {
+                let a = (sums >> (6 * j)) & 0x7;
+                let b = (sums >> (6 * j + 3)) & 0x7;
+                *coeff = FieldElement::from(a as u16) - FieldElement::from(b as u16);
+            }
+        }
         Self::new(coefficients)
     }
 }
