@@ -113,17 +113,23 @@ fn barrett_reduce(a: __m256i) -> __m256i {
 /// load, so even (degree-0) and odd (degree-1) coefficients are separated with
 /// a `shuffle_epi8` + `permute4x64`/`permute2x128` sequence and re-interleaved
 /// on store. The result is scaled by `R^-1`, which `ntt_inverse` later undoes.
+///
+/// `h` is stack-allocated `MaybeUninit`, not `[ZERO; N]`, so we skip the
+/// 16-`vmovups` array wipe LLVM otherwise emits — it can't see through the
+/// `unsafe` pointer stores to prove the loop overwrites every element.
 pub(crate) fn multiply(
     f: &[FieldElement; parameters::N],
     g: &[FieldElement; parameters::N],
 ) -> [FieldElement; parameters::N] {
-    let mut h = [FieldElement::ZERO; parameters::N];
+    let mut h = core::mem::MaybeUninit::<[FieldElement; parameters::N]>::uninit();
 
     // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so the three
     // length-256 arrays and the length-128 `GAMMA_MONT` reinterpret as `[i16]`.
-    // Each iteration reads/writes a 32-`i16` window of `f`/`g`/`h` (8 windows
-    // tile 256) and a 16-`i16` window of the gammas (8 windows tile 128), all in
-    // bounds. `loadu`/`storeu` are unaligned; the module is AVX2.
+    // Each iteration reads a 32-`i16` window of `f`/`g` and writes a 32-`i16`
+    // window of `h` (8 windows tile 256), and reads a 16-`i16` window of the
+    // gammas (8 windows tile 128), all in bounds. The `storeu` writes tile the
+    // full 256-element `h`, so the `assume_init` at the end reads only
+    // initialized bytes. `loadu`/`storeu` are unaligned; the module is AVX2.
     unsafe {
         let f_ptr = f.as_ptr().cast::<i16>();
         let g_ptr = g.as_ptr().cast::<i16>();
@@ -178,9 +184,9 @@ pub(crate) fn multiply(
 
             pair += 16;
         }
-    }
 
-    h
+        h.assume_init()
+    }
 }
 
 /// Forward NTT in place, then Barrett-reduce. Vectorizes the stride-≥16

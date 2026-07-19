@@ -66,11 +66,10 @@ impl RqElement {
     /// Implements [Algorithm 9, `NTT(f)`] from FIPS 203.
     ///
     /// [Algorithm 9, `NTT(f)`]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.9
-    pub fn ntt(self) -> TqElement {
-        let mut coefficients = self.0;
-        arch::ntt(&mut coefficients);
+    pub fn ntt(mut self) -> TqElement {
+        arch::ntt(&mut self.0);
 
-        TqElement::new(coefficients)
+        TqElement::new(self.0)
     }
 }
 
@@ -162,11 +161,10 @@ impl TqElement {
     /// Implements [Algorithm 10, `NTT⁻¹(f_hat)`] from FIPS 203.
     ///
     /// [Algorithm 10, `NTT⁻¹(f_hat)`]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.10
-    pub fn ntt_inverse(self) -> RqElement {
-        let mut coefficients = self.0;
-        arch::ntt_inverse(&mut coefficients);
+    pub fn ntt_inverse(mut self) -> RqElement {
+        arch::ntt_inverse(&mut self.0);
 
-        RqElement::new(coefficients)
+        RqElement::new(self.0)
     }
 
     /// Scales every coefficient by `R`, undoing the `R^-1` left by base
