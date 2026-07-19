@@ -198,19 +198,19 @@ unsafe fn ntt_stride64_group_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
 /// Stride-128 forward-NTT stage, software-pipelined by SLOTHY.
 ///
 /// Runs all sixteen vector butterflies of the stride-128 stage in place. The
-/// schedule was produced by SLOTHY targeting the `Apple_M4_everest_experimental`
-/// microarchitecture model (a `Apple_M1_firestorm_experimental` fork with
-/// `issue_rate=10` and paired-Q ldp/stp coverage added) with software
-/// pipelining enabled. The pattern is:
+/// schedule was produced by SLOTHY targeting the
+/// `Apple_M4_everest_experimental` microarchitecture model (a
+/// `Apple_M1_firestorm_experimental` fork with `issue_rate=10` and paired-Q
+/// ldp/stp coverage added) with software pipelining enabled. The pattern is:
 ///
 ///   - **Preamble** (9 instrs): kicks off iterations 0 and 1 — loads their
 ///     `q_vjl` / `q_vj` pairs, issues the first `mul` / `sqrdmulh` / `mls`
 ///     chains, decrements `x9` by 2 to account for the two in-flight iters.
 ///   - **Steady-state body** (14 instrs, 6 cy/iter on the M4 model): each pass
 ///     finishes iteration N-2's `add` / `sub` / `stp` while starting iteration
-///     N's loads and Barrett chain. Register file freely reassigned across
-///     the boundary — the WAR chain Rust SSA + LLVM regalloc preserved is
-///     broken here by SLOTHY's rename.
+///     N's loads and Barrett chain. Register file freely reassigned across the
+///     boundary — the WAR chain Rust SSA + LLVM regalloc preserved is broken
+///     here by SLOTHY's rename.
 ///   - **Postamble** (19 instrs): drains the final two in-flight iterations'
 ///     `add` / `sub` / `stp` sequence.
 ///
