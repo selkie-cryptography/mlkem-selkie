@@ -4,8 +4,9 @@
 //! All three kernels are vectorized. The transforms vectorize the stride-≥8
 //! butterfly stages (eight butterflies per vector under one broadcast zeta) and
 //! leave the narrow stride-4/2 stages scalar; `ntt`'s final Barrett reduction
-//! is also scalar, while `ntt_inverse`'s per-stage reduction and final scale
-//! are vectorized. The arithmetic matches the scalar backend — the
+//! is also scalar, while `ntt_inverse`'s lazy per-schedule reduction (len-2
+//! and len-16 stages only) and final scale follow the stage they land in.
+//! The arithmetic matches the scalar backend — the
 //! `tests` module cross-checks every kernel — in the signed Montgomery
 //! convention of [`crate::algebraic::field`].
 //!
@@ -94,30 +95,27 @@ fn barrett_const_mul(a: int16x8_t, b: int16x8_t, b_bar: int16x8_t) -> int16x8_t 
     }
 }
 
-/// Stride-64 forward-NTT butterfly group, SW-pipelined by SLOTHY.
+/// Stride-64 forward-NTT butterfly group, software-pipelined for the M4.
 ///
 /// Runs 8 vector butterflies at `[ptr, ptr+128)` paired with
 /// `[ptr+128, ptr+256)`, all sharing one zeta pair. Called twice per
 /// forward NTT (once per outer start position) with the two different
 /// zetas.
 ///
-/// Same SLOTHY workflow as [`ntt_stride128_asm`], just with shorter loop
+/// Same schedule shape as [`ntt_stride128_asm`], with a shorter loop
 /// (4 iters → 6 cy/iter steady state → ~35 cy stage total, vs. 52 cy for
-/// the previous hand-scheduled 2× interleave). The SLOTHY workspace under
-/// `tools/slothy/` (see its README) holds the raw output; the `asm!` block
-/// below is spliced from it by `cargo xtask slothy gen` — regenerate rather
-/// than hand-edit.
+/// the previous hand-scheduled 2× interleave).
 ///
 /// # Safety
 ///
 /// `ptr` must point to a 256-byte window mutable for reads and writes.
-/// Clobbers `v0`-`v7` and `v16`-`v30` (all caller-saved — SLOTHY was run
-/// with `v8`-`v15` reserved), general register `x9`, and the input `ptr`
-/// (post-increments through the low half).
+/// Clobbers `v0`-`v7` and `v16`-`v30` (all caller-saved; `v8`-`v15` stay
+/// reserved), general register `x9`, and the input `ptr` (post-increments
+/// through the low half).
 #[inline]
 unsafe fn ntt_stride64_group_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
     // SAFETY: `ptr` covers 128 i16s lower + 128 i16s upper = 256 bytes.
-    // The SLOTHY preamble seeds iterations 0 and 1, the body handles the
+    // The preamble seeds iterations 0 and 1, the body handles the
     // remaining pipelined steady state, and the postamble drains the last
     // two in-flight iterations. All writes stay within `[ptr, ptr+256)`
     // and the schedule tiles the full stage exactly once. No stack use.
@@ -129,7 +127,7 @@ unsafe fn ntt_stride64_group_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
         "dup     v30.8h, w9",
         "mov     x9,     #4",
 
-        // SLOTHY preamble — seeds the in-flight iterations.
+        // Preamble — seeds the in-flight iterations.
         "ldp q6, q27, [{ptr}, #0]",
         "ldp q19, q3, [{ptr}, #128]",
         "sqrdmulh v7.8H, v3.8H, v29.8H",
@@ -141,7 +139,7 @@ unsafe fn ntt_stride64_group_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
         "mls v18.8H, v7.8H, v30.8H",
         "sub x9, x9, #2",
 
-        // Steady-state body — 6 cy/iter (IPC 2.33) on the SLOTHY-M4 model.
+        // Steady-state body — 6 cy/iter (IPC 2.33) on the M4 model.
     "2:",
         "add v1.8H, v27.8H, v18.8H",
         "sub v22.8H, v27.8H, v18.8H",
@@ -160,7 +158,7 @@ unsafe fn ntt_stride64_group_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
         "sub x9, x9, 1",
         "cbnz x9, 2b",
 
-        // SLOTHY postamble — drains the in-flight iterations.
+        // Postamble — drains the in-flight iterations.
         "mul v7.8H, v4.8H, v28.8H",
         "sqrdmulh v26.8H, v4.8H, v29.8H",
         "ldp q17, q23, [{ptr}, #32]",
@@ -195,49 +193,27 @@ unsafe fn ntt_stride64_group_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
     );
 }
 
-/// Stride-128 forward-NTT stage, software-pipelined by SLOTHY.
+/// Stride-128 forward-NTT stage, software-pipelined for the M4.
 ///
-/// Runs all sixteen vector butterflies of the stride-128 stage in place. The
-/// schedule was produced by SLOTHY targeting the
-/// `Apple_M4_everest_experimental` microarchitecture model (a
-/// `Apple_M1_firestorm_experimental` fork with `issue_rate=10` and paired-Q
-/// ldp/stp coverage added) with software pipelining enabled. The pattern is:
+/// Runs all sixteen vector butterflies of the stride-128 stage in place:
 ///
-///   - **Preamble** (9 instrs): kicks off iterations 0 and 1 — loads their
-///     `q_vjl` / `q_vj` pairs, issues the first `mul` / `sqrdmulh` / `mls`
-///     chains, decrements `x9` by 2 to account for the two in-flight iters.
+///   - **Preamble** (9 instrs): kicks off iterations 0 and 1.
 ///   - **Steady-state body** (14 instrs, 6 cy/iter on the M4 model): each pass
 ///     finishes iteration N-2's `add` / `sub` / `stp` while starting iteration
-///     N's loads and Barrett chain. Register file freely reassigned across the
-///     boundary — the WAR chain Rust SSA + LLVM regalloc preserved is broken
-///     here by SLOTHY's rename.
-///   - **Postamble** (19 instrs): drains the final two in-flight iterations'
-///     `add` / `sub` / `stp` sequence.
+///     N's loads and Barrett chain.
+///   - **Postamble** (19 instrs): drains the final two in-flight iterations.
 ///
-/// Comparison against the previous hand-written 2-butterfly interleave:
-///
-/// ```text
-///     schedule                         cycles/iter  stage total (8 iters)
-///     hand-written 2× interleave       13           104
-///     SLOTHY-M4, no SW pipelining      13           104   (identical)
-///     SLOTHY-M4, SW pipelining         6 steady     ~53   (-49%)
-/// ```
-///
-/// The hand schedule was already SLOTHY-optimal at the same problem shape;
-/// all the remaining win comes from the software pipeline across the loop
-/// back-edge. The SLOTHY workspace under `tools/slothy/` (see its README)
-/// holds the raw output and the microarch model changes required; the `asm!`
-/// block below is spliced from it by `cargo xtask slothy gen` — regenerate
-/// rather than hand-edit.
+/// Pipelining across the loop back-edge buys ~49% over the previous
+/// hand-written 2× interleave (13 → 6 cy/iter steady state); the hand
+/// schedule was already optimal without it.
 ///
 /// # Safety
 ///
 /// `ptr` must point to the base of a 256-`i16` (`FieldElement::N`) buffer,
 /// mutable for reads and writes. Clobbers `v0`-`v7` and `v16`-`v30` (all
-/// caller-saved on aarch64 — SLOTHY was re-run with the callee-saved
-/// `v8`-`v15` bank reserved so LLVM does not emit a `stp d, d, [sp, #-N]!`
-/// prologue), general register `x9`, and the input `ptr` (post-increments
-/// through the low half).
+/// caller-saved; the callee-saved `v8`-`v15` bank stays reserved so LLVM
+/// does not emit a `stp d, d, [sp, #-N]!` prologue), general register `x9`,
+/// and the input `ptr` (post-increments through the low half).
 #[inline]
 unsafe fn ntt_stride128_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
     // SAFETY: `ptr` is a 256-`i16` buffer; the schedule reads and writes
@@ -245,8 +221,7 @@ unsafe fn ntt_stride128_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
     // body advances `ptr` by 32 bytes per pass across the lower half, and the
     // postamble drains the last two iterations. No stack use beyond LLVM's
     // callee-save prologue for `v8`-`v15`. All working registers are declared
-    // as clobbers; the SLOTHY workspace under `tools/slothy/` (see its README)
-    // and the `poly/arch/neon/tests.rs` differential proptest cover
+    // as clobbers; the `poly/arch/neon/tests.rs` differential proptest covers
     // correctness.
     core::arch::asm!(
         // Prologue: broadcast constants and set the iteration count.
@@ -256,7 +231,7 @@ unsafe fn ntt_stride128_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
         "dup     v30.8h, w9",
         "mov     x9,     #8",
 
-        // SLOTHY preamble — seeds the in-flight iterations.
+        // Preamble — seeds the in-flight iterations.
         "ldp q16, q17, [{ptr}, #288]",
         "ldp q4, q25, [{ptr}, #256]",
         "mul v21.8H, v4.8H, v28.8H",
@@ -268,7 +243,7 @@ unsafe fn ntt_stride128_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
         "ldp q0, q25, [{ptr}, #0]",
         "sub x9, x9, #2",
 
-        // Steady-state body — 6 cy/iter (IPC 2.33) on the SLOTHY-M4 model.
+        // Steady-state body — 6 cy/iter (IPC 2.33) on the M4 model.
     "2:",
         "sqrdmulh v23.8H, v17.8H, v29.8H",
         "sub v18.8H, v25.8H, v26.8H",
@@ -287,7 +262,7 @@ unsafe fn ntt_stride128_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
         "sub x9, x9, 1",
         "cbnz x9, 2b",
 
-        // SLOTHY postamble — drains the in-flight iterations.
+        // Postamble — drains the in-flight iterations.
         "sqrdmulh v18.8H, v17.8H, v29.8H",
         "mul v23.8H, v17.8H, v28.8H",
         "sqrdmulh v19.8H, v16.8H, v29.8H",
@@ -504,7 +479,9 @@ pub(crate) fn ntt_inverse(coefficients: &mut [FieldElement; parameters::N]) {
 
             for j in start..start + len {
                 let t = coefficients[j];
-                coefficients[j] = (t + coefficients[j + len]).reduce();
+                let sum = t + coefficients[j + len];
+                // Lazy reduction: len-2 only (len-16 reduces in the vector loop).
+                coefficients[j] = if len == 2 { sum.reduce() } else { sum };
                 coefficients[j + len] =
                     (coefficients[j + len] - t).barrett_const_mul(zeta, zeta_bar);
             }
@@ -536,7 +513,12 @@ pub(crate) fn ntt_inverse(coefficients: &mut [FieldElement; parameters::N]) {
                     let vj = vld1q_s16(ptr.add(j));
                     let vjl = vld1q_s16(ptr.add(j + len));
 
-                    vst1q_s16(ptr.add(j), barrett_reduce(vaddq_s16(vj, vjl)));
+                    let sum = vaddq_s16(vj, vjl);
+                    // Lazy reduction: len-16 only.
+                    vst1q_s16(
+                        ptr.add(j),
+                        if len == 16 { barrett_reduce(sum) } else { sum },
+                    );
                     vst1q_s16(
                         ptr.add(j + len),
                         barrett_const_mul(vsubq_s16(vjl, vj), zeta, zeta_bar),

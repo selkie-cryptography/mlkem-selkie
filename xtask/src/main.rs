@@ -120,9 +120,8 @@ const KERNELS: &[KernelSpec] = &[
             },
         ],
     },
-    // Test-only: the whittle-thinned inverse stride-128 stage (no sum-path
-    // reduction, per the derived reduction schedule). Splices into the test
-    // module until the entry-bound validation clears adoption in ntt_inverse.
+    // Test-only: thinned inverse stride-128 stage (no sum-path reduction,
+    // per the lazy len-2/len-16 schedule). Splices into the test module.
     KernelSpec {
         name: "intt_stride128_thin",
         input: "tools/slothy/intt_stride128_thin_input.s",
@@ -285,23 +284,15 @@ impl KernelSpec {
             prologue,
             None,
         );
-        push_section(
-            "SLOTHY preamble — seeds the in-flight iterations.",
-            preamble,
-            None,
-        );
+        push_section("Preamble — seeds the in-flight iterations.", preamble, None);
         let body_title = match (body_cycles, body_ipc) {
             (Some(cy), Some(ipc)) if cy > 0 => {
-                format!("Steady-state body — {cy} cy/iter (IPC {ipc}) on the SLOTHY-M4 model.")
+                format!("Steady-state body — {cy} cy/iter (IPC {ipc}) on the M4 model.")
             }
             _ => "Steady-state body.".to_string(),
         };
         push_section(&body_title, &body, Some("2:"));
-        push_section(
-            "SLOTHY postamble — drains the in-flight iterations.",
-            &tail,
-            None,
-        );
+        push_section("Postamble — drains the in-flight iterations.", &tail, None);
 
         for op in self.operands {
             out.push_str(&format!("{indent}{}\n", op.binding));

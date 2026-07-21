@@ -75,12 +75,9 @@ proptest! {
     }
 }
 
-/// Thinned stride-128 inverse-NTT stage from the whittle → SLOTHY pipeline:
-/// no Barrett reduction on the sum path, per the reduction schedule derived
-/// at the crate's real entry bounds (only stages 1 and 4 — len 2 and len 16
-/// — reduce; the stride-128 stage then sees `|x| ≤ 4q`). Test-only —
-/// `ntt_inverse` still reduces every stage. The `asm!` block is spliced by
-/// `cargo xtask slothy gen intt_stride128_thin`.
+/// Thinned, software-pipelined stride-128 inverse-NTT stage: no sum-path
+/// reduction, per the lazy len-2/len-16 schedule (this stage sees
+/// `|x| ≤ 4q`). Test-only.
 ///
 /// # Safety
 ///
@@ -95,7 +92,7 @@ unsafe fn intt_stride128_thin_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
         "dup     v30.8h, w9",
         "mov     x9,     #8",
 
-        // SLOTHY preamble — seeds the in-flight iterations.
+        // Preamble — seeds the in-flight iterations.
         "ldp q3, q16, [{ptr}, #0]",
         "ldp q7, q6, [{ptr}, #256]",
         "ldp q0, q1, [{ptr}, #32]",
@@ -113,7 +110,7 @@ unsafe fn intt_stride128_thin_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
         "mls v6.8H, v18.8H, v30.8H",
         "sub x9, x9, #2",
 
-        // Steady-state body — 6 cy/iter (IPC 2.33) on the SLOTHY-M4 model.
+        // Steady-state body — 6 cy/iter (IPC 2.33) on the M4 model.
     "2:",
         "sub v5.8H, v2.8H, v0.8H",
         "add v2.8H, v0.8H, v2.8H",
@@ -132,7 +129,7 @@ unsafe fn intt_stride128_thin_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
         "sub x9, x9, 1",
         "cbnz x9, 2b",
 
-        // SLOTHY postamble — drains the in-flight iterations.
+        // Postamble — drains the in-flight iterations.
         "add v5.8H, v0.8H, v2.8H",
         "sub v4.8H, v2.8H, v0.8H",
         "sub v0.8H, v3.8H, v1.8H",
@@ -168,8 +165,8 @@ proptest! {
 
     /// The thinned stage computes exact unreduced sums on the low half and
     /// congruent, `(-q, q)`-bounded Barrett products on the high half, for
-    /// inputs in `[-4q, 4q]` — the stage-7 entry bound under the reduction
-    /// schedule derived at the crate's real `ntt_inverse` entry interval.
+    /// inputs in `[-4q, 4q]` — this stage's entry bound under the lazy
+    /// schedule.
     #[test]
     fn intt_stride128_thin_matches_reference(
         window in prop::collection::vec(
@@ -184,7 +181,7 @@ proptest! {
 
         let mut out = [0i16; 256];
         out.copy_from_slice(&window);
-        // SAFETY: 256-i16 window; inputs bounded in (-q, q) per the strategy.
+        // SAFETY: 256-i16 window; inputs bounded in [-4q, 4q] per the strategy.
         unsafe { intt_stride128_thin_asm(out.as_mut_ptr(), zeta, zbar) };
 
         let inputs = window.iter().take(128).zip(window.iter().skip(128));

@@ -262,8 +262,9 @@ pub(crate) fn ntt(coefficients: &mut [FieldElement; parameters::N]) {
 }
 
 /// Inverse NTT in place, followed by the scale back to the standard domain.
-/// Vectorizes the stride-≥16 Gentleman-Sande stages, their Barrett reduction,
-/// and the final scale; the narrow stride-2/4/8 stages run scalar.
+/// Vectorizes the stride-≥16 Gentleman-Sande stages and the final scale; the
+/// narrow stride-2/4/8 stages run scalar. Reductions follow the lazy len-2 /
+/// len-16 schedule of [`super::generic::ntt_inverse`].
 ///
 /// Matches [`super::generic::ntt_inverse`].
 // reason: scalar-head butterfly/zeta indices are provably in 0..256, as in the
@@ -283,7 +284,9 @@ pub(crate) fn ntt_inverse(coefficients: &mut [FieldElement; parameters::N]) {
 
             for j in start..start + len {
                 let t = coefficients[j];
-                coefficients[j] = (t + coefficients[j + len]).reduce();
+                let sum = t + coefficients[j + len];
+                // Lazy reduction: len-2 only (len-16 reduces in the vector loop).
+                coefficients[j] = if len == 2 { sum.reduce() } else { sum };
                 coefficients[j + len] =
                     (coefficients[j + len] - t).barrett_const_mul(zeta, zeta_bar);
             }
@@ -314,9 +317,11 @@ pub(crate) fn ntt_inverse(coefficients: &mut [FieldElement; parameters::N]) {
                     let vj = _mm256_loadu_si256(ptr.add(j).cast::<__m256i>());
                     let vjl = _mm256_loadu_si256(ptr.add(j + len).cast::<__m256i>());
 
+                    let sum = _mm256_add_epi16(vj, vjl);
+                    // Lazy reduction: len-16 only.
                     _mm256_storeu_si256(
                         ptr.add(j).cast::<__m256i>(),
-                        barrett_reduce(_mm256_add_epi16(vj, vjl)),
+                        if len == 16 { barrett_reduce(sum) } else { sum },
                     );
                     _mm256_storeu_si256(
                         ptr.add(j + len).cast::<__m256i>(),

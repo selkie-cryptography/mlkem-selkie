@@ -160,6 +160,10 @@ impl TqElement {
     ///
     /// Implements [Algorithm 10, `NTT⁻¹(f_hat)`] from FIPS 203.
     ///
+    /// Reduces lazily (len-2 and len-16 stages only); inputs must satisfy
+    /// `|x| ≤ 16383` so first-stage sums fit `i16` — comfortably above what
+    /// accumulated basemul products reach.
+    ///
     /// [Algorithm 10, `NTT⁻¹(f_hat)`]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.10
     pub fn ntt_inverse(mut self) -> RqElement {
         arch::ntt_inverse(&mut self.0);
