@@ -75,6 +75,135 @@ proptest! {
     }
 }
 
+/// Thinned stride-128 inverse-NTT stage from the whittle → SLOTHY pipeline:
+/// no Barrett reduction on the sum path, per the reduction schedule derived
+/// at the crate's real entry bounds (only stages 1 and 4 — len 2 and len 16
+/// — reduce; the stride-128 stage then sees `|x| ≤ 4q`). Test-only —
+/// `ntt_inverse` still reduces every stage. The `asm!` block is spliced by
+/// `cargo xtask slothy gen intt_stride128_thin`.
+///
+/// # Safety
+///
+/// `ptr` must point to a 256-`i16` window mutable for reads and writes, with
+/// every representative in `[-4q, 4q]` so the unreduced sums fit `i16`.
+unsafe fn intt_stride128_thin_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
+    core::arch::asm!(
+        // Prologue: broadcast constants and set the iteration count.
+        "dup     v28.8h, {zeta:w}",
+        "dup     v29.8h, {zbar:w}",
+        "mov     w9,     #3329",
+        "dup     v30.8h, w9",
+        "mov     x9,     #8",
+
+        // SLOTHY preamble — seeds the in-flight iterations.
+        "ldp q3, q16, [{ptr}, #0]",
+        "ldp q7, q6, [{ptr}, #256]",
+        "ldp q0, q1, [{ptr}, #32]",
+        "sub v2.8H, v7.8H, v3.8H",
+        "sub v20.8H, v6.8H, v16.8H",
+        "add v21.8H, v16.8H, v6.8H",
+        "sqrdmulh v22.8H, v2.8H, v29.8H",
+        "mul v16.8H, v2.8H, v28.8H",
+        "mul v6.8H, v20.8H, v28.8H",
+        "sqrdmulh v18.8H, v20.8H, v29.8H",
+        "add v7.8H, v3.8H, v7.8H",
+        "ldp q2, q3, [{ptr}, #288]",
+        "stp q7, q21, [{ptr}], #32",
+        "mls v16.8H, v22.8H, v30.8H",
+        "mls v6.8H, v18.8H, v30.8H",
+        "sub x9, x9, #2",
+
+        // Steady-state body — 6 cy/iter (IPC 2.33) on the SLOTHY-M4 model.
+    "2:",
+        "sub v5.8H, v2.8H, v0.8H",
+        "add v2.8H, v0.8H, v2.8H",
+        "sub v7.8H, v3.8H, v1.8H",
+        "add v3.8H, v1.8H, v3.8H",
+        "ldp q0, q1, [{ptr}, #32]",
+        "sqrdmulh v17.8H, v5.8H, v29.8H",
+        "stp q2, q3, [{ptr}], #32",
+        "stp q16, q6, [{ptr}, #192]",
+        "mul v16.8H, v5.8H, v28.8H",
+        "mul v6.8H, v7.8H, v28.8H",
+        "sqrdmulh v7.8H, v7.8H, v29.8H",
+        "ldp q2, q3, [{ptr}, #256]",
+        "mls v16.8H, v17.8H, v30.8H",
+        "mls v6.8H, v7.8H, v30.8H",
+        "sub x9, x9, 1",
+        "cbnz x9, 2b",
+
+        // SLOTHY postamble — drains the in-flight iterations.
+        "add v5.8H, v0.8H, v2.8H",
+        "sub v4.8H, v2.8H, v0.8H",
+        "sub v0.8H, v3.8H, v1.8H",
+        "stp q16, q6, [{ptr}, #224]",
+        "add v16.8H, v1.8H, v3.8H",
+        "sqrdmulh v17.8H, v0.8H, v29.8H",
+        "mul v19.8H, v0.8H, v28.8H",
+        "mul v2.8H, v4.8H, v28.8H",
+        "sqrdmulh v0.8H, v4.8H, v29.8H",
+        "stp q5, q16, [{ptr}], #32",
+        "mls v2.8H, v0.8H, v30.8H",
+        "mls v19.8H, v17.8H, v30.8H",
+        "stp q2, q19, [{ptr}, #224]",
+
+        ptr  = inout(reg) ptr => _,
+        zeta = in(reg) zeta as u32,
+        zbar = in(reg) zeta_bar as u32,
+        out("x9")  _,
+        out("v0")  _, out("v1")  _, out("v2")  _, out("v3")  _,
+        out("v4")  _, out("v5")  _, out("v6")  _, out("v7")  _,
+        out("v16") _, out("v17") _, out("v18") _, out("v19") _,
+        out("v20") _, out("v21") _, out("v22") _, out("v28") _,
+        out("v29") _, out("v30") _,
+        options(nostack),
+    );
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 4096,
+        .. ProptestConfig::default()
+    })]
+
+    /// The thinned stage computes exact unreduced sums on the low half and
+    /// congruent, `(-q, q)`-bounded Barrett products on the high half, for
+    /// inputs in `[-4q, 4q]` — the stage-7 entry bound under the reduction
+    /// schedule derived at the crate's real `ntt_inverse` entry interval.
+    #[test]
+    fn intt_stride128_thin_matches_reference(
+        window in prop::collection::vec(
+            -4 * (parameters::Q as i16)..=4 * (parameters::Q as i16),
+            256,
+        )
+    ) {
+        let q = i64::from(parameters::Q);
+        // The len=128 stage's zeta pair (k = 1 in `ntt_inverse`).
+        let zeta = crate::algebraic::poly::arch::ZETA_RAW[1] as i16;
+        let zbar = crate::algebraic::poly::arch::ZETA_BARRETT[1];
+
+        let mut out = [0i16; 256];
+        out.copy_from_slice(&window);
+        // SAFETY: 256-i16 window; inputs bounded in (-q, q) per the strategy.
+        unsafe { intt_stride128_thin_asm(out.as_mut_ptr(), zeta, zbar) };
+
+        let inputs = window.iter().take(128).zip(window.iter().skip(128));
+        let outputs = out.iter().take(128).zip(out.iter().skip(128));
+        for ((&vj, &vjl), (&lo, &hi)) in inputs.zip(outputs) {
+            let (vj, vjl) = (i64::from(vj), i64::from(vjl));
+
+            // Sum path: exact and unreduced — no i16 wrap by the entry bound.
+            prop_assert_eq!(i64::from(lo), vj + vjl);
+
+            // Diff path: barrett_const_mul — congruent to diff * zeta mod q
+            // and bounded in (-q, q).
+            let hi = i64::from(hi);
+            prop_assert_eq!((hi - (vjl - vj) * i64::from(zeta)).rem_euclid(q), 0);
+            prop_assert!(-q < hi && hi < q);
+        }
+    }
+}
+
 /// Every [`crate::algebraic::poly::arch::ZETA_BARRETT`] entry matches
 /// `round(zeta * 2^15 / q)` recomputed via an independent `u32` code path.
 ///

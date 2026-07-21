@@ -24,15 +24,36 @@ Apple M4 target.
   against the `Apple_M4_everest_experimental` model. This is what got
   transcribed into `ntt_stride128_asm` in `neon.rs`.
 
-## Reproducing
+## Workflow (automated via xtask)
+
+The schedule → `asm!` pipeline is driven by `cargo xtask slothy` (see
+`xtask/src/main.rs`, which also holds the per-kernel register/operand specs):
 
 ```
-git clone https://github.com/slothy-optimizer/slothy.git /tmp/slothy
-cd /tmp/slothy && git apply /path/to/slothy/apple-m4-model.patch
-python3 -m venv /tmp/slothy-venv
-/tmp/slothy-venv/bin/pip install -e . ortools==9.15.6755 sympy==1.14.0
+cargo xtask slothy run <kernel>   # slothy-cli → archive output → splice into neon.rs
+cargo xtask slothy gen <kernel>   # splice from the archived output (no Python)
+cargo xtask slothy check          # fail if spliced code drifted from the archive
+```
 
-/tmp/slothy-venv/bin/python3 /tmp/slothy/slothy-cli \
+Splicing rewrites only the `core::arch::asm!(...)` invocation inside the
+kernel's function in `neon.rs`, located syntactically (no marker comments in
+production code) — operand substitution (`x0` → `{ptr}`), numeric-label
+conversion, and clobber derivation are all automated; surrounding rustdoc and
+SAFETY comments are hand-maintained. Adding a kernel = write the `_input.s`
+here, add a `KernelSpec` naming the target fn, then `cargo xtask slothy run`.
+
+`run` needs the SLOTHY fork checkout at `$SLOTHY_DIR` (default
+`~/src/github.com/selkie-cryptography/whittle/slothy`, nested in the whittle
+repo) with a `.venv` — set up per that repo's README
+(`pip install -e . ortools sympy`). The fork carries the
+`Apple_M4_everest_experimental` model and aarch64 parser extensions;
+`apple-m4-model.patch` here is the frozen pre-fork version of those changes,
+kept until they land on the fork's main branch.
+
+Manual invocation (what `run` executes under the hood):
+
+```
+$SLOTHY_DIR/.venv/bin/python $SLOTHY_DIR/slothy-cli \
     Arm_AArch64 Apple_M4_everest_experimental \
     stride128_input.s \
     -c sw_pipelining.enabled=true \

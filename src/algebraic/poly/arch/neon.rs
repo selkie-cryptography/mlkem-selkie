@@ -104,8 +104,9 @@ fn barrett_const_mul(a: int16x8_t, b: int16x8_t, b_bar: int16x8_t) -> int16x8_t 
 /// Same SLOTHY workflow as [`ntt_stride128_asm`], just with shorter loop
 /// (4 iters → 6 cy/iter steady state → ~35 cy stage total, vs. 52 cy for
 /// the previous hand-scheduled 2× interleave). The SLOTHY workspace under
-/// `tools/slothy/` (see its README) holds the raw output this was transcribed
-/// from.
+/// `tools/slothy/` (see its README) holds the raw output; the `asm!` block
+/// below is spliced from it by `cargo xtask slothy gen` — regenerate rather
+/// than hand-edit.
 ///
 /// # Safety
 ///
@@ -121,65 +122,64 @@ unsafe fn ntt_stride64_group_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
     // two in-flight iterations. All writes stay within `[ptr, ptr+256)`
     // and the schedule tiles the full stage exactly once. No stack use.
     core::arch::asm!(
-        // Prologue: broadcast zeta / zeta_bar / Q and set iteration count.
-        "dup    v28.8h, {zeta:w}",
-        "dup    v29.8h, {zbar:w}",
-        "mov    w9,     #3329",
-        "dup    v30.8h, w9",
-        "mov    x9,     #4",
+        // Prologue: broadcast constants and set the iteration count.
+        "dup     v28.8h, {zeta:w}",
+        "dup     v29.8h, {zbar:w}",
+        "mov     w9,     #3329",
+        "dup     v30.8h, w9",
+        "mov     x9,     #4",
 
-        // SLOTHY preamble — kicks off iterations 0 and 1.
-        "ldp    q6, q27, [{ptr}, #0]",
-        "ldp    q19, q3, [{ptr}, #128]",
-        "sqrdmulh v7.8h,  v3.8h,  v29.8h",
-        "sqrdmulh v4.8h,  v19.8h, v29.8h",
-        "mul    v18.8h, v3.8h,  v28.8h",
-        "mul    v24.8h, v19.8h, v28.8h",
-        "mls    v24.8h, v4.8h,  v30.8h",
-        "ldp    q19, q4, [{ptr}, #160]",
-        "mls    v18.8h, v7.8h,  v30.8h",
-        "sub    x9, x9, #2",
+        // SLOTHY preamble — seeds the in-flight iterations.
+        "ldp q6, q27, [{ptr}, #0]",
+        "ldp q19, q3, [{ptr}, #128]",
+        "sqrdmulh v7.8H, v3.8H, v29.8H",
+        "sqrdmulh v4.8H, v19.8H, v29.8H",
+        "mul v18.8H, v3.8H, v28.8H",
+        "mul v24.8H, v19.8H, v28.8H",
+        "mls v24.8H, v4.8H, v30.8H",
+        "ldp q19, q4, [{ptr}, #160]",
+        "mls v18.8H, v7.8H, v30.8H",
+        "sub x9, x9, #2",
 
-        // Steady-state body — 6 cy/iter. Iteration N-2 finishes here while
-        // iteration N is set up.
+        // Steady-state body — 6 cy/iter (IPC 2.33) on the SLOTHY-M4 model.
     "2:",
-        "add    v1.8h,  v27.8h, v18.8h",
-        "sub    v22.8h, v27.8h, v18.8h",
-        "mul    v18.8h, v4.8h,  v28.8h",
-        "sqrdmulh v7.8h,  v4.8h,  v29.8h",
-        "add    v21.8h, v6.8h,  v24.8h",
-        "sub    v17.8h, v6.8h,  v24.8h",
-        "ldp    q6, q27, [{ptr}, #32]",
-        "mul    v24.8h, v19.8h, v28.8h",
-        "sqrdmulh v3.8h,  v19.8h, v29.8h",
-        "ldp    q19, q4, [{ptr}, #192]",
-        "stp    q17, q22, [{ptr}, #128]",
-        "mls    v18.8h, v7.8h,  v30.8h",
-        "mls    v24.8h, v3.8h,  v30.8h",
-        "stp    q21, q1, [{ptr}], #32",
-        "sub    x9, x9, #1",
-        "cbnz   x9, 2b",
+        "add v1.8H, v27.8H, v18.8H",
+        "sub v22.8H, v27.8H, v18.8H",
+        "mul v18.8H, v4.8H, v28.8H",
+        "sqrdmulh v7.8H, v4.8H, v29.8H",
+        "add v21.8H, v6.8H, v24.8H",
+        "sub v17.8H, v6.8H, v24.8H",
+        "ldp q6, q27, [{ptr}, #32]",
+        "mul v24.8H, v19.8H, v28.8H",
+        "sqrdmulh v3.8H, v19.8H, v29.8H",
+        "ldp q19, q4, [{ptr}, #192]",
+        "stp q17, q22, [{ptr}, #128]",
+        "mls v18.8H, v7.8H, v30.8H",
+        "mls v24.8H, v3.8H, v30.8H",
+        "stp q21, q1, [{ptr}], #32",
+        "sub x9, x9, 1",
+        "cbnz x9, 2b",
 
-        // SLOTHY postamble — drains the last two in-flight iterations.
-        "mul    v7.8h,  v4.8h,  v28.8h",
-        "sqrdmulh v26.8h, v4.8h,  v29.8h",
-        "ldp    q17, q23, [{ptr}, #32]",
-        "mul    v4.8h,  v19.8h, v28.8h",
-        "sqrdmulh v20.8h, v19.8h, v29.8h",
-        "add    v22.8h, v27.8h, v18.8h",
-        "sub    v2.8h,  v27.8h, v18.8h",
-        "add    v3.8h,  v6.8h,  v24.8h",
-        "mls    v7.8h,  v26.8h, v30.8h",
-        "mls    v4.8h,  v20.8h, v30.8h",
-        "sub    v0.8h,  v6.8h,  v24.8h",
-        "stp    q3, q22, [{ptr}], #32",
-        "stp    q0, q2, [{ptr}, #96]",
-        "add    v16.8h, v23.8h, v7.8h",
-        "sub    v5.8h,  v23.8h, v7.8h",
-        "add    v25.8h, v17.8h, v4.8h",
-        "sub    v6.8h,  v17.8h, v4.8h",
-        "stp    q6, q5, [{ptr}, #128]",
-        "stp    q25, q16, [{ptr}], #32",
+        // SLOTHY postamble — drains the in-flight iterations.
+        "mul v7.8H, v4.8H, v28.8H",
+        "sqrdmulh v26.8H, v4.8H, v29.8H",
+        "ldp q17, q23, [{ptr}, #32]",
+        "mul v4.8H, v19.8H, v28.8H",
+        "sqrdmulh v20.8H, v19.8H, v29.8H",
+        "add v22.8H, v27.8H, v18.8H",
+        "sub v2.8H, v27.8H, v18.8H",
+        "add v3.8H, v6.8H, v24.8H",
+        "mls v7.8H, v26.8H, v30.8H",
+        "mls v4.8H, v20.8H, v30.8H",
+        "sub v0.8H, v6.8H, v24.8H",
+        "stp q3, q22, [{ptr}], #32",
+        "stp q0, q2, [{ptr}, #96]",
+        "add v16.8H, v23.8H, v7.8H",
+        "sub v5.8H, v23.8H, v7.8H",
+        "add v25.8H, v17.8H, v4.8H",
+        "sub v6.8H, v17.8H, v4.8H",
+        "stp q6, q5, [{ptr}, #128]",
+        "stp q25, q16, [{ptr}], #32",
 
         ptr  = inout(reg) ptr => _,
         zeta = in(reg) zeta as u32,
@@ -226,8 +226,9 @@ unsafe fn ntt_stride64_group_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
 /// The hand schedule was already SLOTHY-optimal at the same problem shape;
 /// all the remaining win comes from the software pipeline across the loop
 /// back-edge. The SLOTHY workspace under `tools/slothy/` (see its README)
-/// holds the raw output this was transcribed from and the microarch model
-/// changes required.
+/// holds the raw output and the microarch model changes required; the `asm!`
+/// block below is spliced from it by `cargo xtask slothy gen` — regenerate
+/// rather than hand-edit.
 ///
 /// # Safety
 ///
@@ -248,66 +249,64 @@ unsafe fn ntt_stride128_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
     // and the `poly/arch/neon/tests.rs` differential proptest cover
     // correctness.
     core::arch::asm!(
-        // Prologue: broadcast zeta / zeta_bar / Q and set iteration count.
-        "dup    v28.8h, {zeta:w}",
-        "dup    v29.8h, {zbar:w}",
-        "mov    w9,     #3329",
-        "dup    v30.8h, w9",
-        "mov    x9,     #8",
+        // Prologue: broadcast constants and set the iteration count.
+        "dup     v28.8h, {zeta:w}",
+        "dup     v29.8h, {zbar:w}",
+        "mov     w9,     #3329",
+        "dup     v30.8h, w9",
+        "mov     x9,     #8",
 
-        // SLOTHY preamble — kicks off iterations 0 and 1.
-        "ldp    q16, q17, [{ptr}, #288]",
-        "ldp    q4, q25, [{ptr}, #256]",
-        "mul    v21.8h, v4.8h, v28.8h",
-        "sqrdmulh v23.8h, v25.8h, v29.8h",
-        "sqrdmulh v0.8h, v4.8h, v29.8h",
-        "mul    v26.8h, v25.8h, v28.8h",
-        "mls    v26.8h, v23.8h, v30.8h",
-        "mls    v21.8h, v0.8h, v30.8h",
-        "ldp    q0, q25, [{ptr}, #0]",
-        "sub    x9, x9, #2",
+        // SLOTHY preamble — seeds the in-flight iterations.
+        "ldp q16, q17, [{ptr}, #288]",
+        "ldp q4, q25, [{ptr}, #256]",
+        "mul v21.8H, v4.8H, v28.8H",
+        "sqrdmulh v23.8H, v25.8H, v29.8H",
+        "sqrdmulh v0.8H, v4.8H, v29.8H",
+        "mul v26.8H, v25.8H, v28.8H",
+        "mls v26.8H, v23.8H, v30.8H",
+        "mls v21.8H, v0.8H, v30.8H",
+        "ldp q0, q25, [{ptr}, #0]",
+        "sub x9, x9, #2",
 
-        // Steady-state body — 6 cycles per pass on the M4 model. Iteration
-        // N-2 completes here (finishing its `add`/`sub`/`stp` outputs) while
-        // iteration N's Barrett chain gets set up.
+        // Steady-state body — 6 cy/iter (IPC 2.33) on the SLOTHY-M4 model.
     "2:",
-        "sqrdmulh v23.8h, v17.8h, v29.8h",
-        "sub    v18.8h, v25.8h, v26.8h",
-        "add    v4.8h,  v25.8h, v26.8h",
-        "mul    v26.8h, v17.8h, v28.8h",
-        "sqrdmulh v2.8h, v16.8h, v29.8h",
-        "sub    v5.8h,  v0.8h,  v21.8h",
-        "add    v22.8h, v0.8h,  v21.8h",
-        "mul    v21.8h, v16.8h, v28.8h",
-        "ldp    q16, q17, [{ptr}, #320]",
-        "ldp    q0, q25, [{ptr}, #32]",
-        "mls    v26.8h, v23.8h, v30.8h",
-        "mls    v21.8h, v2.8h,  v30.8h",
-        "stp    q5, q18, [{ptr}, #256]",
-        "stp    q22, q4, [{ptr}], #32",
-        "sub    x9, x9, #1",
-        "cbnz   x9, 2b",
+        "sqrdmulh v23.8H, v17.8H, v29.8H",
+        "sub v18.8H, v25.8H, v26.8H",
+        "add v4.8H, v25.8H, v26.8H",
+        "mul v26.8H, v17.8H, v28.8H",
+        "sqrdmulh v2.8H, v16.8H, v29.8H",
+        "sub v5.8H, v0.8H, v21.8H",
+        "add v22.8H, v0.8H, v21.8H",
+        "mul v21.8H, v16.8H, v28.8H",
+        "ldp q16, q17, [{ptr}, #320]",
+        "ldp q0, q25, [{ptr}, #32]",
+        "mls v26.8H, v23.8H, v30.8H",
+        "mls v21.8H, v2.8H, v30.8H",
+        "stp q5, q18, [{ptr}, #256]",
+        "stp q22, q4, [{ptr}], #32",
+        "sub x9, x9, 1",
+        "cbnz x9, 2b",
 
-        // SLOTHY postamble — drains the last two in-flight iterations.
-        "sqrdmulh v18.8h, v17.8h, v29.8h",
-        "mul    v23.8h, v17.8h, v28.8h",
-        "sqrdmulh v19.8h, v16.8h, v29.8h",
-        "mul    v17.8h, v16.8h, v28.8h",
-        "sub    v7.8h,  v0.8h,  v21.8h",
-        "add    v21.8h, v0.8h,  v21.8h",
-        "ldp    q0, q27, [{ptr}, #32]",
-        "sub    v24.8h, v25.8h, v26.8h",
-        "mls    v23.8h, v18.8h, v30.8h",
-        "mls    v17.8h, v19.8h, v30.8h",
-        "add    v3.8h,  v25.8h, v26.8h",
-        "stp    q7, q24, [{ptr}, #256]",
-        "stp    q21, q3, [{ptr}], #32",
-        "sub    v6.8h,  v27.8h, v23.8h",
-        "add    v1.8h,  v27.8h, v23.8h",
-        "add    v20.8h, v0.8h,  v17.8h",
-        "sub    v0.8h,  v0.8h,  v17.8h",
-        "stp    q0, q6, [{ptr}, #256]",
-        "stp    q20, q1, [{ptr}], #32",
+        // SLOTHY postamble — drains the in-flight iterations.
+        "sqrdmulh v18.8H, v17.8H, v29.8H",
+        "mul v23.8H, v17.8H, v28.8H",
+        "sqrdmulh v19.8H, v16.8H, v29.8H",
+        "mul v17.8H, v16.8H, v28.8H",
+        "sub v7.8H, v0.8H, v21.8H",
+        "add v21.8H, v0.8H, v21.8H",
+        "ldp q0, q27, [{ptr}, #32]",
+        "sub v24.8H, v25.8H, v26.8H",
+        "mls v23.8H, v18.8H, v30.8H",
+        "mls v17.8H, v19.8H, v30.8H",
+        "add v3.8H, v25.8H, v26.8H",
+        "stp q7, q24, [{ptr}, #256]",
+        "stp q21, q3, [{ptr}], #32",
+        "sub v6.8H, v27.8H, v23.8H",
+        "add v1.8H, v27.8H, v23.8H",
+        "add v20.8H, v0.8H, v17.8H",
+        "sub v0.8H, v0.8H, v17.8H",
+        "stp q0, q6, [{ptr}, #256]",
+        "stp q20, q1, [{ptr}], #32",
 
         ptr  = inout(reg) ptr => _,
         zeta = in(reg) zeta as u32,

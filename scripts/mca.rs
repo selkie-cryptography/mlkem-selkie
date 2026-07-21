@@ -44,14 +44,14 @@ fn kernels() -> BTreeMap<&'static str, (&'static str, &'static str)> {
         (
             "ntt",
             (
-                "mlkem_selkie::algebraic::poly::RqElement::ntt",
+                "<mlkem_selkie::algebraic::poly::RqElement>::ntt",
                 "Forward NTT (Rq → Tq), Cooley-Tukey butterflies with a final Barrett reduce",
             ),
         ),
         (
             "ntt_inverse",
             (
-                "mlkem_selkie::algebraic::poly::TqElement::ntt_inverse",
+                "<mlkem_selkie::algebraic::poly::TqElement>::ntt_inverse",
                 "Inverse NTT (Tq → Rq), Gentleman-Sande butterflies + f=1441 scale",
             ),
         ),
@@ -181,6 +181,9 @@ fn run_mca(
     let mut cargo = cargo(root);
     cargo.args([
         "asm",
+        // Disambiguate now that the workspace also contains `xtask`.
+        "-p",
+        "mlkem-selkie",
         "--lib",
         "--target",
         triple,
@@ -237,6 +240,9 @@ fn run_asm(root: &Path, triple: &str, target_cpu: &str, symbol: &str, extra: Vec
     let mut cargo = cargo(root);
     cargo.args([
         "asm",
+        // Disambiguate now that the workspace also contains `xtask`.
+        "-p",
+        "mlkem-selkie",
         "--lib",
         "--target",
         triple,

@@ -11,10 +11,14 @@ documentation = "https://docs.rs/mlkem-selkie"
 # crates.io caps keywords at five.
 keywords = ["cryptography", "post-quantum", "ml-kem", "kyber", "fips203"]
 categories = ["cryptography"]
-# Dev-only trees: microarch tooling/artifacts (SLOTHY, llvm-mca driver) and
-# the BoringSSL cross-test oracle. Not needed to build or use the crate, so
-# keep them out of the published `.crate`.
-exclude = ["scripts/", "tools/"]
+# Dev-only trees: microarch tooling/artifacts (SLOTHY, llvm-mca driver), the
+# BoringSSL cross-test oracle, and the xtask driver. Not needed to build or
+# use the crate, so keep them out of the published `.crate`.
+exclude = ["scripts/", "tools/", "xtask/"]
+
+[workspace]
+members = ["xtask"]
+resolver = "2"
 
 [features]
 default = ["mlkem512", "mlkem768", "mlkem1024"]
