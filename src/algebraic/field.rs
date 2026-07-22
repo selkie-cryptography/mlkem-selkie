@@ -105,6 +105,16 @@ impl FieldElement {
         Self(value)
     }
 
+    /// Returns the raw `i16` representative, un-canonicalized. `PartialEq`
+    /// compares canonical values, so the differential tests use this to pin
+    /// backends to identical representatives (and thus identical reduction
+    /// schedules), not just congruent ones.
+    #[cfg(test)]
+    #[inline]
+    pub(super) const fn representative(self) -> i16 {
+        self.0
+    }
+
     /// Builds a 128-entry table of Montgomery-form field elements from
     /// canonical zeta values at compile time (the NTT zeta tables).
     pub(super) const fn montgomery_table(raw: [u16; 128]) -> [Self; 128] {

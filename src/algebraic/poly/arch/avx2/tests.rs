@@ -35,6 +35,26 @@ fn canonical_poly() -> impl Strategy<Value = [FieldElement; parameters::N]> {
     })
 }
 
+/// A [`FieldElement; 256`] strategy over the full `ntt_inverse` input
+/// contract, `|x| ≤ 16383`: wide enough that a mis-scheduled reduction
+/// overflows `i16` mid-transform where canonical inputs would not.
+fn inverse_contract_poly() -> impl Strategy<Value = [FieldElement; parameters::N]> {
+    prop::collection::vec(-16383i16..=16383, parameters::N).prop_map(|values| {
+        let mut poly = [FieldElement::ZERO; parameters::N];
+        for (out, &v) in poly.iter_mut().zip(values.iter()) {
+            *out = FieldElement::from_montgomery_table(v);
+        }
+        poly
+    })
+}
+
+/// The raw representatives of a polynomial. `FieldElement`'s `PartialEq`
+/// compares canonical values; comparing representatives instead pins both
+/// backends to the same reduction schedule, not just congruent outputs.
+fn representatives(poly: &[FieldElement; parameters::N]) -> [i16; parameters::N] {
+    poly.map(FieldElement::representative)
+}
+
 proptest! {
     // 4096 cases × 256 coefficients per poly hits the i16 boundary reliably
     // and covers a wider input distribution than proptest's default 256.
@@ -45,14 +65,18 @@ proptest! {
         .. ProptestConfig::default()
     })]
 
-    /// `multiply` matches the scalar backend on arbitrary Montgomery-domain
-    /// inputs.
+    /// `multiply` matches the scalar backend, representative-exact, on
+    /// arbitrary Montgomery-domain inputs.
     #[test]
     fn multiply_matches_generic(f in any_poly(), g in any_poly()) {
-        prop_assert_eq!(super::multiply(&f, &g), generic::multiply(&f, &g));
+        prop_assert_eq!(
+            representatives(&super::multiply(&f, &g)),
+            representatives(&generic::multiply(&f, &g)),
+        );
     }
 
-    /// `ntt` matches the scalar backend on any canonical input polynomial.
+    /// `ntt` matches the scalar backend, representative-exact, on any
+    /// canonical input polynomial.
     #[test]
     fn ntt_matches_generic(input in canonical_poly()) {
         let mut vectorized = input;
@@ -60,10 +84,11 @@ proptest! {
         super::ntt(&mut vectorized);
         generic::ntt(&mut scalar);
 
-        prop_assert_eq!(vectorized, scalar);
+        prop_assert_eq!(representatives(&vectorized), representatives(&scalar));
     }
 
-    /// `ntt_inverse` matches the scalar backend on any canonical input.
+    /// `ntt_inverse` matches the scalar backend, representative-exact, on
+    /// any canonical input.
     #[test]
     fn ntt_inverse_matches_generic(input in canonical_poly()) {
         let mut vectorized = input;
@@ -71,7 +96,19 @@ proptest! {
         super::ntt_inverse(&mut vectorized);
         generic::ntt_inverse(&mut scalar);
 
-        prop_assert_eq!(vectorized, scalar);
+        prop_assert_eq!(representatives(&vectorized), representatives(&scalar));
+    }
+
+    /// `ntt_inverse` matches the scalar backend across its full input
+    /// contract, where a mis-placed reduction wraps `i16` mid-transform.
+    #[test]
+    fn ntt_inverse_matches_generic_on_contract(input in inverse_contract_poly()) {
+        let mut vectorized = input;
+        let mut scalar = input;
+        super::ntt_inverse(&mut vectorized);
+        generic::ntt_inverse(&mut scalar);
+
+        prop_assert_eq!(representatives(&vectorized), representatives(&scalar));
     }
 }
 
