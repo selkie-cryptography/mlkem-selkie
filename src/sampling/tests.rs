@@ -71,7 +71,7 @@ fn sample_ntt_matches_manual_unpack() {
     let mut expected: Vec<u16> = Vec::with_capacity(parameters::N);
     let mut triple = [0u8; 3];
     while expected.len() < parameters::N {
-        reader.squeeze(&mut triple);
+        reader.read(&mut triple);
 
         let d1 = u16::from(triple[0]) | (u16::from(triple[1] & 0x0F) << 8);
         let d2 = (u16::from(triple[1]) >> 4) | (u16::from(triple[2]) << 4);

@@ -1050,7 +1050,6 @@ dependencies = [
  "gungraun",
  "hex",
  "libcrux-ml-kem",
- "libcrux-sha3",
  "mlkem-selkie",
  "mutants",
  "proptest",
@@ -1059,6 +1058,7 @@ dependencies = [
  "rand_core 0.6.4",
  "serde",
  "serde_json",
+ "sha3-selkie",
  "subtle",
  "tacet",
  "zeroize",
@@ -1749,6 +1749,11 @@ dependencies = [
  "serde_core",
  "zmij",
 ]
+
+[[package]]
+name = "sha3-selkie"
+version = "0.1.0"
+source = "git+https://github.com/selkie-cryptography/sha3-selkie#2e7a6d3d103537d5eb6815789f07ba7980fbbc30"
 
 [[package]]
 name = "shlex"
