@@ -181,7 +181,6 @@ fn run_mca(
     let mut cargo = cargo(root);
     cargo.args([
         "asm",
-        // Disambiguate now that the workspace also contains `xtask`.
         "-p",
         "mlkem-selkie",
         "--lib",
@@ -240,7 +239,6 @@ fn run_asm(root: &Path, triple: &str, target_cpu: &str, symbol: &str, extra: Vec
     let mut cargo = cargo(root);
     cargo.args([
         "asm",
-        // Disambiguate now that the workspace also contains `xtask`.
         "-p",
         "mlkem-selkie",
         "--lib",

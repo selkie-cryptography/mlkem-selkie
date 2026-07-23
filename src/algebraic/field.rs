@@ -109,7 +109,7 @@ impl FieldElement {
     /// compares canonical values, so the differential tests use this to pin
     /// backends to identical representatives (and thus identical reduction
     /// schedules), not just congruent ones.
-    #[cfg(test)]
+    #[cfg(all(test, any(mlkem_selkie_arch = "neon", mlkem_selkie_arch = "avx2")))]
     #[inline]
     pub(super) const fn representative(self) -> i16 {
         self.0

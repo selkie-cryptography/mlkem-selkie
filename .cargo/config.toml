@@ -4,9 +4,6 @@
 [build]
 warnings = "deny"
 
-[alias]
-xtask = "run --quiet -p xtask --"
-
 # Raise the x86_64 baseline to x86-64-v3 (AVX2, BMI2, FMA, ...) so `build.rs`
 # detects AVX2 and selects the `avx2` polynomial backend. aarch64 has NEON in
 # its baseline and needs no flags here.
