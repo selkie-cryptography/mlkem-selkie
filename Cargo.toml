@@ -30,9 +30,10 @@ dhat-heap = []
 [dependencies]
 getrandom = "0.2"
 rand_core = "0.6"
-# Constant-time Keccak, in-house; replaces libcrux-sha3. Git-pinned via
-# Cargo.lock until sha3-selkie publishes to crates.io.
-sha3-selkie = { git = "https://github.com/selkie-cryptography/sha3-selkie" }
+# Constant-time Keccak, in-house; replaces libcrux-sha3. Git-sourced (rev
+# pinned via Cargo.lock) until sha3-selkie publishes to crates.io; the
+# version requirement keeps the eventual registry switch a source-only change.
+sha3-selkie = { version = "0.1.0", git = "https://github.com/selkie-cryptography/sha3-selkie" }
 subtle = "2"
 zeroize = { version = "1.7.0", features = ["derive"] }
 
