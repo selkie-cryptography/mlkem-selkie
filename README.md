@@ -51,6 +51,19 @@ to `main` and fail the build on regression.
 but its iteration count depends only on the public matrix seed `rho`,
 not on any secret.
 
+### Backends
+
+Vectorized backends are selected at compile time from the target's
+features — no cargo features, no runtime detection. aarch64 gets the
+NEON polynomial backend unconditionally (NEON is baseline); x86_64 gets
+the AVX2 backend when the target features include it, e.g.
+`-C target-cpu=x86-64-v3`. The Keccak backends inside
+[`sha3-selkie`](https://github.com/selkie-cryptography/sha3-selkie)
+select the same way: the Arm SHA-3 extension on Apple silicon (baseline
+there), AVX2 on x86_64, and a batched scalar/NEON hybrid kernel on
+other aarch64. On non-Apple aarch64 with `FEAT_SHA3` (Graviton3 and
+later), opt in with `RUSTFLAGS="-C target-feature=+sha3"`.
+
 ### About
 
 <img width="27%" align="right" src="https://user-images.githubusercontent.com/552961/197638905-f5144be3-a2f2-48c2-9ecb-26e4e34d8d8a.svg#gh-light-mode-only"/>
