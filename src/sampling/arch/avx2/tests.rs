@@ -3,7 +3,10 @@
 
 use proptest::prelude::*;
 
-use crate::sampling::arch::{EMPTY_REJECT_BUFFER, generic};
+use crate::{
+    parameters,
+    sampling::arch::{EMPTY_REJECT_BUFFER, generic},
+};
 
 proptest! {
     #![proptest_config(ProptestConfig {
@@ -59,4 +62,28 @@ fn reject_all_accepted() {
     super::reject(&[0u8; 168], &mut buffer, &mut count);
 
     assert_eq!(count, 112);
+}
+
+/// Once `N` coefficients are collected, later groups must not be processed:
+/// the slack tail stays untouched. Fills to exactly `N` mid-block (two
+/// all-accept blocks, then four accepting groups), with the block's
+/// remaining groups holding accepted nonzero candidates (`0x111 < q`) that a
+/// keep-sampling mutant would write into the slack.
+#[test]
+fn reject_stops_at_full() {
+    let mut buffer = EMPTY_REJECT_BUFFER;
+    let mut count = 0;
+
+    super::reject(&[0u8; 168], &mut buffer, &mut count);
+    super::reject(&[0u8; 168], &mut buffer, &mut count);
+
+    let mut block = [0x11u8; 168];
+    block[..48].fill(0);
+    super::reject(&block, &mut buffer, &mut count);
+
+    assert_eq!(count, parameters::N);
+    assert!(
+        buffer.iter().skip(parameters::N).all(|c| c.value() == 0),
+        "slack written past N"
+    );
 }

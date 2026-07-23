@@ -31,35 +31,9 @@ mod tests;
 /// `2i + 1` spans `(3i + 1, 3i + 2)`.
 const GATHER: [u8; 16] = [0, 1, 1, 2, 3, 4, 4, 5, 6, 7, 7, 8, 9, 10, 10, 11];
 
-/// Byte-shuffle table packing accepted `u16` lanes to the front: entry `m`
-/// lists the byte pairs of `m`'s set bits in ascending order, padded with
+/// Byte-shuffle table packing accepted `u16` lanes to the front, padded with
 /// `0x80` (which `pshufb` maps to zero).
-const COMPACT: [[u8; 16]; 256] = {
-    let mut table = [[0x80; 16]; 256];
-
-    let mut mask = 0;
-    while mask < 256 {
-        let mut packed = 0;
-        let mut lane = 0;
-        while lane < 8 {
-            if mask & (1 << lane) != 0 {
-                // reason: mask < 256 and packed < lane < 8 by the loop
-                // guards, so every index is in bounds (and any violation is a
-                // compile error in this const initializer).
-                #[allow(clippy::indexing_slicing)]
-                {
-                    table[mask][2 * packed] = (2 * lane) as u8;
-                    table[mask][2 * packed + 1] = (2 * lane + 1) as u8;
-                }
-                packed += 1;
-            }
-            lane += 1;
-        }
-        mask += 1;
-    }
-
-    table
-};
+const COMPACT: [[u8; 16]; 256] = super::compact_table(0x80);
 
 /// Appends the accepted 12-bit candidates of `bytes` to `out[*count..]`,
 /// eight candidates per iteration.
@@ -68,19 +42,17 @@ const COMPACT: [[u8; 16]; 256] = {
 /// `*count`; accepted groups straddling `N` spill into the buffer's
 /// [`super::REJECT_SLACK`] tail. `bytes` must be a whole number of 12-byte
 /// groups (SHAKE128 blocks are: `168 = 14 * 12`).
-// reason: the final-group slice is provably 12 bytes (`len % 12 == 0`) and
-// `mask` is masked to 8 bits before indexing the 256-entry table; the
-// padded-copy rewrite the lint suggests is this code.
+// reason: `padded[..12]` is a constant range of a `[u8; 16]` and the mask
+// (8 bits) indexes the 256-entry table; both are provably in bounds.
 #[allow(clippy::indexing_slicing)]
 pub(crate) fn reject(bytes: &[u8], out: &mut RejectBuffer, count: &mut usize) {
     debug_assert_eq!(bytes.len() % 12, 0);
     let groups = bytes.len() / 12;
 
-    // SAFETY: group `i < groups` starts at byte `12 * i`. Full 16-byte loads
-    // run only while `group + 1 < groups`, whose last offset `12 * (groups -
-    // 2) + 16` is `len - 8`; the final group is copied into a padded stack
-    // buffer first. Each store writes eight `i16` lanes at `out[*count]` with
-    // `*count < N` (loop guard), and `N - 1 + 8` is the last slack index of
+    // SAFETY: every 16-byte load reads a `bytes.get`-checked window or a
+    // local padded buffer, so loads are in bounds by construction. Each
+    // store writes eight `i16` lanes at `out[*count]` with `*count < N`
+    // (loop guard), and `N - 1 + 8` is the last slack index of
     // `RejectBuffer`. `FieldElement` is `repr(transparent)` over `i16`, so
     // `out` reinterprets as `[u8]`. The avx2 module compiles only with AVX2
     // enabled, so every intrinsic is available.
@@ -93,11 +65,14 @@ pub(crate) fn reject(bytes: &[u8], out: &mut RejectBuffer, count: &mut usize) {
 
         let mut group = 0;
         while group < groups && *count < parameters::N {
-            let data = if group + 1 < groups {
-                _mm_loadu_si128(bytes.as_ptr().add(12 * group).cast::<__m128i>())
+            let start = 12 * group;
+            let data = if let Some(window) = bytes.get(start..start + 16) {
+                _mm_loadu_si128(window.as_ptr().cast::<__m128i>())
             } else {
                 let mut padded = [0u8; 16];
-                padded[..12].copy_from_slice(&bytes[12 * group..]);
+                if let Some(tail) = bytes.get(start..start + 12) {
+                    padded[..12].copy_from_slice(tail);
+                }
                 _mm_loadu_si128(padded.as_ptr().cast::<__m128i>())
             };
 

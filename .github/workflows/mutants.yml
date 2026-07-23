@@ -63,12 +63,12 @@ jobs:
           # on aarch64. Full-tree runs cover both arches.
           if [ "${{ matrix.arch }}" = "x86_64" ]; then
             RUNNER="mold -run"
-            EXCLUDE=":(exclude)src/algebraic/poly/arch/neon.rs"
+            EXCLUDE=(":(exclude)src/algebraic/poly/arch/neon.rs" ":(exclude)src/sampling/arch/neon.rs")
           else
             RUNNER=""
-            EXCLUDE=":(exclude)src/algebraic/poly/arch/avx2.rs"
+            EXCLUDE=(":(exclude)src/algebraic/poly/arch/avx2.rs" ":(exclude)src/sampling/arch/avx2.rs")
           fi
-          git diff "origin/${{ github.base_ref }}" -- . "$EXCLUDE" > pr.diff
+          git diff "origin/${{ github.base_ref }}" -- . "${EXCLUDE[@]}" > pr.diff
           $RUNNER cargo mutants -j ${{ matrix.arch == 'x86_64' && '2' || '3' }} --in-diff pr.diff
       - uses: actions/upload-artifact@v4
         if: always()

@@ -199,3 +199,17 @@ proptest! {
         prop_assert_eq!(got, want);
     }
 }
+
+/// The raw representative accessor returns the stored value unchanged — a
+/// direct pin, since the differential tests read both backends through this
+/// accessor and a corrupted one would cancel out of their comparisons.
+#[cfg(any(mlkem_selkie_arch = "neon", mlkem_selkie_arch = "avx2"))]
+#[test]
+fn representative_returns_stored_value() {
+    for value in [i16::MIN, -3329, -1, 0, 1, 3328, i16::MAX] {
+        assert_eq!(
+            FieldElement::from_montgomery_table(value).representative(),
+            value
+        );
+    }
+}

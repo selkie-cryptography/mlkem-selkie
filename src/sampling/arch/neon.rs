@@ -36,35 +36,9 @@ const SHIFTS: [i16; 8] = [0, -4, 0, -4, 0, -4, 0, -4];
 /// Lane-mask bit weights for narrowing an acceptance mask to one byte.
 const BIT_WEIGHTS: [u8; 8] = [1, 2, 4, 8, 16, 32, 64, 128];
 
-/// Byte-shuffle table packing accepted `u16` lanes to the front: entry `m`
-/// lists the byte pairs of `m`'s set bits in ascending order, padded with
+/// Byte-shuffle table packing accepted `u16` lanes to the front, padded with
 /// `0xFF` (which `tbl` maps to zero).
-const COMPACT: [[u8; 16]; 256] = {
-    let mut table = [[0xFF; 16]; 256];
-
-    let mut mask = 0;
-    while mask < 256 {
-        let mut packed = 0;
-        let mut lane = 0;
-        while lane < 8 {
-            if mask & (1 << lane) != 0 {
-                // reason: mask < 256 and packed < lane < 8 by the loop
-                // guards, so every index is in bounds (and any violation is a
-                // compile error in this const initializer).
-                #[allow(clippy::indexing_slicing)]
-                {
-                    table[mask][2 * packed] = (2 * lane) as u8;
-                    table[mask][2 * packed + 1] = (2 * lane + 1) as u8;
-                }
-                packed += 1;
-            }
-            lane += 1;
-        }
-        mask += 1;
-    }
-
-    table
-};
+const COMPACT: [[u8; 16]; 256] = super::compact_table(0xFF);
 
 /// Appends the accepted 12-bit candidates of `bytes` to `out[*count..]`,
 /// eight candidates per iteration.
@@ -73,22 +47,19 @@ const COMPACT: [[u8; 16]; 256] = {
 /// `*count`; accepted groups straddling `N` spill into the buffer's
 /// [`super::REJECT_SLACK`] tail. `bytes` must be a whole number of 12-byte
 /// groups (SHAKE128 blocks are: `168 = 14 * 12`).
-// reason: the final-group slice is provably 12 bytes (`len % 12 == 0`) and
-// `mask` is a `u8` indexing the 256-entry table; the padded-copy rewrite the
-// lint suggests is this code.
+// reason: `padded[..12]` is a constant range of a `[u8; 16]` and the mask
+// (8 bits) indexes the 256-entry table; both are provably in bounds.
 #[allow(clippy::indexing_slicing)]
 pub(crate) fn reject(bytes: &[u8], out: &mut RejectBuffer, count: &mut usize) {
     debug_assert_eq!(bytes.len() % 12, 0);
     let groups = bytes.len() / 12;
 
-    // SAFETY: group `i < groups` starts at byte `12 * i`. Full 16-byte loads
-    // run only while `12 * i + 16 <= bytes.len()` (guaranteed for
-    // `i < groups - 1` since blocks are at least 24 bytes); the final group
-    // is copied into a padded stack buffer first. Each store writes eight
-    // `i16` lanes at `out[*count]` with `*count < N` (loop guard), and
-    // `N - 1 + 8` is the last slack index of `RejectBuffer`. `FieldElement`
-    // is `repr(transparent)` over `i16`, so `out` reinterprets as `[u8]`.
-    // NEON is baseline on aarch64.
+    // SAFETY: every 16-byte load reads a `bytes.get`-checked window or a
+    // local padded buffer, so loads are in bounds by construction. Each
+    // store writes eight `i16` lanes at `out[*count]` with `*count < N`
+    // (loop guard), and `N - 1 + 8` is the last slack index of
+    // `RejectBuffer`. `FieldElement` is `repr(transparent)` over `i16`, so
+    // `out` reinterprets as `[u8]`. NEON is baseline on aarch64.
     unsafe {
         let gather = vld1q_u8(GATHER.as_ptr());
         let shifts = vld1q_s16(SHIFTS.as_ptr());
@@ -100,11 +71,14 @@ pub(crate) fn reject(bytes: &[u8], out: &mut RejectBuffer, count: &mut usize) {
 
         let mut group = 0;
         while group < groups && *count < parameters::N {
-            let data = if group + 1 < groups {
-                vld1q_u8(bytes.as_ptr().add(12 * group))
+            let start = 12 * group;
+            let data = if let Some(window) = bytes.get(start..start + 16) {
+                vld1q_u8(window.as_ptr())
             } else {
                 let mut padded = [0u8; 16];
-                padded[..12].copy_from_slice(&bytes[12 * group..]);
+                if let Some(tail) = bytes.get(start..start + 12) {
+                    padded[..12].copy_from_slice(tail);
+                }
                 vld1q_u8(padded.as_ptr())
             };
 
