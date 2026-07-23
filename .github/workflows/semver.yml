@@ -1,0 +1,34 @@
+name: Semver
+
+# Flags accidental breaking API changes on PRs. Compares against the PR's base
+# commit (not a published crate), so it needs no network baseline.
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "Cargo.toml"
+      - ".github/workflows/semver.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  semver-checks:
+    name: API semver
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0 # need the base commit to diff the API against
+      # Nightly: cargo-semver-checks generates rustdoc JSON, which is nightly-only.
+      - uses: dtolnay/rust-toolchain@4fd1da8b0805d2d2e936788875a7d65dbd677dc2 # nightly
+      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2
+        with:
+          tool: cargo-semver-checks@0.49.0
+      - run: cargo semver-checks --baseline-rev "${{ github.event.pull_request.base.sha }}"
