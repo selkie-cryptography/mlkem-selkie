@@ -297,6 +297,63 @@ proptest! {
 
 }
 
+/// The vectorized `Compress_d` matches the scalar backend on every canonical
+/// input, for every compressed width the parameter sets use — the exhaustive
+/// check backing `compress_multiplier`'s exactness claim.
+#[test]
+fn compress_matches_generic_exhaustively() {
+    for d in [1usize, 4, 5, 10, 11] {
+        // All q canonical inputs, in 256-coefficient chunks (zero-padded).
+        for base in (0..parameters::Q).step_by(parameters::N) {
+            let poly: [FieldElement; parameters::N] =
+                array::from_fn(|i| FieldElement::new((base + i as u16) % parameters::Q));
+
+            assert_eq!(
+                super::compress(&poly, d),
+                generic::compress(&poly, d),
+                "d = {d}, base = {base}"
+            );
+        }
+    }
+}
+
+/// The vectorized `Decompress_d` matches the scalar backend on every `d`-bit
+/// input, for every compressed width the parameter sets use.
+#[test]
+fn decompress_matches_generic_exhaustively() {
+    for d in [1usize, 4, 5, 10, 11] {
+        for base in (0..1u32 << d).step_by(parameters::N) {
+            let values: [u16; parameters::N] =
+                array::from_fn(|i| ((base + i as u32) % (1 << d)) as u16);
+
+            assert_eq!(
+                representatives(&super::decompress(&values, d)),
+                representatives(&generic::decompress(&values, d)),
+                "d = {d}, base = {base}"
+            );
+        }
+    }
+}
+
+/// The vectorized canonicalization matches `FieldElement::value` on every
+/// `i16` representative.
+#[test]
+fn canonical_matches_generic_exhaustively() {
+    for base in (i32::from(i16::MIN)..=i32::from(i16::MAX)).step_by(parameters::N) {
+        let poly: [FieldElement; parameters::N] = array::from_fn(|i| {
+            let v = (base + i as i32).clamp(i32::from(i16::MIN), i32::from(i16::MAX));
+
+            FieldElement::from_montgomery_table(v as i16)
+        });
+
+        assert_eq!(
+            super::canonical(&poly),
+            generic::canonical(&poly),
+            "base = {base}"
+        );
+    }
+}
+
 /// Every [`crate::algebraic::poly::arch::ZETA_BARRETT`] entry matches
 /// `round(zeta * 2^15 / q)` recomputed via an independent `u32` code path.
 ///

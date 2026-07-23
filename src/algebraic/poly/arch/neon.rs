@@ -24,11 +24,12 @@
 #![allow(unsafe_code)]
 
 use core::arch::aarch64::{
-    int16x4_t, int16x8_t, int16x8x2_t, int32x4_t, vaddq_s16, vcombine_s16, vdup_n_s16, vdupq_n_s16,
-    vdupq_n_s32, vget_low_s16, vld1q_s16, vld1q_s32, vld2q_s16, vmlal_high_s16, vmlal_s16,
-    vmlaq_n_s32, vmlsq_s16, vmovl_high_s16, vmovl_s16, vmovn_s32, vmul_s16, vmull_high_s16,
-    vmull_s16, vmulq_n_s32, vmulq_s16, vqrdmulhq_s16, vshrn_n_s32, vshrq_n_s32, vst1q_s16,
-    vst1q_s32, vst2q_s16, vsubq_s16, vsubq_s32,
+    int16x4_t, int16x8_t, int16x8x2_t, int32x4_t, vaddq_s16, vandq_s16, vandq_s32, vcombine_s16,
+    vdup_n_s16, vdupq_n_s16, vdupq_n_s32, vget_low_s16, vld1q_s16, vld1q_s32, vld2q_s16,
+    vmlal_high_s16, vmlal_s16, vmlaq_n_s32, vmlsq_s16, vmovl_high_s16, vmovl_s16, vmovn_s32,
+    vmul_s16, vmull_high_s16, vmull_s16, vmulq_n_s32, vmulq_s16, vqrdmulhq_s16, vqrdmulhq_s32,
+    vshlq_s32, vshrn_n_s32, vshrq_n_s16, vshrq_n_s32, vst1q_s16, vst1q_s32, vst2q_s16, vsubq_s16,
+    vsubq_s32,
 };
 
 use crate::{algebraic::field::FieldElement, parameters};
@@ -306,6 +307,146 @@ unsafe fn ntt_stride128_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
         out("v28") _, out("v29") _, out("v30") _,
         options(nostack),
     );
+}
+
+/// The ceiling multiplier `ceil(2^(31 + d) / q)` for the vectorized
+/// `Compress_d`: `vqrdmulhq_s32(x, multiplier)` computes
+/// `round(x * multiplier / 2^31)`, which equals `round(x * 2^d / q)` for
+/// every canonical `x` (ceiling, not nearest, so exact rational ties round
+/// up as the reference `floor((x * 2^d + q/2) / q)` does; the `tests` module
+/// checks all `q` inputs per `d` exhaustively).
+const fn compress_multiplier(d: usize) -> i32 {
+    (1u64 << (31 + d)).div_ceil(parameters::Q as u64) as i32
+}
+
+/// Canonicalizes eight lanes to `[0, q)`: Barrett-reduce, then a branch-free
+/// conditional add of q on the negative lanes. The vector form of
+/// `FieldElement::value`.
+#[inline]
+fn canonical_lanes(x: int16x8_t) -> int16x8_t {
+    let reduced = barrett_reduce(x);
+
+    // SAFETY: NEON is baseline on aarch64; every intrinsic below is total.
+    unsafe {
+        let negative = vshrq_n_s16::<15>(reduced);
+
+        vaddq_s16(reduced, vandq_s16(negative, vdupq_n_s16(Q)))
+    }
+}
+
+/// `Compress_d` of every coefficient: canonicalizes and maps each to
+/// `round((2^d / q) * x) mod 2^d`, thirty-two eight-lane groups.
+///
+/// Matches [`super::generic::compress`]. Constant-time on secret-derived
+/// inputs: every lane runs the same multiply/shift sequence, with no
+/// data-dependent branches or lookups.
+pub(crate) fn compress(
+    coefficients: &[FieldElement; parameters::N],
+    d: usize,
+) -> [u16; parameters::N] {
+    let multiplier = match d {
+        1 => compress_multiplier(1),
+        4 => compress_multiplier(4),
+        5 => compress_multiplier(5),
+        10 => compress_multiplier(10),
+        11 => compress_multiplier(11),
+        _ => return super::generic::compress(coefficients, d),
+    };
+
+    let mut out = [0u16; parameters::N];
+
+    // SAFETY: `FieldElement` is `repr(transparent)` over `i16` and the `u16`
+    // outputs are below `2^d`, so both arrays reinterpret as `[i16]`. Each
+    // iteration reads and writes one 8-`i16` window (32 windows tile 256).
+    // `vld1q`/`vst1q` are unaligned. NEON is baseline on aarch64.
+    unsafe {
+        let in_ptr = coefficients.as_ptr().cast::<i16>();
+        let out_ptr = out.as_mut_ptr().cast::<i16>();
+        let m = vdupq_n_s32(multiplier);
+        let mask = vdupq_n_s32((1 << d) - 1);
+
+        let mut i = 0;
+        while i < parameters::N {
+            let x = canonical_lanes(vld1q_s16(in_ptr.add(i)));
+
+            // round(x * 2^d / q) per lane, in i32 precision.
+            let lo = vandq_s32(vqrdmulhq_s32(vmovl_s16(vget_low_s16(x)), m), mask);
+            let hi = vandq_s32(vqrdmulhq_s32(vmovl_high_s16(x), m), mask);
+
+            vst1q_s16(out_ptr.add(i), vcombine_s16(vmovn_s32(lo), vmovn_s32(hi)));
+
+            i += 8;
+        }
+    }
+
+    out
+}
+
+/// `Decompress_d` of every value: maps each `d`-bit value back into Zq via
+/// `(q * y + 2^(d-1)) >> d`, thirty-two eight-lane groups.
+///
+/// Matches [`super::generic::decompress`]. Constant-time: every lane runs
+/// the same multiply/shift sequence.
+pub(crate) fn decompress(values: &[u16; parameters::N], d: usize) -> [FieldElement; parameters::N] {
+    let mut out = [FieldElement::ZERO; parameters::N];
+
+    // SAFETY: the `u16` inputs are below `2^12` and the outputs canonical, so
+    // both arrays reinterpret as `[i16]` (`FieldElement` is
+    // `repr(transparent)` over `i16`). Each iteration reads and writes one
+    // 8-`i16` window (32 windows tile 256). `vld1q`/`vst1q` are unaligned.
+    // NEON is baseline on aarch64.
+    unsafe {
+        let in_ptr = values.as_ptr().cast::<i16>();
+        let out_ptr = out.as_mut_ptr().cast::<i16>();
+        let half = vdupq_n_s32(1 << (d - 1));
+        let shift = vdupq_n_s32(-(d as i32));
+
+        let mut i = 0;
+        while i < parameters::N {
+            let y = vld1q_s16(in_ptr.add(i));
+
+            // (q * y + 2^(d-1)) >> d per lane, exact in i32.
+            let lo = vshlq_s32(
+                vmlaq_n_s32(half, vmovl_s16(vget_low_s16(y)), Q as i32),
+                shift,
+            );
+            let hi = vshlq_s32(vmlaq_n_s32(half, vmovl_high_s16(y), Q as i32), shift);
+
+            vst1q_s16(out_ptr.add(i), vcombine_s16(vmovn_s32(lo), vmovn_s32(hi)));
+
+            i += 8;
+        }
+    }
+
+    out
+}
+
+/// The canonical representative in `[0, q)` of every coefficient,
+/// thirty-two eight-lane groups: the vector form of `FieldElement::value`
+/// over a polynomial.
+///
+/// Matches [`super::generic::canonical`]. Constant-time: branch-free per
+/// lane.
+pub(crate) fn canonical(coefficients: &[FieldElement; parameters::N]) -> [u16; parameters::N] {
+    let mut out = [0u16; parameters::N];
+
+    // SAFETY: `FieldElement` is `repr(transparent)` over `i16` and the
+    // canonical outputs are below q, so both arrays reinterpret as `[i16]`.
+    // Each iteration reads and writes one 8-`i16` window (32 windows tile
+    // 256). `vld1q`/`vst1q` are unaligned. NEON is baseline on aarch64.
+    unsafe {
+        let in_ptr = coefficients.as_ptr().cast::<i16>();
+        let out_ptr = out.as_mut_ptr().cast::<i16>();
+
+        let mut i = 0;
+        while i < parameters::N {
+            vst1q_s16(out_ptr.add(i), canonical_lanes(vld1q_s16(in_ptr.add(i))));
+
+            i += 8;
+        }
+    }
+
+    out
 }
 
 /// One Cooley-Tukey butterfly over eight lanes: returns `(a + t, a - t)` for

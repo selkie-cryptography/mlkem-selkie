@@ -99,6 +99,29 @@ pub(crate) fn ntt_inverse(coefficients: &mut [FieldElement; parameters::N]) {
     }
 }
 
+/// `Compress_d` of every coefficient: canonicalizes and maps each to
+/// `round((2^d / q) * x) mod 2^d`, one output value per coefficient.
+///
+/// Constant-time on secret-derived inputs, as `FieldElement::compress` is.
+pub(crate) fn compress(
+    coefficients: &[FieldElement; parameters::N],
+    d: usize,
+) -> [u16; parameters::N] {
+    coefficients.map(|c| c.compress(d))
+}
+
+/// `Decompress_d` of every value: maps each `d`-bit value back into Zq via
+/// `round((q / 2^d) * y)`.
+pub(crate) fn decompress(values: &[u16; parameters::N], d: usize) -> [FieldElement; parameters::N] {
+    values.map(|v| FieldElement::decompress(v, d))
+}
+
+/// The canonical representative in `[0, q)` of every coefficient
+/// (`FieldElement::value`, one output per coefficient).
+pub(crate) fn canonical(coefficients: &[FieldElement; parameters::N]) -> [u16; parameters::N] {
+    coefficients.map(FieldElement::value)
+}
+
 /// Pointwise base multiplication of two NTT representations, reducing to 128
 /// independent degree-one products modulo the quadratics `X^2 - gamma`. The
 /// result is scaled by `R^-1` (Montgomery convention), which [`ntt_inverse`]

@@ -41,6 +41,10 @@ pub trait PolynomialRingElement: Copy + Index<usize, Output = FieldElement> {
     fn new(coefficients: [FieldElement; parameters::N]) -> Self;
 
     /// Returns this polynomial's coefficients.
+    // reason: the public accessor for `expose-internals` consumers and tests;
+    // in-crate serialization reads coefficients through the arch kernels
+    // instead, so the default build has no caller.
+    #[allow(dead_code)]
     fn coefficients(&self) -> [FieldElement; parameters::N];
 }
 
@@ -74,6 +78,21 @@ impl RqElement {
         arch::ntt(&mut self.0);
 
         TqElement::new(self.0)
+    }
+
+    /// `Compress_d` of every coefficient, via the architecture backend.
+    ///
+    /// Constant-time on secret-derived inputs (the `K-PKE` ciphertext
+    /// components and recovered message), as `FieldElement::compress` is.
+    #[must_use]
+    pub(crate) fn compressed(&self, d: usize) -> [u16; parameters::N] {
+        arch::compress(&self.0, d)
+    }
+
+    /// Constructs a polynomial by `Decompress_d` of every `d`-bit value, via
+    /// the architecture backend.
+    pub(crate) fn decompress(values: &[u16; parameters::N], d: usize) -> Self {
+        Self(arch::decompress(values, d))
     }
 }
 
@@ -211,6 +230,13 @@ impl TqElement {
         }
 
         Self(acc.reduce())
+    }
+
+    /// The canonical `[0, q)` representative of every coefficient, via the
+    /// architecture backend (the `ByteEncode_12` serialization values).
+    #[must_use]
+    pub(crate) fn canonical(&self) -> [u16; parameters::N] {
+        arch::canonical(&self.0)
     }
 }
 
