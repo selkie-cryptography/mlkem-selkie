@@ -7,8 +7,9 @@ use core::ops::{Add, Index, Mul};
 
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
+use super::TqMulCache;
 use crate::{
-    algebraic::poly::{PolynomialRingElement, RqElement, TqElement, TqMulCache},
+    algebraic::poly::{PolynomialRingElement, RqElement, TqElement},
     parameters::ParameterSet,
 };
 

@@ -139,6 +139,33 @@ proptest! {
 
         prop_assert_eq!(representatives(&vectorized), representatives(&scalar));
     }
+
+    /// The `basemul_accumulate` / `basemul_reduce` pair matches the scalar
+    /// backend at every dot-product length the parameter sets use.
+    // reason: j < k <= 4 indexes the length-4 strategy vectors; the loop
+    // structure mirrors the dot product it tests.
+    #[allow(clippy::indexing_slicing)]
+    #[test]
+    fn basemul_accumulate_reduce_matches_generic(
+        f in prop::collection::vec(accumulation_poly(), 4),
+        g in prop::collection::vec(accumulation_poly(), 4),
+    ) {
+        for k in 1..=4 {
+            let mut vectorized = ProductAccumulator::default();
+            let mut scalar = ProductAccumulator::default();
+
+            for j in 0..k {
+                let cache = mul_cache(&g[j]);
+                super::basemul_accumulate(&mut vectorized, &f[j], &g[j], &cache);
+                generic::basemul_accumulate(&mut scalar, &f[j], &g[j], &cache);
+            }
+
+            prop_assert_eq!(
+                representatives(&super::basemul_reduce(&vectorized)),
+                representatives(&generic::basemul_reduce(&scalar)),
+            );
+        }
+    }
 }
 
 /// Thinned, software-pipelined stride-128 inverse-NTT stage: no sum-path
@@ -149,6 +176,7 @@ proptest! {
 ///
 /// `ptr` must point to a 256-`i16` window mutable for reads and writes, with
 /// every representative in `[-4q, 4q]` so the unreduced sums fit `i16`.
+#[cfg(mlkem_selkie_neon_asm)]
 unsafe fn intt_stride128_thin_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
     core::arch::asm!(
         // Prologue: broadcast constants and set the iteration count.
@@ -223,6 +251,7 @@ unsafe fn intt_stride128_thin_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
     );
 }
 
+#[cfg(mlkem_selkie_neon_asm)]
 proptest! {
     #![proptest_config(ProptestConfig {
         cases: 4096,
@@ -266,32 +295,6 @@ proptest! {
         }
     }
 
-    /// The `basemul_accumulate` / `basemul_reduce` pair matches the scalar
-    /// backend at every dot-product length the parameter sets use.
-    // reason: j < k <= 4 indexes the length-4 strategy vectors; the loop
-    // structure mirrors the dot product it tests.
-    #[allow(clippy::indexing_slicing)]
-    #[test]
-    fn basemul_accumulate_reduce_matches_generic(
-        f in prop::collection::vec(accumulation_poly(), 4),
-        g in prop::collection::vec(accumulation_poly(), 4),
-    ) {
-        for k in 1..=4 {
-            let mut vectorized = ProductAccumulator::default();
-            let mut scalar = ProductAccumulator::default();
-
-            for j in 0..k {
-                let cache = mul_cache(&g[j]);
-                super::basemul_accumulate(&mut vectorized, &f[j], &g[j], &cache);
-                generic::basemul_accumulate(&mut scalar, &f[j], &g[j], &cache);
-            }
-
-            prop_assert_eq!(
-                representatives(&super::basemul_reduce(&vectorized)),
-                representatives(&generic::basemul_reduce(&scalar)),
-            );
-        }
-    }
 }
 
 /// Every [`crate::algebraic::poly::arch::ZETA_BARRETT`] entry matches

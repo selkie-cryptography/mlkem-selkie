@@ -10,6 +10,14 @@
 //! `tests` module cross-checks every kernel — in the signed Montgomery
 //! convention of [`crate::algebraic::field`].
 //!
+//! On Apple targets (the `mlkem_selkie_neon_asm` cfg from `build.rs`), the
+//! forward NTT's stride-128/64 stages run as software-pipelined `asm!` blocks
+//! scheduled for Apple's wide NEON pipes; on other aarch64 cores that
+//! schedule regresses, so those stages take the intrinsics loop instead. The
+//! companion `mlkem_selkie_neon_tune` cfg names the targeted Apple core
+//! (`"apple-m4"`, or `"apple"` when unknown), for kernels that specialize
+//! per-core as schedules accumulate.
+//!
 //! The only `unsafe` in the crate lives in this module (and the future `avx2`
 //! sibling): NEON is baseline on aarch64, so each intrinsic call is sound, as
 //! the per-block `SAFETY` notes record.
@@ -113,6 +121,7 @@ fn barrett_const_mul(a: int16x8_t, b: int16x8_t, b_bar: int16x8_t) -> int16x8_t 
 /// Clobbers `v0`-`v7` and `v16`-`v30` (all caller-saved; `v8`-`v15` stay
 /// reserved), general register `x9`, and the input `ptr` (post-increments
 /// through the low half).
+#[cfg(mlkem_selkie_neon_asm)]
 #[inline]
 unsafe fn ntt_stride64_group_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
     // SAFETY: `ptr` covers 128 i16s lower + 128 i16s upper = 256 bytes.
@@ -215,6 +224,7 @@ unsafe fn ntt_stride64_group_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
 /// caller-saved; the callee-saved `v8`-`v15` bank stays reserved so LLVM
 /// does not emit a `stp d, d, [sp, #-N]!` prologue), general register `x9`,
 /// and the input `ptr` (post-increments through the low half).
+#[cfg(mlkem_selkie_neon_asm)]
 #[inline]
 unsafe fn ntt_stride128_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
     // SAFETY: `ptr` is a 256-`i16` buffer; the schedule reads and writes
@@ -493,21 +503,31 @@ pub(crate) fn ntt(coefficients: &mut [FieldElement; parameters::N]) {
         let zeta_raw_ptr = super::ZETA_RAW.as_ptr().cast::<i16>();
         let zeta_bar_ptr = super::ZETA_BARRETT.as_ptr();
 
-        // Stride-128 stage: one zeta pair spans all 16 vector butterflies,
-        // so the whole stage runs from a single hand-scheduled `asm!` block
-        // that interleaves adjacent butterflies for the M1 vector-mul units.
-        ntt_stride128_asm(ptr, *zeta_raw_ptr.add(k), *zeta_bar_ptr.add(k));
-        k += 1;
+        // Stride-128/64 stages, Apple targets only: one zeta pair spans a
+        // whole butterfly group, so each stage runs from a single
+        // software-pipelined `asm!` block (stride-64 is two independent
+        // groups, one per outer start position). Other aarch64 cores take
+        // these stages through the intrinsics loop below instead — the
+        // schedule regresses on narrower NEON pipes.
+        #[cfg(mlkem_selkie_neon_asm)]
+        {
+            ntt_stride128_asm(ptr, *zeta_raw_ptr.add(k), *zeta_bar_ptr.add(k));
+            k += 1;
 
-        // Stride-64 stage: two independent butterfly groups (one per outer
-        // start position, each with its own zeta pair). Same asm kernel as
-        // stride-128 with a shorter loop and a `+128` upper offset.
-        ntt_stride64_group_asm(ptr, *zeta_raw_ptr.add(k), *zeta_bar_ptr.add(k));
-        k += 1;
-        ntt_stride64_group_asm(ptr.add(128), *zeta_raw_ptr.add(k), *zeta_bar_ptr.add(k));
-        k += 1;
+            ntt_stride64_group_asm(ptr, *zeta_raw_ptr.add(k), *zeta_bar_ptr.add(k));
+            k += 1;
+            ntt_stride64_group_asm(ptr.add(128), *zeta_raw_ptr.add(k), *zeta_bar_ptr.add(k));
+            k += 1;
+        }
 
-        for len in [32usize, 16, 8] {
+        /// The strides the intrinsics loop covers: everything the `asm!`
+        /// stages above did not already handle.
+        #[cfg(mlkem_selkie_neon_asm)]
+        const VECTOR_STRIDES: &[usize] = &[32, 16, 8];
+        #[cfg(not(mlkem_selkie_neon_asm))]
+        const VECTOR_STRIDES: &[usize] = &[128, 64, 32, 16, 8];
+
+        for &len in VECTOR_STRIDES {
             let mut start = 0;
             while start < 256 {
                 let zeta = vdupq_n_s16(*zeta_raw_ptr.add(k));
