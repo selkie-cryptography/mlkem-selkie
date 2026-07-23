@@ -47,7 +47,7 @@ impl TqElement {
         let mut block = [0u8; SHAKE128_BLOCK];
 
         while count < parameters::N {
-            reader.squeeze(&mut block);
+            reader.read(&mut block);
             arch::reject(&block, &mut buffer, &mut count);
         }
 

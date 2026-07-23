@@ -30,18 +30,11 @@ dhat-heap = []
 [dependencies]
 getrandom = "0.2"
 rand_core = "0.6"
-# Pinned to `=0.0.10`: pre-1.0 crate on the crypto-critical path.
-libcrux-sha3 = { version = "=0.0.10", default-features = false }
+# Constant-time Keccak, in-house; replaces libcrux-sha3. Git-pinned via
+# Cargo.lock until sha3-selkie publishes to crates.io.
+sha3-selkie = { git = "https://github.com/selkie-cryptography/sha3-selkie" }
 subtle = "2"
 zeroize = { version = "1.7.0", features = ["derive"] }
-
-# Batched SIMD Keccak for parallel SHAKE streams; layered on top of the scalar
-# `libcrux-sha3` above.
-[target.'cfg(all(target_arch = "aarch64", target_feature = "neon"))'.dependencies]
-libcrux-sha3 = { version = "=0.0.10", default-features = false, features = ["simd128"] }
-
-[target.'cfg(all(target_arch = "x86_64", target_feature = "avx2"))'.dependencies]
-libcrux-sha3 = { version = "=0.0.10", default-features = false, features = ["simd256"] }
 
 [dev-dependencies]
 # Self dev-dep so `expose-internals` is active for tests/benches/examples
