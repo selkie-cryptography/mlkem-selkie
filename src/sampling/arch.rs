@@ -9,12 +9,16 @@
 
 use crate::{algebraic::FieldElement, parameters};
 
+#[cfg(mlkem_selkie_arch = "avx2")]
+mod avx2;
 #[cfg(mlkem_selkie_arch = "neon")]
 mod neon;
 
 mod generic;
 
-#[cfg(not(mlkem_selkie_arch = "neon"))]
+#[cfg(mlkem_selkie_arch = "avx2")]
+pub(crate) use avx2::reject;
+#[cfg(not(any(mlkem_selkie_arch = "neon", mlkem_selkie_arch = "avx2")))]
 pub(crate) use generic::reject;
 #[cfg(mlkem_selkie_arch = "neon")]
 pub(crate) use neon::reject;
