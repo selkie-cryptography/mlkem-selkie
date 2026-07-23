@@ -13,10 +13,14 @@
 //!
 //! [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
 
-use core::ops::{Add, AddAssign, Index, Mul, Sub};
+use core::{
+    array,
+    ops::{Add, AddAssign, Index, Mul, Sub},
+};
 
 use zeroize::DefaultIsZeroes;
 
+use self::arch::ProductAccumulator;
 use crate::{algebraic::field::FieldElement, parameters};
 
 mod arch;
@@ -177,6 +181,37 @@ impl TqElement {
     pub fn to_montgomery(self) -> Self {
         Self(self.0.map(FieldElement::to_montgomery))
     }
+
+    /// Precomputes this polynomial's asymmetric base-multiplication cache.
+    #[must_use]
+    pub fn mul_cache(&self) -> TqMulCache {
+        // reason: indices 2i+1 and i are provably in bounds for i in 0..128,
+        // and the pairwise indexing matches `multiply`.
+        #[allow(clippy::indexing_slicing)]
+        TqMulCache(array::from_fn(|i| self.0[2 * i + 1] * arch::GAMMA_MONT[i]))
+    }
+
+    /// Computes the accumulated dot product `sum_j f_j * g_j` of two
+    /// component slices, where `caches` holds each `g_j`'s [`TqMulCache`].
+    ///
+    /// The raw `i32` coefficient products of all components are summed first
+    /// and Montgomery-reduced once per coefficient, matching the sum of
+    /// per-component [`Mul`] products mod q with `4 * len - 1` fewer
+    /// reductions per coefficient pair. The result is scaled by `R^-1`
+    /// (Montgomery convention), as [`Mul`]'s is.
+    ///
+    /// The accumulator bound in `FieldElement::from_product_sum` admits at
+    /// most four components with coefficients bounded by `3q/2`; every caller
+    /// dots vectors of `K <= 4` NTT-domain polynomials within that bound.
+    pub(crate) fn accumulated_dot(f: &[Self], g: &[Self], caches: &[TqMulCache]) -> Self {
+        let mut acc = ProductAccumulator::default();
+
+        for ((f_j, g_j), cache) in f.iter().zip(g).zip(caches) {
+            acc.accumulate(&f_j.0, &g_j.0, &cache.0);
+        }
+
+        Self(acc.reduce())
+    }
 }
 
 impl PolynomialRingElement for TqElement {
@@ -237,3 +272,25 @@ impl Mul for TqElement {
         Self(arch::multiply(&self.0, &rhs.0))
     }
 }
+
+/// The precomputed asymmetric base-multiplication cache of a [`TqElement`]
+/// `g`: the 128 products `gamma_i * g_(2i+1)`.
+///
+/// The degree-0 half of a base-case product is `f_e * g_e + f_o * (gamma *
+/// g_o)`; the parenthesized factor depends only on `g`, so a polynomial reused
+/// across the components of a matrix-vector or dot product pays its 128
+/// Montgomery multiplications once instead of once per product.
+/// `crate::algebraic::vector::CachedTqVector` bundles caches with their
+/// polynomials so the two cannot be cross-wired.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TqMulCache([FieldElement; parameters::N / 2]);
+
+impl Default for TqMulCache {
+    fn default() -> Self {
+        Self([FieldElement::ZERO; parameters::N / 2])
+    }
+}
+
+// Secret-derived caches (of `s_hat`, of encryption randomness `y_hat`) scrub
+// as one bulk write, as the polynomial types do.
+impl DefaultIsZeroes for TqMulCache {}

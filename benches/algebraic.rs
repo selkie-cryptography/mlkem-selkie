@@ -4,8 +4,10 @@
 
 use divan::{Bencher, black_box};
 use mlkem_selkie::{
-    algebraic::{FieldElement, PolynomialRingElement, RqElement, TqElement},
-    parameters::Eta,
+    algebraic::{
+        CachedTqVector, FieldElement, PolynomialRingElement, RqElement, TqElement, TqVector,
+    },
+    parameters::{Eta, MLKEM768},
 };
 
 fn main() {
@@ -42,6 +44,24 @@ fn multiply(bencher: Bencher<'_, '_>) {
     let b = sample_poly().ntt();
 
     bencher.bench(|| black_box(a) * black_box(b));
+}
+
+/// Asymmetric base-multiplication cache of one NTT-domain polynomial.
+#[divan::bench]
+fn mul_cache(bencher: Bencher<'_, '_>) {
+    let g = sample_poly().ntt();
+
+    bencher.bench(|| black_box(&g).mul_cache());
+}
+
+/// Cached, accumulated dot product of two `K = 3` vectors (the hot inner
+/// product of encryption and decryption at ML-KEM-768).
+#[divan::bench]
+fn accumulated_dot(bencher: Bencher<'_, '_>) {
+    let f = TqVector::<MLKEM768>::from_fn(|_| sample_poly().ntt());
+    let g = CachedTqVector::from(TqVector::<MLKEM768>::from_fn(|_| sample_poly().ntt()));
+
+    bencher.bench(|| black_box(&f) * black_box(&g));
 }
 
 /// `SamplePolyCBD_eta` at the largest noise parameter (eta = 3).

@@ -1,11 +1,12 @@
 //! Architecture-dispatched polynomial kernels.
 //!
-//! Every backend exposes the same three kernels — [`ntt`], [`ntt_inverse`], and
-//! [`multiply`] — operating on the 256-coefficient array, so
-//! [`super::RqElement`] and [`super::TqElement`] stay architecture-agnostic.
-//! The active backend is chosen at compile time from the `mlkem_selkie_arch`
-//! cfg that `build.rs` emits; absent it, the portable scalar [`generic`]
-//! backend is used.
+//! Every backend exposes the same kernels — [`ntt`], [`ntt_inverse`],
+//! [`multiply`], and the asymmetric base-multiplication pair
+//! [`basemul_accumulate`] / [`basemul_reduce`] — operating on the
+//! 256-coefficient array, so [`super::RqElement`] and [`super::TqElement`] stay
+//! architecture-agnostic. The active backend is chosen at compile time from
+//! the `mlkem_selkie_arch` cfg that `build.rs` emits; absent it, the portable
+//! scalar [`generic`] backend is used.
 //!
 //! The shared zeta tables live here so every backend reads the same constants.
 //! [`ZETA_RAW`] holds the canonical values from FIPS 203 Appendix A;
@@ -22,11 +23,65 @@ mod generic;
 mod neon;
 
 #[cfg(mlkem_selkie_arch = "avx2")]
+use avx2::{basemul_accumulate, basemul_reduce};
+#[cfg(mlkem_selkie_arch = "avx2")]
 pub(crate) use avx2::{multiply, ntt, ntt_inverse};
+#[cfg(not(any(mlkem_selkie_arch = "neon", mlkem_selkie_arch = "avx2")))]
+use generic::{basemul_accumulate, basemul_reduce};
 #[cfg(not(any(mlkem_selkie_arch = "neon", mlkem_selkie_arch = "avx2")))]
 pub(crate) use generic::{multiply, ntt, ntt_inverse};
 #[cfg(mlkem_selkie_arch = "neon")]
+use neon::{basemul_accumulate, basemul_reduce};
+#[cfg(mlkem_selkie_arch = "neon")]
 pub(crate) use neon::{multiply, ntt, ntt_inverse};
+
+use crate::parameters;
+
+/// Widened `i32` sums of raw coefficient products, accumulated across the
+/// components of a base-multiplication dot product before a single Montgomery
+/// reduction per coefficient ([`Self::reduce`]).
+///
+/// Stored as separate even (degree-0) and odd (degree-1) planes — the layout
+/// the deinterleaving SIMD loads produce — rather than interleaved coefficient
+/// order.
+#[derive(Clone, Debug)]
+pub(crate) struct ProductAccumulator {
+    /// The degree-0 sums `sum_j (f_e * g_e + f_o * cache)` per pair.
+    even: [i32; 128],
+    /// The degree-1 sums `sum_j (f_e * g_o + f_o * g_e)` per pair.
+    odd: [i32; 128],
+}
+
+impl ProductAccumulator {
+    /// Accumulates one component of an asymmetric base-multiplication dot
+    /// product: raw `i32` products of `f` and `g` (with `cache` holding the
+    /// precomputed `gamma_i * g_(2i+1)` terms), no reduction. Dispatched to
+    /// the active backend.
+    pub(crate) fn accumulate(
+        &mut self,
+        f: &[FieldElement; parameters::N],
+        g: &[FieldElement; parameters::N],
+        cache: &[FieldElement; parameters::N / 2],
+    ) {
+        basemul_accumulate(self, f, g, cache);
+    }
+
+    /// Montgomery-reduces the accumulated sums to interleaved coefficients,
+    /// one reduction per coefficient, scaled by `R^-1` (Montgomery
+    /// convention). Dispatched to the active backend.
+    pub(crate) fn reduce(&self) -> [FieldElement; parameters::N] {
+        basemul_reduce(self)
+    }
+}
+
+impl Default for ProductAccumulator {
+    fn default() -> Self {
+        Self {
+            even: [0; 128],
+            odd: [0; 128],
+        }
+    }
+}
 
 /// The canonical values `ζ^BitRev7(i) mod q` for `i` in `{0, ..., 127}`,
 /// [FIPS 203 Appendix A].
@@ -50,7 +105,7 @@ pub(super) const ZETA_RAW: [u16; 128] = [
 /// `2^16`) pre-divides by 2 to compensate for the doubling in both
 /// instructions.
 pub(super) const ZETA_BARRETT: [i16; 128] = {
-    let q = crate::parameters::Q as i32;
+    let q = parameters::Q as i32;
     let mut table = [0i16; 128];
     let mut i = 0;
     while i < 128 {
@@ -69,7 +124,7 @@ pub(super) const ZETA_BARRETT: [i16; 128] = {
 /// modular reduction applied, matching BoringSSL).
 ///
 /// [FIPS 203 Appendix A]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#appendix.A
-const GAMMA_MONT: [FieldElement; 128] = FieldElement::montgomery_table([
+pub(super) const GAMMA_MONT: [FieldElement; 128] = FieldElement::montgomery_table([
     17, 3312, 2761, 568, 583, 2746, 2649, 680, 1637, 1692, 723, 2606, 2288, 1041, 1100, 2229, 1409,
     1920, 2662, 667, 3281, 48, 233, 3096, 756, 2573, 2156, 1173, 3015, 314, 3050, 279, 1703, 1626,
     1651, 1678, 2789, 540, 1789, 1540, 1847, 1482, 952, 2377, 1461, 1868, 2687, 642, 939, 2390,

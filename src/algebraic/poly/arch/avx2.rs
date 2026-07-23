@@ -16,10 +16,12 @@
 #![allow(unsafe_code)]
 
 use core::arch::x86_64::{
-    __m256i, _mm256_add_epi16, _mm256_loadu_si256, _mm256_mulhi_epi16, _mm256_mulhrs_epi16,
-    _mm256_mullo_epi16, _mm256_permute2x128_si256, _mm256_permute4x64_epi64, _mm256_set1_epi16,
-    _mm256_setr_epi8, _mm256_shuffle_epi8, _mm256_srai_epi16, _mm256_storeu_si256,
-    _mm256_sub_epi16,
+    __m256i, _mm256_add_epi16, _mm256_add_epi32, _mm256_loadu_si256, _mm256_mulhi_epi16,
+    _mm256_mulhrs_epi16, _mm256_mullo_epi16, _mm256_mullo_epi32, _mm256_packs_epi32,
+    _mm256_permute2x128_si256, _mm256_permute4x64_epi64, _mm256_set1_epi16, _mm256_set1_epi32,
+    _mm256_setr_epi8, _mm256_shuffle_epi8, _mm256_slli_epi32, _mm256_srai_epi16, _mm256_srai_epi32,
+    _mm256_storeu_si256, _mm256_sub_epi16, _mm256_sub_epi32, _mm256_unpackhi_epi16,
+    _mm256_unpacklo_epi16,
 };
 
 use crate::{algebraic::field::FieldElement, parameters};
@@ -187,6 +189,190 @@ pub(crate) fn multiply(
 
         h.assume_init()
     }
+}
+
+/// Widens two 16-lane `i16` products into eight-lane `i32` sums-of-products,
+/// low unpack half: `mullo`/`mulhi` recombined per lane.
+///
+/// [`_mm256_unpacklo_epi16`] interleaves within 128-bit lanes, so the result
+/// holds pairs `{0..3, 8..11}` of the block; [`widening_mul_hi`] holds
+/// `{4..7, 12..15}`. [`basemul_accumulate`] and [`basemul_reduce`] both use
+/// this split, so the accumulator plane layout is self-consistent.
+#[inline]
+fn widening_mul_lo(a: __m256i, b: __m256i) -> __m256i {
+    // SAFETY: the avx2 module compiles only with AVX2 enabled; every intrinsic
+    // below is total.
+    unsafe { _mm256_unpacklo_epi16(_mm256_mullo_epi16(a, b), _mm256_mulhi_epi16(a, b)) }
+}
+
+/// Widens two 16-lane `i16` products into eight-lane `i32` sums-of-products,
+/// high unpack half: pairs `{4..7, 12..15}` of the block.
+#[inline]
+fn widening_mul_hi(a: __m256i, b: __m256i) -> __m256i {
+    // SAFETY: the avx2 module compiles only with AVX2 enabled; every intrinsic
+    // below is total.
+    unsafe { _mm256_unpackhi_epi16(_mm256_mullo_epi16(a, b), _mm256_mulhi_epi16(a, b)) }
+}
+
+/// Montgomery-reduces eight `i32` lanes to `i16` values (in the low 16 bits of
+/// each `i32` lane): the vector form of `FieldElement::from_product_sum`.
+#[inline]
+fn montgomery_reduce_wide(a: __m256i) -> __m256i {
+    // SAFETY: the avx2 module compiles only with AVX2 enabled; every intrinsic
+    // below is total.
+    unsafe {
+        let q = _mm256_set1_epi32(Q as i32);
+        let qinv = _mm256_set1_epi32(QINV as i32);
+
+        // m = sign-extended low 16 bits of a * QINV.
+        let m = _mm256_mullo_epi32(a, qinv);
+        let m = _mm256_srai_epi32::<16>(_mm256_slli_epi32::<16>(m));
+
+        _mm256_srai_epi32::<16>(_mm256_sub_epi32(a, _mm256_mullo_epi32(m, q)))
+    }
+}
+
+/// Accumulates one component of an asymmetric base-multiplication dot product
+/// into `acc`: widening multiplies summed in `i32` lanes, no reduction.
+///
+/// Matches [`super::generic::basemul_accumulate`] mod q. The accumulator
+/// planes hold each 16-pair block in the unpack order
+/// `{0..3, 8..11, 4..7, 12..15}` (see [`widening_mul_lo`]); only
+/// [`basemul_reduce`] reads them back, with the matching order.
+pub(crate) fn basemul_accumulate(
+    acc: &mut super::ProductAccumulator,
+    f: &[FieldElement; parameters::N],
+    g: &[FieldElement; parameters::N],
+    cache: &[FieldElement; parameters::N / 2],
+) {
+    // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so `f`/`g`/
+    // `cache` reinterpret as `[i16]`. Each iteration reads 32-`i16` windows of
+    // `f`/`g` (8 windows tile 256), a 16-`i16` window of `cache`, and
+    // read-modify-writes two 8-`i32` windows of each 128-`i32` accumulator
+    // plane (pair and pair + 8, with pair + 16 <= 128), all in bounds.
+    // `loadu`/`storeu` are unaligned; the module is AVX2.
+    unsafe {
+        let f_ptr = f.as_ptr().cast::<i16>();
+        let g_ptr = g.as_ptr().cast::<i16>();
+        let cache_ptr = cache.as_ptr().cast::<i16>();
+        let even_ptr = acc.even.as_mut_ptr();
+        let odd_ptr = acc.odd.as_mut_ptr();
+
+        // As in `multiply`: gather the even `i16`s into the low half and odds
+        // into the high half of each 128-bit lane.
+        let deinterleave = _mm256_setr_epi8(
+            0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15, //
+            0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15,
+        );
+
+        let mut pair = 0;
+        while pair < 128 {
+            let f0 = _mm256_loadu_si256(f_ptr.add(2 * pair).cast::<__m256i>());
+            let f1 = _mm256_loadu_si256(f_ptr.add(2 * pair + 16).cast::<__m256i>());
+            let g0 = _mm256_loadu_si256(g_ptr.add(2 * pair).cast::<__m256i>());
+            let g1 = _mm256_loadu_si256(g_ptr.add(2 * pair + 16).cast::<__m256i>());
+
+            let f0d = _mm256_permute4x64_epi64::<0xD8>(_mm256_shuffle_epi8(f0, deinterleave));
+            let f1d = _mm256_permute4x64_epi64::<0xD8>(_mm256_shuffle_epi8(f1, deinterleave));
+            let g0d = _mm256_permute4x64_epi64::<0xD8>(_mm256_shuffle_epi8(g0, deinterleave));
+            let g1d = _mm256_permute4x64_epi64::<0xD8>(_mm256_shuffle_epi8(g1, deinterleave));
+
+            let a0 = _mm256_permute2x128_si256::<0x20>(f0d, f1d);
+            let a1 = _mm256_permute2x128_si256::<0x31>(f0d, f1d);
+            let b0 = _mm256_permute2x128_si256::<0x20>(g0d, g1d);
+            let b1 = _mm256_permute2x128_si256::<0x31>(g0d, g1d);
+
+            let c = _mm256_loadu_si256(cache_ptr.add(pair).cast::<__m256i>());
+
+            // even += a0*b0 + a1*cache, in i32 lanes.
+            let even_gain_lo = _mm256_add_epi32(widening_mul_lo(a0, b0), widening_mul_lo(a1, c));
+            let even_gain_hi = _mm256_add_epi32(widening_mul_hi(a0, b0), widening_mul_hi(a1, c));
+            let even_lo_ptr = even_ptr.add(pair).cast::<__m256i>();
+            let even_hi_ptr = even_ptr.add(pair + 8).cast::<__m256i>();
+            _mm256_storeu_si256(
+                even_lo_ptr,
+                _mm256_add_epi32(_mm256_loadu_si256(even_lo_ptr), even_gain_lo),
+            );
+            _mm256_storeu_si256(
+                even_hi_ptr,
+                _mm256_add_epi32(_mm256_loadu_si256(even_hi_ptr), even_gain_hi),
+            );
+
+            // odd += a0*b1 + a1*b0, in i32 lanes.
+            let odd_gain_lo = _mm256_add_epi32(widening_mul_lo(a0, b1), widening_mul_lo(a1, b0));
+            let odd_gain_hi = _mm256_add_epi32(widening_mul_hi(a0, b1), widening_mul_hi(a1, b0));
+            let odd_lo_ptr = odd_ptr.add(pair).cast::<__m256i>();
+            let odd_hi_ptr = odd_ptr.add(pair + 8).cast::<__m256i>();
+            _mm256_storeu_si256(
+                odd_lo_ptr,
+                _mm256_add_epi32(_mm256_loadu_si256(odd_lo_ptr), odd_gain_lo),
+            );
+            _mm256_storeu_si256(
+                odd_hi_ptr,
+                _mm256_add_epi32(_mm256_loadu_si256(odd_hi_ptr), odd_gain_hi),
+            );
+
+            pair += 16;
+        }
+    }
+}
+
+/// Montgomery-reduces the accumulated product sums to interleaved
+/// coefficients, sixteen pairs at a time.
+///
+/// Matches [`super::generic::basemul_reduce`] mod q. `packs_epi32` packs
+/// within 128-bit lanes, which exactly inverts the unpack order the
+/// accumulator planes were stored in (see [`basemul_accumulate`]); the packed
+/// values are Montgomery residues bounded well inside `i16`, so the
+/// saturation in `packs` never fires.
+pub(crate) fn basemul_reduce(acc: &super::ProductAccumulator) -> [FieldElement; parameters::N] {
+    let mut h = [FieldElement::ZERO; parameters::N];
+
+    // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so `h`
+    // reinterprets as `[i16]`. Each iteration reads two 8-`i32` windows of
+    // each 128-`i32` accumulator plane and writes a 32-`i16` window of `h`
+    // (8 windows tile 256), all in bounds. `loadu`/`storeu` are unaligned; the
+    // module is AVX2.
+    unsafe {
+        let even_ptr = acc.even.as_ptr();
+        let odd_ptr = acc.odd.as_ptr();
+        let h_ptr = h.as_mut_ptr().cast::<i16>();
+
+        // As in `multiply`: re-interleave even (c0) and odd (c1) coefficients.
+        let interleave = _mm256_setr_epi8(
+            0, 1, 8, 9, 2, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15, //
+            0, 1, 8, 9, 2, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15,
+        );
+
+        let mut pair = 0;
+        while pair < 128 {
+            let even_lo =
+                montgomery_reduce_wide(_mm256_loadu_si256(even_ptr.add(pair).cast::<__m256i>()));
+            let even_hi = montgomery_reduce_wide(_mm256_loadu_si256(
+                even_ptr.add(pair + 8).cast::<__m256i>(),
+            ));
+            let odd_lo =
+                montgomery_reduce_wide(_mm256_loadu_si256(odd_ptr.add(pair).cast::<__m256i>()));
+            let odd_hi =
+                montgomery_reduce_wide(_mm256_loadu_si256(odd_ptr.add(pair + 8).cast::<__m256i>()));
+
+            // Pack the i32 residues back to the 16-pair `i16` block order.
+            let c0 = _mm256_packs_epi32(even_lo, even_hi);
+            let c1 = _mm256_packs_epi32(odd_lo, odd_hi);
+
+            let lo = _mm256_permute2x128_si256::<0x20>(c0, c1);
+            let hi = _mm256_permute2x128_si256::<0x31>(c0, c1);
+            let h0 = _mm256_shuffle_epi8(_mm256_permute4x64_epi64::<0xD8>(lo), interleave);
+            let h1 = _mm256_shuffle_epi8(_mm256_permute4x64_epi64::<0xD8>(hi), interleave);
+
+            _mm256_storeu_si256(h_ptr.add(2 * pair).cast::<__m256i>(), h0);
+            _mm256_storeu_si256(h_ptr.add(2 * pair + 16).cast::<__m256i>(), h1);
+
+            pair += 16;
+        }
+    }
+
+    h
 }
 
 /// Forward NTT in place, then Barrett-reduce. Vectorizes the stride-≥16

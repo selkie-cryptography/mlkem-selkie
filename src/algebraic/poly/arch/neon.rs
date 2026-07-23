@@ -17,9 +17,10 @@
 
 use core::arch::aarch64::{
     int16x4_t, int16x8_t, int16x8x2_t, int32x4_t, vaddq_s16, vcombine_s16, vdup_n_s16, vdupq_n_s16,
-    vdupq_n_s32, vget_low_s16, vld1q_s16, vld2q_s16, vmlaq_n_s32, vmlsq_s16, vmovl_high_s16,
-    vmovl_s16, vmovn_s32, vmul_s16, vmull_high_s16, vmull_s16, vmulq_n_s32, vmulq_s16,
-    vqrdmulhq_s16, vshrn_n_s32, vshrq_n_s32, vst1q_s16, vst2q_s16, vsubq_s16, vsubq_s32,
+    vdupq_n_s32, vget_low_s16, vld1q_s16, vld1q_s32, vld2q_s16, vmlal_high_s16, vmlal_s16,
+    vmlaq_n_s32, vmlsq_s16, vmovl_high_s16, vmovl_s16, vmovn_s32, vmul_s16, vmull_high_s16,
+    vmull_s16, vmulq_n_s32, vmulq_s16, vqrdmulhq_s16, vshrn_n_s32, vshrq_n_s32, vst1q_s16,
+    vst1q_s32, vst2q_s16, vsubq_s16, vsubq_s32,
 };
 
 use crate::{algebraic::field::FieldElement, parameters};
@@ -371,6 +372,103 @@ pub(crate) fn multiply(
 
         h.assume_init()
     }
+}
+
+/// Accumulates one component of an asymmetric base-multiplication dot product
+/// into `acc`: widening multiply-accumulates, no reduction.
+///
+/// Matches [`super::generic::basemul_accumulate`].
+pub(crate) fn basemul_accumulate(
+    acc: &mut super::ProductAccumulator,
+    f: &[FieldElement; parameters::N],
+    g: &[FieldElement; parameters::N],
+    cache: &[FieldElement; parameters::N / 2],
+) {
+    // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so `f`/`g`/
+    // `cache` reinterpret as `[i16]`. Each iteration reads 16-`i16` windows of
+    // `f`/`g` (16 windows tile 256), an 8-`i16` window of `cache`, and
+    // read-modify-writes two 4-`i32` windows of each 128-`i32` accumulator
+    // plane (pair and pair + 4, with pair + 8 <= 128), all in bounds.
+    // `vld1q`/`vld2q`/`vst1q` are unaligned. NEON is baseline on aarch64.
+    unsafe {
+        let f_ptr = f.as_ptr().cast::<i16>();
+        let g_ptr = g.as_ptr().cast::<i16>();
+        let cache_ptr = cache.as_ptr().cast::<i16>();
+        let even_ptr = acc.even.as_mut_ptr();
+        let odd_ptr = acc.odd.as_mut_ptr();
+
+        let mut pair = 0;
+        while pair < 128 {
+            let f_de = vld2q_s16(f_ptr.add(2 * pair));
+            let g_de = vld2q_s16(g_ptr.add(2 * pair));
+            let c = vld1q_s16(cache_ptr.add(pair));
+
+            let (f0, f1) = (f_de.0, f_de.1);
+            let (g0, g1) = (g_de.0, g_de.1);
+
+            // even += f0*g0 + f1*cache, in i32 lanes.
+            let mut even_lo = vld1q_s32(even_ptr.add(pair));
+            let mut even_hi = vld1q_s32(even_ptr.add(pair + 4));
+            even_lo = vmlal_s16(even_lo, vget_low_s16(f0), vget_low_s16(g0));
+            even_hi = vmlal_high_s16(even_hi, f0, g0);
+            even_lo = vmlal_s16(even_lo, vget_low_s16(f1), vget_low_s16(c));
+            even_hi = vmlal_high_s16(even_hi, f1, c);
+            vst1q_s32(even_ptr.add(pair), even_lo);
+            vst1q_s32(even_ptr.add(pair + 4), even_hi);
+
+            // odd += f0*g1 + f1*g0, in i32 lanes.
+            let mut odd_lo = vld1q_s32(odd_ptr.add(pair));
+            let mut odd_hi = vld1q_s32(odd_ptr.add(pair + 4));
+            odd_lo = vmlal_s16(odd_lo, vget_low_s16(f0), vget_low_s16(g1));
+            odd_hi = vmlal_high_s16(odd_hi, f0, g1);
+            odd_lo = vmlal_s16(odd_lo, vget_low_s16(f1), vget_low_s16(g0));
+            odd_hi = vmlal_high_s16(odd_hi, f1, g0);
+            vst1q_s32(odd_ptr.add(pair), odd_lo);
+            vst1q_s32(odd_ptr.add(pair + 4), odd_hi);
+
+            pair += 8;
+        }
+    }
+}
+
+/// Montgomery-reduces the accumulated product sums to interleaved
+/// coefficients, eight pairs at a time.
+///
+/// Matches [`super::generic::basemul_reduce`].
+pub(crate) fn basemul_reduce(acc: &super::ProductAccumulator) -> [FieldElement; parameters::N] {
+    let mut h = [FieldElement::ZERO; parameters::N];
+
+    // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so `h`
+    // reinterprets as `[i16]`. Each iteration reads two 4-`i32` windows of
+    // each 128-`i32` accumulator plane and writes a 16-`i16` window of `h`
+    // (16 windows tile 256), all in bounds. `vld1q`/`vst2q` are unaligned.
+    // NEON is baseline on aarch64.
+    unsafe {
+        let even_ptr = acc.even.as_ptr();
+        let odd_ptr = acc.odd.as_ptr();
+        let h_ptr = h.as_mut_ptr().cast::<i16>();
+
+        let q = vdup_n_s16(Q);
+        let qinv = vdup_n_s16(QINV);
+
+        let mut pair = 0;
+        while pair < 128 {
+            let c0 = vcombine_s16(
+                montgomery_reduce(vld1q_s32(even_ptr.add(pair)), q, qinv),
+                montgomery_reduce(vld1q_s32(even_ptr.add(pair + 4)), q, qinv),
+            );
+            let c1 = vcombine_s16(
+                montgomery_reduce(vld1q_s32(odd_ptr.add(pair)), q, qinv),
+                montgomery_reduce(vld1q_s32(odd_ptr.add(pair + 4)), q, qinv),
+            );
+
+            vst2q_s16(h_ptr.add(2 * pair), int16x8x2_t(c0, c1));
+
+            pair += 8;
+        }
+    }
+
+    h
 }
 
 /// Forward NTT in place, then Barrett-reduce. Vectorizes the stride-≥8

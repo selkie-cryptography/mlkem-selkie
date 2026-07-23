@@ -18,5 +18,5 @@ mod vector;
 
 pub use field::FieldElement;
 pub use matrix::TqMatrix;
-pub use poly::{PolynomialRingElement, RqElement, TqElement};
-pub use vector::{RqVector, TqVector};
+pub use poly::{PolynomialRingElement, RqElement, TqElement, TqMulCache};
+pub use vector::{CachedTqVector, RqVector, TqVector};

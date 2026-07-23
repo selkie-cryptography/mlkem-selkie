@@ -16,7 +16,7 @@
 //! unused in any single build.
 #![allow(dead_code)]
 
-use super::{GAMMA_MONT, ZETA_BARRETT, ZETA_RAW};
+use super::{GAMMA_MONT, ProductAccumulator, ZETA_BARRETT, ZETA_RAW};
 use crate::{algebraic::field::FieldElement, parameters};
 
 /// The loop strides taken by the NTT (and NTT⁻¹) butterfly stages, in [NTT]
@@ -124,6 +124,48 @@ pub(crate) fn multiply(
 
         h[even] = (f[even] * g[even]) + (f[odd] * g[odd] * gamma);
         h[odd] = (f[even] * g[odd]) + (f[odd] * g[even]);
+    }
+
+    h
+}
+
+/// Accumulates one component of an asymmetric base-multiplication dot product
+/// into `acc`: raw `i32` products, no reduction.
+///
+/// Per pair, the degree-0 plane gains `f_e * g_e + f_o * cache_i` and the
+/// degree-1 plane `f_e * g_o + f_o * g_e`, where `cache` holds the
+/// precomputed `gamma_i * g_(2i+1)` products. [`basemul_reduce`] later
+/// performs the single Montgomery reduction per coefficient; the deferred sum
+/// matches per-component reduction mod q.
+// reason: indices 2i+1 and i are provably in bounds for i in 0..128, and the
+// pairwise indexing matches `multiply`.
+#[allow(clippy::indexing_slicing, clippy::needless_range_loop)]
+pub(crate) fn basemul_accumulate(
+    acc: &mut ProductAccumulator,
+    f: &[FieldElement; parameters::N],
+    g: &[FieldElement; parameters::N],
+    cache: &[FieldElement; parameters::N / 2],
+) {
+    for i in 0..128 {
+        let (even, odd) = (2 * i, 2 * i + 1);
+
+        acc.even[i] += f[even].widening_mul(g[even]) + f[odd].widening_mul(cache[i]);
+        acc.odd[i] += f[even].widening_mul(g[odd]) + f[odd].widening_mul(g[even]);
+    }
+}
+
+/// Montgomery-reduces the accumulated product sums to interleaved
+/// coefficients, one reduction per coefficient. The result is scaled by
+/// `R^-1` (Montgomery convention), as [`multiply`]'s is.
+// reason: indices 2i+1 and i are provably in bounds for i in 0..128, and the
+// pairwise indexing matches `multiply`.
+#[allow(clippy::indexing_slicing, clippy::needless_range_loop)]
+pub(crate) fn basemul_reduce(acc: &ProductAccumulator) -> [FieldElement; parameters::N] {
+    let mut h = [FieldElement::ZERO; parameters::N];
+
+    for i in 0..128 {
+        h[2 * i] = FieldElement::from_product_sum(acc.even[i]);
+        h[2 * i + 1] = FieldElement::from_product_sum(acc.odd[i]);
     }
 
     h

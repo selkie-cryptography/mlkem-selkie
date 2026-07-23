@@ -155,6 +155,30 @@ impl FieldElement {
         ((a - (m as i32) * (Q as i32)) >> 16) as i16
     }
 
+    /// Returns the raw `i32` product of the two stored representatives, for
+    /// accumulated base multiplication: summing these and reducing once via
+    /// [`Self::from_product_sum`] matches summing per-product Montgomery
+    /// reductions mod q, with `k - 1` fewer reductions.
+    #[inline]
+    #[must_use]
+    pub(super) const fn widening_mul(self, rhs: Self) -> i32 {
+        self.0 as i32 * rhs.0 as i32
+    }
+
+    /// Montgomery-reduces a sum of raw products from [`Self::widening_mul`],
+    /// yielding `sum * R^-1 mod q`.
+    ///
+    /// The reduction is exact mod q for any `i32` input. The output
+    /// representative is bounded by `|sum| / 2^16 + q/2`; the base
+    /// multiplication call sites keep `|sum| <= 12 * q^2` (`K = 4` components,
+    /// coefficients bounded by `3q/2`), so the result stays within `+-1.2q`,
+    /// inside the entry bounds of the inverse NTT, `to_montgomery`, and the
+    /// canonicalizing Barrett in [`Self::value`].
+    #[inline]
+    pub(super) const fn from_product_sum(sum: i32) -> Self {
+        Self(Self::montgomery_reduce(sum))
+    }
+
     /// Multiplies by a canonical zeta constant `b` using precomputed Barrett
     /// multiplier `b_bar = round(b · 2^15 / q)`. Scalar analog of the NTT
     /// butterfly path in the SIMD backends (NEON's `vqrdmulhq_s16`, AVX2's

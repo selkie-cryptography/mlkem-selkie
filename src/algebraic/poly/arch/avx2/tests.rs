@@ -2,10 +2,15 @@
 //! backend on random canonical inputs. These run only on an AVX2-capable
 //! x86_64 target (CI), so the host that authored them (aarch64) cannot.
 
+use core::array;
+
 use proptest::prelude::*;
 
 use crate::{
-    algebraic::{field::FieldElement, poly::arch::generic},
+    algebraic::{
+        field::FieldElement,
+        poly::arch::{GAMMA_MONT, ProductAccumulator, generic},
+    },
     parameters,
 };
 
@@ -53,6 +58,30 @@ fn inverse_contract_poly() -> impl Strategy<Value = [FieldElement; parameters::N
 /// backends to the same reduction schedule, not just congruent outputs.
 fn representatives(poly: &[FieldElement; parameters::N]) -> [i16; parameters::N] {
     poly.map(FieldElement::representative)
+}
+
+/// A [`FieldElement; 256`] strategy over representatives bounded by `3q/2`,
+/// the accumulated base-multiplication input domain (see
+/// `FieldElement::from_product_sum`); unbounded `i16` inputs would overflow
+/// the `i32` accumulator at dot length 4.
+fn accumulation_poly() -> impl Strategy<Value = [FieldElement; parameters::N]> {
+    let bound = 3 * parameters::Q as i16 / 2;
+    prop::collection::vec(-bound..=bound, parameters::N).prop_map(|values| {
+        let mut poly = [FieldElement::ZERO; parameters::N];
+        for (out, &v) in poly.iter_mut().zip(values.iter()) {
+            *out = FieldElement::from_montgomery_table(v);
+        }
+        poly
+    })
+}
+
+/// The asymmetric base-multiplication cache of `g`, computed with scalar field
+/// arithmetic (the shared scalar path both backends consume).
+// reason: indices 2i+1 and i are provably in bounds for i in 0..128, and the
+// pairwise indexing matches `multiply`.
+#[allow(clippy::indexing_slicing)]
+fn mul_cache(g: &[FieldElement; parameters::N]) -> [FieldElement; parameters::N / 2] {
+    array::from_fn(|i| g[2 * i + 1] * GAMMA_MONT[i])
 }
 
 proptest! {
@@ -109,6 +138,33 @@ proptest! {
         generic::ntt_inverse(&mut scalar);
 
         prop_assert_eq!(representatives(&vectorized), representatives(&scalar));
+    }
+
+    /// The `basemul_accumulate` / `basemul_reduce` pair matches the scalar
+    /// backend at every dot-product length the parameter sets use.
+    // reason: j < k <= 4 indexes the length-4 strategy vectors; the loop
+    // structure mirrors the dot product it tests.
+    #[allow(clippy::indexing_slicing)]
+    #[test]
+    fn basemul_accumulate_reduce_matches_generic(
+        f in prop::collection::vec(accumulation_poly(), 4),
+        g in prop::collection::vec(accumulation_poly(), 4),
+    ) {
+        for k in 1..=4 {
+            let mut vectorized = ProductAccumulator::default();
+            let mut scalar = ProductAccumulator::default();
+
+            for j in 0..k {
+                let cache = mul_cache(&g[j]);
+                super::basemul_accumulate(&mut vectorized, &f[j], &g[j], &cache);
+                generic::basemul_accumulate(&mut scalar, &f[j], &g[j], &cache);
+            }
+
+            prop_assert_eq!(
+                representatives(&super::basemul_reduce(&vectorized)),
+                representatives(&generic::basemul_reduce(&scalar)),
+            );
+        }
     }
 }
 

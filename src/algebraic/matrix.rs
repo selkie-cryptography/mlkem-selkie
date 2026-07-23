@@ -2,7 +2,10 @@
 
 use core::ops::{Index, Mul};
 
-use crate::{algebraic::vector::TqVector, parameters::ParameterSet};
+use crate::{
+    algebraic::vector::{CachedTqVector, TqVector},
+    parameters::ParameterSet,
+};
 
 #[cfg(test)]
 mod tests;
@@ -55,6 +58,17 @@ impl<P: ParameterSet> Mul<&TqVector<P>> for &TqMatrix<P> {
     ///
     /// [section 2.4.7]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsubsection.2.4.7
     fn mul(self, rhs: &TqVector<P>) -> TqVector<P> {
+        TqVector::from_fn(|i| &self[i] * rhs)
+    }
+}
+
+impl<P: ParameterSet> Mul<&CachedTqVector<P>> for &TqMatrix<P> {
+    type Output = TqVector<P>;
+
+    /// Multiplies this matrix by a cached column vector: each row's dot
+    /// product reuses the column's per-component caches by accumulated base
+    /// multiplication.
+    fn mul(self, rhs: &CachedTqVector<P>) -> TqVector<P> {
         TqVector::from_fn(|i| &self[i] * rhs)
     }
 }

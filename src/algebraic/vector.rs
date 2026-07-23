@@ -8,7 +8,7 @@ use core::ops::{Add, Index, Mul};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{
-    algebraic::poly::{PolynomialRingElement, RqElement, TqElement},
+    algebraic::poly::{PolynomialRingElement, RqElement, TqElement, TqMulCache},
     parameters::ParameterSet,
 };
 
@@ -125,5 +125,50 @@ impl<P: ParameterSet> Index<usize> for TqVector<P> {
     #[allow(clippy::indexing_slicing)]
     fn index(&self, index: usize) -> &TqElement {
         &self.polys.as_ref()[index]
+    }
+}
+
+/// A [`TqVector`] bundled with each component's asymmetric
+/// base-multiplication [`TqMulCache`], index-aligned.
+///
+/// The bundling keeps a cache from being paired with any polynomial other
+/// than the one it was computed from. Built once for the operand a
+/// matrix-vector or dot product reuses across components: the secret `s_hat`
+/// (cached in the decryption key) and the encryption randomness `y_hat`.
+///
+/// `ZeroizeOnDrop` for the same reason as `TqVector`; the caches are derived
+/// from the same secrets.
+#[derive(Clone, Debug, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
+pub struct CachedTqVector<P: ParameterSet> {
+    /// The component polynomials.
+    vector: TqVector<P>,
+    /// Each component's cache, index-aligned with `vector`.
+    caches: P::KArray<TqMulCache>,
+}
+
+impl<P: ParameterSet> CachedTqVector<P> {
+    /// Returns the underlying vector.
+    pub fn vector(&self) -> &TqVector<P> {
+        &self.vector
+    }
+}
+
+impl<P: ParameterSet> From<TqVector<P>> for CachedTqVector<P> {
+    fn from(vector: TqVector<P>) -> Self {
+        let caches = P::k_array_from_fn(|i| vector[i].mul_cache());
+
+        Self { vector, caches }
+    }
+}
+
+impl<P: ParameterSet> Mul<&CachedTqVector<P>> for &TqVector<P> {
+    type Output = TqElement;
+
+    /// Computes the dot product `self^T . rhs` by accumulated base
+    /// multiplication: the `P::K` components' raw products are summed and
+    /// Montgomery-reduced once per coefficient, against per-component
+    /// reduction in the uncached [`Mul`].
+    fn mul(self, rhs: &CachedTqVector<P>) -> TqElement {
+        TqElement::accumulated_dot(self.as_slice(), rhs.vector.as_slice(), rhs.caches.as_ref())
     }
 }

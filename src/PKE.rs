@@ -12,7 +12,9 @@
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{
-    algebraic::{PolynomialRingElement, RqElement, RqVector, TqElement, TqMatrix, TqVector},
+    algebraic::{
+        CachedTqVector, PolynomialRingElement, RqElement, RqVector, TqElement, TqMatrix, TqVector,
+    },
     functions::{G, PRF, shake256_x4},
     parameters::{Eta, ParameterSet},
 };
@@ -102,7 +104,9 @@ impl<P: ParameterSet> EncryptionKey<P> {
         let e1 = RqVector::<P>::sample_cbd(P::ETA_2, randomness, &mut n);
         let e2 = RqElement::sample_cbd(P::ETA_2, &PRF(P::ETA_2, randomness, n));
 
-        let y_hat = y.ntt();
+        // `y_hat` is the reused operand of both products below; cache its
+        // base-multiplication terms once.
+        let y_hat = CachedTqVector::from(y.ntt());
 
         // u = NTT⁻¹(A^T . y_hat) + e1, using the `A^T` cached at key construction.
         let u = (&self.a_hat_transpose * &y_hat).ntt_inverse() + e1;
@@ -123,19 +127,22 @@ impl<P: ParameterSet> EncryptionKey<P> {
 }
 
 /// A K-PKE decryption key: the NTT-domain secret vector `s_hat` (section 5 of
-/// FIPS 203).
+/// FIPS 203), with its base-multiplication caches.
+///
+/// `s_hat` is the reused operand of every `decrypt`'s dot product, so its
+/// caches are computed once per key rather than per decryption.
 // No `PartialEq`/`Eq`: this is secret key material.
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct DecryptionKey<P: ParameterSet> {
-    /// `s_hat = NTT(s)`, the secret vector in Tq.
-    s_hat: TqVector<P>,
+    /// `s_hat = NTT(s)`, the secret vector in Tq, with its caches.
+    s_hat: CachedTqVector<P>,
 }
 
 impl<P: ParameterSet> DecryptionKey<P> {
     /// Returns an iterator over the decryption key's serialized bytes,
     /// `ByteEncode_12(s_hat)`, yielded lazily.
     pub(crate) fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
-        self.s_hat.byte_encode()
+        self.s_hat.vector().byte_encode()
     }
 
     /// Parses a decryption key from `384 * K` bytes.
@@ -147,7 +154,7 @@ impl<P: ParameterSet> DecryptionKey<P> {
         debug_assert_eq!(bytes.len(), P::PKE_DECRYPTION_KEY_SIZE);
 
         Self {
-            s_hat: TqVector::<P>::byte_decode(bytes),
+            s_hat: CachedTqVector::from(TqVector::<P>::byte_decode(bytes)),
         }
     }
 
@@ -165,8 +172,8 @@ impl<P: ParameterSet> DecryptionKey<P> {
         let u = RqVector::<P>::decode_decompress(c1, P::D_U);
         let v = RqElement::decode_decompress(c2, P::D_V);
 
-        // w = v - NTT⁻¹(s_hat^T . NTT(u))
-        let w = v - (&self.s_hat * &u.ntt()).ntt_inverse();
+        // w = v - NTT⁻¹(s_hat^T . NTT(u)), reusing the caches of s_hat.
+        let w = v - (&u.ntt() * &self.s_hat).ntt_inverse();
 
         w.compress_message()
     }
@@ -242,7 +249,9 @@ impl<P: ParameterSet> KeyPair<P> {
         // sigma is no longer needed after CBD sampling.
         sigma.zeroize();
 
-        let s_hat = s.ntt();
+        // `s_hat` is reused by every row of `A . s_hat` and then by every
+        // `decrypt` under this key; cache its base-multiplication terms once.
+        let s_hat = CachedTqVector::from(s.ntt());
         let e_hat = e.ntt();
 
         // t_hat = A . s_hat + e_hat. The matrix-vector base multiplication leaves

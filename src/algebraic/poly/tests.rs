@@ -36,7 +36,7 @@ fn bit_rev_7_known_values() {
 /// [`TqElement::to_montgomery`]).
 #[test]
 fn ntt_round_trip_scales_by_montgomery_r() {
-    let coeffs = core::array::from_fn(|i| FieldElement::new((7 * i as u16 + 1) % parameters::Q));
+    let coeffs = array::from_fn(|i| FieldElement::new((7 * i as u16 + 1) % parameters::Q));
     let f = RqElement::new(coeffs);
 
     let expected = RqElement::new(coeffs.map(FieldElement::to_montgomery));
@@ -48,14 +48,59 @@ fn ntt_round_trip_scales_by_montgomery_r() {
 /// `X^256 + 1`.
 #[test]
 fn ntt_multiplication_matches_schoolbook() {
-    let f_coeffs = core::array::from_fn(|i| FieldElement::new((i as u16) % parameters::Q));
-    let g_coeffs = core::array::from_fn(|i| FieldElement::new((2 * i as u16 + 3) % parameters::Q));
+    let f_coeffs = array::from_fn(|i| FieldElement::new((i as u16) % parameters::Q));
+    let g_coeffs = array::from_fn(|i| FieldElement::new((2 * i as u16 + 3) % parameters::Q));
     let f = RqElement::new(f_coeffs);
     let g = RqElement::new(g_coeffs);
 
     let via_ntt = (f.ntt() * g.ntt()).ntt_inverse();
 
     assert_eq!(via_ntt, schoolbook_multiply(f, g));
+}
+
+/// [`TqElement::mul_cache`] holds `gamma_i * g_(2i+1)` per pair.
+#[test]
+fn mul_cache_matches_definition() {
+    let g = TqElement::new(array::from_fn(|i| {
+        FieldElement::new((5 * i as u16 + 2) % parameters::Q)
+    }));
+
+    let cache = g.mul_cache();
+
+    for (i, (entry, &gamma)) in cache.0.iter().zip(arch::GAMMA_MONT.iter()).enumerate() {
+        assert_eq!(entry.value(), (g[2 * i + 1] * gamma).value());
+    }
+}
+
+/// [`TqElement::accumulated_dot`] agrees with the sum of per-component
+/// products at every dot-product length the parameter sets use.
+// reason: j < k <= 4 indexes the length-4 component arrays; the loop
+// structure mirrors the dot product it tests.
+#[allow(clippy::indexing_slicing)]
+#[test]
+fn accumulated_dot_matches_componentwise_sum() {
+    let f: [TqElement; 4] = array::from_fn(|j| {
+        TqElement::new(array::from_fn(|i| {
+            FieldElement::new((3 * i as u16 + 7 * j as u16 + 1) % parameters::Q)
+        }))
+    });
+    let g: [TqElement; 4] = array::from_fn(|j| {
+        TqElement::new(array::from_fn(|i| {
+            FieldElement::new((11 * i as u16 + 13 * j as u16 + 5) % parameters::Q)
+        }))
+    });
+    let caches = g.map(|g_j| g_j.mul_cache());
+
+    for k in 1..=4 {
+        let accumulated = TqElement::accumulated_dot(&f[..k], &g[..k], &caches[..k]);
+
+        let mut componentwise = TqElement::ZERO;
+        for j in 0..k {
+            componentwise += f[j] * g[j];
+        }
+
+        assert_eq!(accumulated, componentwise, "dot length {k}");
+    }
 }
 
 /// Reference multiplication in `Zq[X] / (X^256 + 1)`, computed in the canonical
