@@ -308,6 +308,16 @@ unsafe fn ntt_stride128_asm(ptr: *mut i16, zeta: i16, zeta_bar: i16) {
     );
 }
 
+/// One Cooley-Tukey butterfly over eight lanes: returns `(a + t, a - t)` for
+/// `t = b * zeta`, with the zeta given as its `(raw, Barrett)` broadcast pair.
+#[inline]
+fn butterfly(a: int16x8_t, b: int16x8_t, zeta: (int16x8_t, int16x8_t)) -> (int16x8_t, int16x8_t) {
+    let t = barrett_const_mul(b, zeta.0, zeta.1);
+
+    // SAFETY: NEON is baseline on aarch64; both intrinsics are total.
+    unsafe { (vaddq_s16(a, t), vsubq_s16(a, t)) }
+}
+
 /// Barrett-reduces eight `i16` lanes to a representative in `(-q/2, q/2]`: the
 /// vector form of `FieldElement::reduce`.
 #[inline]
@@ -481,77 +491,128 @@ pub(crate) fn basemul_reduce(acc: &super::ProductAccumulator) -> [FieldElement; 
     h
 }
 
-/// Forward NTT in place, then Barrett-reduce. Vectorizes the stride-≥8
-/// butterfly stages (eight butterflies per vector under one broadcast zeta);
-/// the stride-4 and stride-2 stages and the final reduction run scalar.
+/// Forward NTT in place, then Barrett-reduce. The stride-128/64 stages run
+/// as software-pipelined `asm!` blocks on Apple targets and as a merged
+/// two-stage, four-vector register trip elsewhere; both paths then take a
+/// merged stride-32/16/8 trip (eight vectors held through three butterfly
+/// levels, one memory round-trip instead of three). The stride-4 and
+/// stride-2 stages and the final reduction run scalar.
 ///
-/// Matches [`super::generic::ntt`].
+/// Matches [`super::generic::ntt`]: the merged trips compute the same
+/// butterflies as the stage-at-a-time loop, grouped by data slice instead of
+/// stage, and butterflies within a stage are independent.
 // reason: scalar-tail butterfly/zeta indices are provably in 0..256, as in the
 // generic backend.
 #[allow(clippy::indexing_slicing)]
 pub(crate) fn ntt(coefficients: &mut [FieldElement; parameters::N]) {
-    let mut k = 1;
-
     // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so the array
-    // reinterprets as `[i16]`. Each vector window `[j, j + 8)` and
-    // `[j + len, j + len + 8)` stays within the 256-element array (the loops
-    // bound `j + len + 8 <= start + 2*len <= 256`), and `k < 32 < 128` indexes
-    // `ZETA_RAW` / `ZETA_BARRETT`. `vld1q`/`vst1q` are unaligned. NEON is
-    // baseline on aarch64.
+    // reinterprets as `[i16]`. The head trip reads/writes vectors
+    // `8 * (i + 8b)` for `i < 8`, `b < 4`; the quarter trip vectors
+    // `8 * (8q + w)` for `q < 4`, `w < 8` (each tiles the 32 vector windows
+    // of 256 coefficients once). Zeta indices stay below 32.
+    // `vld1q`/`vst1q` are unaligned. NEON is baseline on aarch64.
     unsafe {
         let ptr = coefficients.as_mut_ptr().cast::<i16>();
         let zeta_raw_ptr = super::ZETA_RAW.as_ptr().cast::<i16>();
         let zeta_bar_ptr = super::ZETA_BARRETT.as_ptr();
+        let zeta = |k: usize| {
+            (
+                vdupq_n_s16(*zeta_raw_ptr.add(k)),
+                vdupq_n_s16(*zeta_bar_ptr.add(k)),
+            )
+        };
 
-        // Stride-128/64 stages, Apple targets only: one zeta pair spans a
-        // whole butterfly group, so each stage runs from a single
+        // Stride-128/64 stages, Apple targets: one zeta pair spans a whole
+        // butterfly group, so each stage runs from a single
         // software-pipelined `asm!` block (stride-64 is two independent
-        // groups, one per outer start position). Other aarch64 cores take
-        // these stages through the intrinsics loop below instead — the
-        // schedule regresses on narrower NEON pipes.
+        // groups, one per outer start position). The schedule regresses on
+        // narrower NEON pipes, which take the merged trip below instead.
         #[cfg(mlkem_selkie_neon_asm)]
         {
-            ntt_stride128_asm(ptr, *zeta_raw_ptr.add(k), *zeta_bar_ptr.add(k));
-            k += 1;
+            ntt_stride128_asm(ptr, *zeta_raw_ptr.add(1), *zeta_bar_ptr.add(1));
 
-            ntt_stride64_group_asm(ptr, *zeta_raw_ptr.add(k), *zeta_bar_ptr.add(k));
-            k += 1;
-            ntt_stride64_group_asm(ptr.add(128), *zeta_raw_ptr.add(k), *zeta_bar_ptr.add(k));
-            k += 1;
+            ntt_stride64_group_asm(ptr, *zeta_raw_ptr.add(2), *zeta_bar_ptr.add(2));
+            ntt_stride64_group_asm(ptr.add(128), *zeta_raw_ptr.add(3), *zeta_bar_ptr.add(3));
         }
 
-        /// The strides the intrinsics loop covers: everything the `asm!`
-        /// stages above did not already handle.
-        #[cfg(mlkem_selkie_neon_asm)]
-        const VECTOR_STRIDES: &[usize] = &[32, 16, 8];
+        // Stride-128/64 stages, other aarch64: a merged two-stage trip
+        // holding four vectors (one per 64-coefficient block, at the same
+        // offset) through both butterfly levels.
         #[cfg(not(mlkem_selkie_neon_asm))]
-        const VECTOR_STRIDES: &[usize] = &[128, 64, 32, 16, 8];
+        {
+            let z1 = zeta(1);
+            let (z2, z3) = (zeta(2), zeta(3));
 
-        for &len in VECTOR_STRIDES {
-            let mut start = 0;
-            while start < 256 {
-                let zeta = vdupq_n_s16(*zeta_raw_ptr.add(k));
-                let zeta_bar = vdupq_n_s16(*zeta_bar_ptr.add(k));
-                k += 1;
+            for i in 0..8 {
+                let at = |block: usize| ptr.add(8 * (i + 8 * block));
+                let mut v0 = vld1q_s16(at(0));
+                let mut v1 = vld1q_s16(at(1));
+                let mut v2 = vld1q_s16(at(2));
+                let mut v3 = vld1q_s16(at(3));
 
-                let mut j = start;
-                while j < start + len {
-                    let vj = vld1q_s16(ptr.add(j));
-                    let vjl = vld1q_s16(ptr.add(j + len));
-                    let t = barrett_const_mul(vjl, zeta, zeta_bar);
+                // Stride 128: halves, one zeta.
+                (v0, v2) = butterfly(v0, v2, z1);
+                (v1, v3) = butterfly(v1, v3, z1);
 
-                    vst1q_s16(ptr.add(j + len), vsubq_s16(vj, t));
-                    vst1q_s16(ptr.add(j), vaddq_s16(vj, t));
+                // Stride 64: quarters, one zeta per half.
+                (v0, v1) = butterfly(v0, v1, z2);
+                (v2, v3) = butterfly(v2, v3, z3);
 
-                    j += 8;
-                }
-
-                start += 2 * len;
+                vst1q_s16(at(0), v0);
+                vst1q_s16(at(1), v1);
+                vst1q_s16(at(2), v2);
+                vst1q_s16(at(3), v3);
             }
+        }
+
+        // Merged stride-32/16/8 trip, both paths: each iteration holds one
+        // 64-coefficient quarter's eight vectors through all three levels.
+        for quarter in 0..4 {
+            let at = |w: usize| ptr.add(8 * (8 * quarter + w));
+            let mut v0 = vld1q_s16(at(0));
+            let mut v1 = vld1q_s16(at(1));
+            let mut v2 = vld1q_s16(at(2));
+            let mut v3 = vld1q_s16(at(3));
+            let mut v4 = vld1q_s16(at(4));
+            let mut v5 = vld1q_s16(at(5));
+            let mut v6 = vld1q_s16(at(6));
+            let mut v7 = vld1q_s16(at(7));
+
+            // Stride 32: one zeta per quarter.
+            let z = zeta(4 + quarter);
+            (v0, v4) = butterfly(v0, v4, z);
+            (v1, v5) = butterfly(v1, v5, z);
+            (v2, v6) = butterfly(v2, v6, z);
+            (v3, v7) = butterfly(v3, v7, z);
+
+            // Stride 16: one zeta per 32-coefficient block.
+            let (za, zb) = (zeta(8 + 2 * quarter), zeta(9 + 2 * quarter));
+            (v0, v2) = butterfly(v0, v2, za);
+            (v1, v3) = butterfly(v1, v3, za);
+            (v4, v6) = butterfly(v4, v6, zb);
+            (v5, v7) = butterfly(v5, v7, zb);
+
+            // Stride 8: one zeta per 16-coefficient group.
+            let (zc, zd) = (zeta(16 + 4 * quarter), zeta(17 + 4 * quarter));
+            let (ze, zf) = (zeta(18 + 4 * quarter), zeta(19 + 4 * quarter));
+            (v0, v1) = butterfly(v0, v1, zc);
+            (v2, v3) = butterfly(v2, v3, zd);
+            (v4, v5) = butterfly(v4, v5, ze);
+            (v6, v7) = butterfly(v6, v7, zf);
+
+            vst1q_s16(at(0), v0);
+            vst1q_s16(at(1), v1);
+            vst1q_s16(at(2), v2);
+            vst1q_s16(at(3), v3);
+            vst1q_s16(at(4), v4);
+            vst1q_s16(at(5), v5);
+            vst1q_s16(at(6), v6);
+            vst1q_s16(at(7), v7);
         }
     }
 
     // Scalar tail: stride-4 and stride-2 groups are narrower than a vector.
+    let mut k = 32;
     for len in [4usize, 2] {
         let mut start = 0;
         while start < 256 {
