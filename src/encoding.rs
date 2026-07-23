@@ -89,7 +89,7 @@ impl TqElement {
     /// `ByteEncode_12`: serializes the 256 NTT coefficients as 384 bytes,
     /// yielded lazily.
     pub fn byte_encode(&self) -> impl Iterator<Item = u8> {
-        pack(self.coefficients().map(|c| c.value()), D_12)
+        pack(self.canonical(), D_12)
     }
 
     /// `ByteDecode_12`: deserializes 384 bytes into 256 NTT coefficients.
@@ -110,15 +110,13 @@ impl RqElement {
     /// `ByteEncode_d(Compress_d(self))`: compresses each coefficient to `d`
     /// bits and packs the result as `32 * d` bytes, yielded lazily.
     pub fn compress_encode(&self, d: usize) -> impl Iterator<Item = u8> {
-        pack(self.coefficients().map(|c| c.compress(d)), d)
+        pack(self.compressed(d), d)
     }
 
     /// `Decompress_d(ByteDecode_d(bytes))`: unpacks `d`-bit values and
     /// decompresses each back into Zq.
     pub fn decode_decompress(bytes: &[u8], d: usize) -> Self {
-        let coefficients = unpack(bytes, d).map(|v| FieldElement::decompress(v, d));
-
-        Self::new(coefficients)
+        Self::decompress(&unpack(bytes, d), d)
     }
 
     /// Serializes a 32-byte message into a polynomial via `Decompress_1`.

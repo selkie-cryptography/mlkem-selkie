@@ -28,12 +28,14 @@ use avx2::{basemul_accumulate, basemul_reduce};
 pub(crate) use avx2::{multiply, ntt, ntt_inverse};
 #[cfg(not(any(mlkem_selkie_arch = "neon", mlkem_selkie_arch = "avx2")))]
 use generic::{basemul_accumulate, basemul_reduce};
+#[cfg(mlkem_selkie_arch = "avx2")]
+pub(crate) use generic::{canonical, compress, decompress};
 #[cfg(not(any(mlkem_selkie_arch = "neon", mlkem_selkie_arch = "avx2")))]
-pub(crate) use generic::{multiply, ntt, ntt_inverse};
+pub(crate) use generic::{canonical, compress, decompress, multiply, ntt, ntt_inverse};
 #[cfg(mlkem_selkie_arch = "neon")]
 use neon::{basemul_accumulate, basemul_reduce};
 #[cfg(mlkem_selkie_arch = "neon")]
-pub(crate) use neon::{multiply, ntt, ntt_inverse};
+pub(crate) use neon::{canonical, compress, decompress, multiply, ntt, ntt_inverse};
 
 use crate::parameters;
 
