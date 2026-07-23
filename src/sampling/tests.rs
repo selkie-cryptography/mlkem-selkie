@@ -1,7 +1,7 @@
 //! Unit tests for ring-element sampling.
 
 use super::*;
-use crate::functions::XOF;
+use crate::{functions::XOF, parameters::Q};
 
 /// All-zero CBD input yields the zero polynomial.
 #[test]
@@ -100,7 +100,7 @@ fn sample_ntt_matches_manual_unpack() {
 #[test]
 fn sample_ntt_x4_matches_serial() {
     let rho = [0x91u8; 32];
-    let seeds: [[u8; 34]; 4] = core::array::from_fn(|k| {
+    let seeds: [[u8; 34]; 4] = array::from_fn(|k| {
         let mut seed = [0u8; 34];
         seed[..32].copy_from_slice(&rho);
         seed[32] = k as u8; // matches `XOF`'s `i` byte
