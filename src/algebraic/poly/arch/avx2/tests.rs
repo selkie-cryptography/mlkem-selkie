@@ -140,6 +140,27 @@ proptest! {
         prop_assert_eq!(representatives(&vectorized), representatives(&scalar));
     }
 
+
+    /// `pack` and `unpack` match the scalar backend and invert each other on
+    /// arbitrary representatives.
+    #[test]
+    fn pack_unpack_match_generic(input in any_poly()) {
+        let packed = super::pack(&input);
+
+        prop_assert_eq!(
+            representatives(&packed),
+            representatives(&generic::pack(&input))
+        );
+        prop_assert_eq!(
+            representatives(&super::unpack(&packed)),
+            representatives(&input)
+        );
+        prop_assert_eq!(
+            representatives(&generic::unpack(&packed)),
+            representatives(&input)
+        );
+    }
+
     /// The `basemul_accumulate` / `basemul_reduce` pair matches the scalar
     /// backend at every dot-product length the parameter sets use.
     // reason: j < k <= 4 indexes the length-4 strategy vectors; the loop
