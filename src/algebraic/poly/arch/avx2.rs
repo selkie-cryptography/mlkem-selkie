@@ -16,12 +16,14 @@
 #![allow(unsafe_code)]
 
 use core::arch::x86_64::{
-    __m256i, _mm256_add_epi16, _mm256_add_epi32, _mm256_loadu_si256, _mm256_mulhi_epi16,
-    _mm256_mulhrs_epi16, _mm256_mullo_epi16, _mm256_mullo_epi32, _mm256_packs_epi32,
-    _mm256_permute2x128_si256, _mm256_permute4x64_epi64, _mm256_set1_epi16, _mm256_set1_epi32,
-    _mm256_setr_epi8, _mm256_shuffle_epi8, _mm256_slli_epi32, _mm256_srai_epi16, _mm256_srai_epi32,
-    _mm256_storeu_si256, _mm256_sub_epi16, _mm256_sub_epi32, _mm256_unpackhi_epi16,
-    _mm256_unpacklo_epi16,
+    __m128i, __m256i, _mm_set1_epi64x, _mm256_add_epi16, _mm256_add_epi32, _mm256_and_si256,
+    _mm256_cvtepu16_epi32, _mm256_extracti128_si256, _mm256_loadu_si256, _mm256_mul_epu32,
+    _mm256_mulhi_epi16, _mm256_mulhrs_epi16, _mm256_mullo_epi16, _mm256_mullo_epi32,
+    _mm256_or_si256, _mm256_packs_epi32, _mm256_packus_epi32, _mm256_permute2x128_si256,
+    _mm256_permute4x64_epi64, _mm256_set1_epi16, _mm256_set1_epi32, _mm256_setr_epi8,
+    _mm256_shuffle_epi8, _mm256_sll_epi32, _mm256_slli_epi32, _mm256_slli_epi64, _mm256_srai_epi16,
+    _mm256_srai_epi32, _mm256_srl_epi32, _mm256_srli_epi64, _mm256_storeu_si256, _mm256_sub_epi16,
+    _mm256_sub_epi32, _mm256_unpackhi_epi16, _mm256_unpacklo_epi16,
 };
 
 use crate::{algebraic::field::FieldElement, parameters};
@@ -88,6 +90,18 @@ fn barrett_const_mul(a: __m256i, b: __m256i, b_bar: __m256i) -> __m256i {
     }
 }
 
+/// One Cooley-Tukey butterfly over sixteen lanes: returns `(a + t, a - t)`
+/// for `t = b * zeta`, with the zeta given as its `(raw, Barrett)` broadcast
+/// pair.
+#[inline]
+fn butterfly(a: __m256i, b: __m256i, zeta: (__m256i, __m256i)) -> (__m256i, __m256i) {
+    let t = barrett_const_mul(b, zeta.0, zeta.1);
+
+    // SAFETY: the avx2 module compiles only with AVX2 enabled; both
+    // intrinsics are total.
+    unsafe { (_mm256_add_epi16(a, t), _mm256_sub_epi16(a, t)) }
+}
+
 /// Barrett-reduces sixteen `i16` lanes to a representative in `(-q/2, q/2]`:
 /// the vector form of `FieldElement::reduce`.
 ///
@@ -105,6 +119,180 @@ fn barrett_reduce(a: __m256i) -> __m256i {
 
         _mm256_sub_epi16(a, t)
     }
+}
+
+/// The multiplier for the vectorized `Compress_d` division:
+/// `floor(a / q) = (a * 2580335) >> 33`, exact for every
+/// `a = (x << d) + q/2` with canonical `x` and `d <= 12` — the same
+/// `BARRETT_DIV_Q` the scalar field arithmetic const-asserts exact over this
+/// range; the `tests` module re-checks every input per `d` exhaustively.
+/// The 44-bit products need 64-bit lanes (`mul_epu32` over the even and odd
+/// halves).
+const COMPRESS_DIV: i64 = 2_580_335;
+
+/// The exact `floor(a / q)` of eight `u32` lanes via `a * COMPRESS_DIV >>
+/// 33`, with the 64-bit products taken over the even and odd lanes
+/// separately and recombined.
+#[inline]
+fn divide_by_q(a: __m256i) -> __m256i {
+    // SAFETY: the avx2 module compiles only with AVX2 enabled; every intrinsic
+    // below is total.
+    unsafe {
+        let divisor = _mm256_set1_epi32(COMPRESS_DIV as i32);
+
+        let even = _mm256_srli_epi64::<33>(_mm256_mul_epu32(a, divisor));
+        let odd = _mm256_srli_epi64::<33>(_mm256_mul_epu32(_mm256_srli_epi64::<32>(a), divisor));
+
+        _mm256_or_si256(even, _mm256_slli_epi64::<32>(odd))
+    }
+}
+
+/// Canonicalizes sixteen lanes to `[0, q)`: Barrett-reduce, then a
+/// branch-free conditional add of q on the negative lanes. The vector form of
+/// `FieldElement::value`.
+#[inline]
+fn canonical_lanes(x: __m256i) -> __m256i {
+    let reduced = barrett_reduce(x);
+
+    // SAFETY: the avx2 module compiles only with AVX2 enabled; every intrinsic
+    // below is total.
+    unsafe {
+        let negative = _mm256_srai_epi16::<15>(reduced);
+
+        _mm256_add_epi16(reduced, _mm256_and_si256(negative, _mm256_set1_epi16(Q)))
+    }
+}
+
+/// Packs two eight-lane `i32` vectors of sixteen-bit values back to one
+/// sixteen-lane `i16` vector in coefficient order (`packus` interleaves the
+/// 128-bit lanes; the `permute` restores them).
+#[inline]
+fn pack_lanes(lo: __m256i, hi: __m256i) -> __m256i {
+    // SAFETY: the avx2 module compiles only with AVX2 enabled; every intrinsic
+    // below is total.
+    unsafe { _mm256_permute4x64_epi64::<0xD8>(_mm256_packus_epi32(lo, hi)) }
+}
+
+/// `Compress_d` of every coefficient: canonicalizes and maps each to
+/// `round((2^d / q) * x) mod 2^d`, sixteen sixteen-lane groups.
+///
+/// Matches [`super::generic::compress`]. Constant-time on secret-derived
+/// inputs: every lane runs the same multiply/shift sequence, with no
+/// data-dependent branches or lookups.
+pub(crate) fn compress(
+    coefficients: &[FieldElement; parameters::N],
+    d: usize,
+) -> [u16; parameters::N] {
+    debug_assert!(d <= 12);
+
+    let mut out = [0u16; parameters::N];
+
+    // SAFETY: `FieldElement` is `repr(transparent)` over `i16` and the `u16`
+    // outputs are below `2^d`, so both arrays reinterpret as `[i16]`. Each
+    // iteration reads and writes one 16-`i16` window (16 windows tile 256).
+    // `loadu`/`storeu` are unaligned; the module is AVX2.
+    unsafe {
+        let in_ptr = coefficients.as_ptr().cast::<i16>();
+        let out_ptr = out.as_mut_ptr().cast::<i16>();
+
+        let up = _mm_set1_epi64x(d as i64);
+        let half_q = _mm256_set1_epi32(i32::from(parameters::Q / 2));
+        let mask = _mm256_set1_epi32((1 << d) - 1);
+
+        let divide = |x: __m128i| -> __m256i {
+            // (x << d) + q/2, then the exact division by q.
+            let a = _mm256_add_epi32(_mm256_sll_epi32(_mm256_cvtepu16_epi32(x), up), half_q);
+
+            _mm256_and_si256(divide_by_q(a), mask)
+        };
+
+        let mut i = 0;
+        while i < parameters::N {
+            let x = canonical_lanes(_mm256_loadu_si256(in_ptr.add(i).cast::<__m256i>()));
+
+            let lo = divide(_mm256_extracti128_si256::<0>(x));
+            let hi = divide(_mm256_extracti128_si256::<1>(x));
+
+            _mm256_storeu_si256(out_ptr.add(i).cast::<__m256i>(), pack_lanes(lo, hi));
+
+            i += 16;
+        }
+    }
+
+    out
+}
+
+/// `Decompress_d` of every value: maps each `d`-bit value back into Zq via
+/// `(q * y + 2^(d-1)) >> d`, sixteen sixteen-lane groups.
+///
+/// Matches [`super::generic::decompress`]. Constant-time: every lane runs
+/// the same multiply/shift sequence.
+pub(crate) fn decompress(values: &[u16; parameters::N], d: usize) -> [FieldElement; parameters::N] {
+    let mut out = [FieldElement::ZERO; parameters::N];
+
+    // SAFETY: the `u16` inputs are below `2^12` and the outputs canonical, so
+    // both arrays reinterpret as `[i16]` (`FieldElement` is
+    // `repr(transparent)` over `i16`). Each iteration reads and writes one
+    // 16-`i16` window (16 windows tile 256). `loadu`/`storeu` are unaligned;
+    // the module is AVX2.
+    unsafe {
+        let in_ptr = values.as_ptr().cast::<i16>();
+        let out_ptr = out.as_mut_ptr().cast::<i16>();
+
+        let down = _mm_set1_epi64x(d as i64);
+        let half = _mm256_set1_epi32(1 << (d - 1));
+        let q = _mm256_set1_epi32(i32::from(parameters::Q));
+
+        let scale = |y: __m128i| -> __m256i {
+            // (q * y + 2^(d-1)) >> d, exact in i32.
+            let a = _mm256_add_epi32(_mm256_mullo_epi32(_mm256_cvtepu16_epi32(y), q), half);
+
+            _mm256_srl_epi32(a, down)
+        };
+
+        let mut i = 0;
+        while i < parameters::N {
+            let y = _mm256_loadu_si256(in_ptr.add(i).cast::<__m256i>());
+
+            let lo = scale(_mm256_extracti128_si256::<0>(y));
+            let hi = scale(_mm256_extracti128_si256::<1>(y));
+
+            _mm256_storeu_si256(out_ptr.add(i).cast::<__m256i>(), pack_lanes(lo, hi));
+
+            i += 16;
+        }
+    }
+
+    out
+}
+
+/// The canonical representative in `[0, q)` of every coefficient, sixteen
+/// sixteen-lane groups: the vector form of `FieldElement::value` over a
+/// polynomial.
+///
+/// Matches [`super::generic::canonical`]. Constant-time: branch-free per
+/// lane.
+pub(crate) fn canonical(coefficients: &[FieldElement; parameters::N]) -> [u16; parameters::N] {
+    let mut out = [0u16; parameters::N];
+
+    // SAFETY: `FieldElement` is `repr(transparent)` over `i16` and the
+    // canonical outputs are below q, so both arrays reinterpret as `[i16]`.
+    // Each iteration reads and writes one 16-`i16` window (16 windows tile
+    // 256). `loadu`/`storeu` are unaligned; the module is AVX2.
+    unsafe {
+        let in_ptr = coefficients.as_ptr().cast::<i16>();
+        let out_ptr = out.as_mut_ptr().cast::<i16>();
+
+        let mut i = 0;
+        while i < parameters::N {
+            let x = canonical_lanes(_mm256_loadu_si256(in_ptr.add(i).cast::<__m256i>()));
+            _mm256_storeu_si256(out_ptr.add(i).cast::<__m256i>(), x);
+
+            i += 16;
+        }
+    }
+
+    out
 }
 
 /// Pointwise base multiplication of two NTT representations: 128 degree-one
@@ -375,56 +563,93 @@ pub(crate) fn basemul_reduce(acc: &super::ProductAccumulator) -> [FieldElement; 
     h
 }
 
-/// Forward NTT in place, then Barrett-reduce. Vectorizes the stride-≥16
-/// butterfly stages sixteen lanes wide; the narrow stride-8/4/2 stages and the
-/// final reduction run scalar.
+/// Forward NTT in place, then Barrett-reduce. The stride-≥16 butterfly
+/// stages run in two register-resident trips (stride 128/64 merged, then
+/// 32/16 merged), so each stage pair costs one memory round-trip instead of
+/// one per stage; the narrow stride-8/4/2 stages and the final reduction run
+/// scalar.
 ///
-/// Matches [`super::generic::ntt`].
+/// Matches [`super::generic::ntt`]: the merged trips compute the same
+/// butterflies as the stage-at-a-time loop, grouped by data slice instead of
+/// stage, and butterflies within a stage are independent.
 // reason: scalar-tail butterfly/zeta indices are provably in 0..256, as in the
 // generic backend.
 #[allow(clippy::indexing_slicing)]
 pub(crate) fn ntt(coefficients: &mut [FieldElement; parameters::N]) {
-    let mut k = 1;
-
     // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so the array
-    // reinterprets as `[i16]`. Each `__m256i` window `[j, j + 16)` and
-    // `[j + len, j + len + 16)` stays within the 256-element array, and `k`
-    // indexes `ZETA_RAW` / `ZETA_BARRETT`. `loadu`/`storeu` are unaligned;
-    // the module is AVX2.
+    // reinterprets as `[i16]`. The head trip reads/writes vectors
+    // `16 * (i + 4b)` for `i < 4`, `b < 4`; the quarter trip vectors
+    // `16 * (4q + w)` for `q < 4`, `w < 4` (each tiles the 16 vector windows
+    // of 256 coefficients once). Zeta indices stay below 16.
+    // `loadu`/`storeu` are unaligned; the module is AVX2.
     unsafe {
         let ptr = coefficients.as_mut_ptr().cast::<i16>();
         let zeta_raw_ptr = super::ZETA_RAW.as_ptr().cast::<i16>();
         let zeta_bar_ptr = super::ZETA_BARRETT.as_ptr();
+        let zeta = |k: usize| {
+            (
+                _mm256_set1_epi16(*zeta_raw_ptr.add(k)),
+                _mm256_set1_epi16(*zeta_bar_ptr.add(k)),
+            )
+        };
+        let load = |v: usize| _mm256_loadu_si256(ptr.add(16 * v).cast::<__m256i>());
+        let store =
+            |v: usize, x: __m256i| _mm256_storeu_si256(ptr.add(16 * v).cast::<__m256i>(), x);
 
-        for len in [128usize, 64, 32, 16] {
-            let mut start = 0;
-            while start < 256 {
-                let zeta = _mm256_set1_epi16(*zeta_raw_ptr.add(k));
-                let zeta_bar = _mm256_set1_epi16(*zeta_bar_ptr.add(k));
-                k += 1;
+        // Stride-128/64 trip: each iteration holds four vectors (one per
+        // 64-coefficient quarter, at the same offset) through both butterfly
+        // levels, one load and one store per vector instead of one per stage.
+        let z1 = zeta(1);
+        let (z2, z3) = (zeta(2), zeta(3));
 
-                let mut j = start;
-                while j < start + len {
-                    let vj = _mm256_loadu_si256(ptr.add(j).cast::<__m256i>());
-                    let vjl = _mm256_loadu_si256(ptr.add(j + len).cast::<__m256i>());
-                    let t = barrett_const_mul(vjl, zeta, zeta_bar);
+        for i in 0..4 {
+            let mut v0 = load(i);
+            let mut v1 = load(i + 4);
+            let mut v2 = load(i + 8);
+            let mut v3 = load(i + 12);
 
-                    _mm256_storeu_si256(
-                        ptr.add(j + len).cast::<__m256i>(),
-                        _mm256_sub_epi16(vj, t),
-                    );
-                    _mm256_storeu_si256(ptr.add(j).cast::<__m256i>(), _mm256_add_epi16(vj, t));
+            // Stride 128: halves, one zeta.
+            (v0, v2) = butterfly(v0, v2, z1);
+            (v1, v3) = butterfly(v1, v3, z1);
 
-                    j += 16;
-                }
+            // Stride 64: quarters, one zeta per half.
+            (v0, v1) = butterfly(v0, v1, z2);
+            (v2, v3) = butterfly(v2, v3, z3);
 
-                start += 2 * len;
-            }
+            store(i, v0);
+            store(i + 4, v1);
+            store(i + 8, v2);
+            store(i + 12, v3);
+        }
+
+        // Stride-32/16 trip: each iteration holds one 64-coefficient
+        // quarter's four vectors through both levels.
+        for quarter in 0..4 {
+            let mut v0 = load(4 * quarter);
+            let mut v1 = load(4 * quarter + 1);
+            let mut v2 = load(4 * quarter + 2);
+            let mut v3 = load(4 * quarter + 3);
+
+            // Stride 32: one zeta per quarter.
+            let z = zeta(4 + quarter);
+            (v0, v2) = butterfly(v0, v2, z);
+            (v1, v3) = butterfly(v1, v3, z);
+
+            // Stride 16: one zeta per 32-coefficient block.
+            let (za, zb) = (zeta(8 + 2 * quarter), zeta(9 + 2 * quarter));
+            (v0, v1) = butterfly(v0, v1, za);
+            (v2, v3) = butterfly(v2, v3, zb);
+
+            store(4 * quarter, v0);
+            store(4 * quarter + 1, v1);
+            store(4 * quarter + 2, v2);
+            store(4 * quarter + 3, v3);
         }
     }
 
     // Scalar tail: stride-8, stride-4, and stride-2 groups are narrower than a
     // vector.
+    let mut k = 16;
     for len in [8usize, 4, 2] {
         let mut start = 0;
         while start < 256 {
