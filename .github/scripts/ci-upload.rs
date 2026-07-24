@@ -1,4 +1,4 @@
-//! Upload CI data (coverage, bench, mutants, dudect) to the Fly.io CI site.
+//! Upload CI data (coverage, bench, mutants, tacet, ctgrind) to the Fly.io CI site.
 //!
 //! Usage: ci-upload [--dry-run] [--pr-only] <kind> <json-file> <sha>
 //!        ci-upload --assets <local-root> <remote-subdir>   (flamegraph SVGs)

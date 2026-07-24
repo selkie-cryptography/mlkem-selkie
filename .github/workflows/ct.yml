@@ -5,15 +5,12 @@ on:
     branches: [main]
   pull_request:
     paths:
-      - "benches/dudect.rs"
       - "benches/tacet.rs"
       - "tests/ctgrind.rs"
       - "src/**"
       - ".github/workflows/ct.yml"
       # Scripts the workflow compiles-and-runs; a change to the gate or the
       # dashboard converters is a CT-relevant change and needs CI validation.
-      - ".github/scripts/dudect-gate.rs"
-      - ".github/scripts/dudect-to-json.rs"
       - ".github/scripts/tacet-to-json.rs"
       - ".github/scripts/ctgrind-report.rs"
   schedule:
@@ -26,63 +23,31 @@ permissions:
 
 jobs:
   statistical:
-    name: dudect + tacet
+    name: tacet
     runs-on: ubuntu-latest
-    # The CT rework has landed: dudect (encaps + decaps) clears |t| < 5.0
-    # locally and ctgrind catches secret-dependent branches in keygen and
-    # decaps. A regression here should fail the build.
+    # tacet's attacker-model analysis and ctgrind's taint tracking gate CT
+    # regressions; a failure here should fail the build.
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build dudect bench
-        run: cargo bench --bench dudect --features expose-internals --no-run
-      - name: dudect t-test (5 independent runs)
-        run: |
-          # Run the bench binary directly: `cargo bench --bench` passes
-          # `--bench` to the harness, which dudect-bencher rejects. Five
-          # independent readings feed the median gate below (median-of-5
-          # tolerates 2 outliers vs median-of-3's 1; decaps `|t|` swings
-          # 2 -> 48 across identical runs on shared-tenant vCPUs, so
-          # between-run outliers are the dominant noise source and more
-          # samples of the distribution help more than longer per-run
-          # samples do). See .github/scripts/dudect-gate.rs.
-          set -o pipefail
-          mkdir -p ct
-          bin=$(find target/release/deps -maxdepth 1 -type f -name 'dudect-*' ! -name '*.d' -perm -u+x | head -1)
-          for i in 1 2 3 4 5; do
-            "$bin" 2>&1 | tee "ct/dudect-run$i.txt"
-          done
-      - name: Enforce median dudect |t| < 5.0
-        run: |
-          rustc -O --edition 2021 .github/scripts/dudect-gate.rs -o /tmp/dudect-gate
-          /tmp/dudect-gate ct/dudect.txt ct/dudect-run1.txt ct/dudect-run2.txt ct/dudect-run3.txt ct/dudect-run4.txt ct/dudect-run5.txt
       - name: Build tacet bench
         run: cargo bench --bench tacet --features expose-internals --no-run
       - name: tacet attacker-model analysis
         run: |
           set -o pipefail
+          mkdir -p ct
           bin=$(find target/release/deps -maxdepth 1 -type f -name 'tacet-*' ! -name '*.d' -perm -u+x | head -1)
           "$bin" 2>&1 | tee ct/tacet.txt
       - name: Build dashboard JSON
         run: |
-          rustc -O --edition 2021 .github/scripts/dudect-to-json.rs -o /tmp/dudect-to-json
           rustc -O --edition 2021 .github/scripts/tacet-to-json.rs -o /tmp/tacet-to-json
-          /tmp/dudect-to-json ct/dudect.txt "${{ github.sha }}" > dudect.json
           /tmp/tacet-to-json ct/tacet.txt "${{ github.sha }}" > tacet.json
-      - name: Verify CT payloads have data
+      - name: Verify CT payload has data
         run: |
-          jq -e '.total > 0' dudect.json > /dev/null || { echo "::error::dudect.json has no t-test results"; cat dudect.json >&2; exit 1; }
           jq -e '.total > 0' tacet.json > /dev/null || { echo "::error::tacet.json has no leak-model results"; cat tacet.json >&2; exit 1; }
-      - name: Upload dudect to dashboard
-        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        uses: ./.github/actions/ci-upload
-        with:
-          kind: dudect
-          payload: dudect.json
-          fly-api-token: ${{ secrets.FLY_API_TOKEN }}
       - name: Upload tacet to dashboard
         if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         uses: ./.github/actions/ci-upload
