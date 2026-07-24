@@ -142,7 +142,3 @@ inherits = "release-checked"
 debug = "none"
 opt-level = 1
 incremental = true
-
-# Hax toolchain only, for proofs.
-[target.'cfg(hax)'.dependencies]
-hax-lib-macros = { version = "0.1.0-pre.1", git = "https://github.com/hacspec/hax" }
