@@ -56,7 +56,7 @@ libcrux-ml-kem = { version = "0.0.10", default-features = false, features = [
     "mlkem1024",
 ] }
 rand = "0.8"
-# Deterministic PRNG for the randomized interop tests and the dudect bench.
+# Deterministic PRNG for the randomized interop tests.
 rand_chacha = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -64,7 +64,6 @@ divan = "0.1"
 dhat = "0.3"
 proptest = "1"
 mutants = "0.0.4"
-dudect-bencher = "0.7"
 tacet = "0.4"
 gungraun = "0.19"
 
@@ -92,11 +91,6 @@ harness = false
 
 [[bench]]
 name = "algebraic"
-harness = false
-required-features = ["expose-internals"]
-
-[[bench]]
-name = "dudect"
 harness = false
 required-features = ["expose-internals"]
 

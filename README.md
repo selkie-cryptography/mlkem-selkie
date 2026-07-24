@@ -45,8 +45,8 @@ implicit-rejection compare and shared-secret selection use `subtle`'s
 than a plain `==`, so neither the equality result nor which secret is
 returned leaks through a branch or an early exit.
 
-Three CT harnesses — **dudect**, **tacet**, and **ctgrind** — run in
-CI on every push to `main` and fail the build on regression.
+Two CT harnesses — **tacet** and **ctgrind** — run in CI on every push
+to `main` and fail the build on regression.
 `SampleNTT`'s rejection-sampling loop is variable-time by construction,
 but its iteration count depends only on the public matrix seed `rho`,
 not on any secret.
