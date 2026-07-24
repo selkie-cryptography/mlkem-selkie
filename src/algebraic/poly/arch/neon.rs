@@ -360,22 +360,21 @@ pub(crate) fn compress(
     // iteration reads and writes one 8-`i16` window (32 windows tile 256).
     // `vld1q`/`vst1q` are unaligned. NEON is baseline on aarch64.
     unsafe {
-        let in_ptr = coefficients.as_ptr().cast::<i16>();
-        let out_ptr = out.as_mut_ptr().cast::<i16>();
         let m = vdupq_n_s32(multiplier);
         let mask = vdupq_n_s32((1 << d) - 1);
 
-        let mut i = 0;
-        while i < parameters::N {
-            let x = canonical_lanes(vld1q_s16(in_ptr.add(i)));
+        let windows = coefficients.chunks_exact(8).zip(out.chunks_exact_mut(8));
+        for (window, out_window) in windows {
+            let x = canonical_lanes(vld1q_s16(window.as_ptr().cast::<i16>()));
 
             // round(x * 2^d / q) per lane, in i32 precision.
             let lo = vandq_s32(vqrdmulhq_s32(vmovl_s16(vget_low_s16(x)), m), mask);
             let hi = vandq_s32(vqrdmulhq_s32(vmovl_high_s16(x), m), mask);
 
-            vst1q_s16(out_ptr.add(i), vcombine_s16(vmovn_s32(lo), vmovn_s32(hi)));
-
-            i += 8;
+            vst1q_s16(
+                out_window.as_mut_ptr().cast::<i16>(),
+                vcombine_s16(vmovn_s32(lo), vmovn_s32(hi)),
+            );
         }
     }
 
@@ -396,14 +395,12 @@ pub(crate) fn decompress(values: &[u16; parameters::N], d: usize) -> [FieldEleme
     // 8-`i16` window (32 windows tile 256). `vld1q`/`vst1q` are unaligned.
     // NEON is baseline on aarch64.
     unsafe {
-        let in_ptr = values.as_ptr().cast::<i16>();
-        let out_ptr = out.as_mut_ptr().cast::<i16>();
         let half = vdupq_n_s32(1 << (d - 1));
         let shift = vdupq_n_s32(-(d as i32));
 
-        let mut i = 0;
-        while i < parameters::N {
-            let y = vld1q_s16(in_ptr.add(i));
+        let windows = values.chunks_exact(8).zip(out.chunks_exact_mut(8));
+        for (window, out_window) in windows {
+            let y = vld1q_s16(window.as_ptr().cast::<i16>());
 
             // (q * y + 2^(d-1)) >> d per lane, exact in i32.
             let lo = vshlq_s32(
@@ -412,9 +409,10 @@ pub(crate) fn decompress(values: &[u16; parameters::N], d: usize) -> [FieldEleme
             );
             let hi = vshlq_s32(vmlaq_n_s32(half, vmovl_high_s16(y), Q as i32), shift);
 
-            vst1q_s16(out_ptr.add(i), vcombine_s16(vmovn_s32(lo), vmovn_s32(hi)));
-
-            i += 8;
+            vst1q_s16(
+                out_window.as_mut_ptr().cast::<i16>(),
+                vcombine_s16(vmovn_s32(lo), vmovn_s32(hi)),
+            );
         }
     }
 
@@ -437,17 +435,20 @@ pub(crate) fn canonical(coefficients: &[FieldElement; parameters::N]) -> [u16; p
     // window of `out` (16 windows tile 256), all in bounds. `vld1q`/`vst2q`
     // are unaligned. NEON is baseline on aarch64.
     unsafe {
-        let in_ptr = coefficients.as_ptr().cast::<i16>();
-        let out_ptr = out.as_mut_ptr().cast::<i16>();
+        let (even_half, odd_half) = coefficients.split_at(parameters::N / 2);
 
-        let mut i = 0;
-        while i < parameters::N / 2 {
-            let even = canonical_lanes(vld1q_s16(in_ptr.add(i)));
-            let odd = canonical_lanes(vld1q_s16(in_ptr.add(128 + i)));
+        let windows = even_half
+            .chunks_exact(8)
+            .zip(odd_half.chunks_exact(8))
+            .zip(out.chunks_exact_mut(16));
+        for ((even_window, odd_window), out_window) in windows {
+            let even = canonical_lanes(vld1q_s16(even_window.as_ptr().cast::<i16>()));
+            let odd = canonical_lanes(vld1q_s16(odd_window.as_ptr().cast::<i16>()));
 
-            vst2q_s16(out_ptr.add(2 * i), int16x8x2_t(even, odd));
-
-            i += 8;
+            vst2q_s16(
+                out_window.as_mut_ptr().cast::<i16>(),
+                int16x8x2_t(even, odd),
+            );
         }
     }
 
@@ -465,17 +466,18 @@ pub(crate) fn pack(natural: &[FieldElement; parameters::N]) -> [FieldElement; pa
     // (offsets `i` and `128 + i`; 16 windows tile 256), all in bounds.
     // `vld2q`/`vst1q` are unaligned. NEON is baseline on aarch64.
     unsafe {
-        let in_ptr = natural.as_ptr().cast::<i16>();
-        let out_ptr = halves.as_mut_ptr().cast::<i16>();
+        let (even_half, odd_half) = halves.split_at_mut(parameters::N / 2);
 
-        let mut i = 0;
-        while i < parameters::N / 2 {
-            let de = vld2q_s16(in_ptr.add(2 * i));
+        let windows = natural.chunks_exact(16).zip(
+            even_half
+                .chunks_exact_mut(8)
+                .zip(odd_half.chunks_exact_mut(8)),
+        );
+        for (window, (even_out, odd_out)) in windows {
+            let de = vld2q_s16(window.as_ptr().cast::<i16>());
 
-            vst1q_s16(out_ptr.add(i), de.0);
-            vst1q_s16(out_ptr.add(128 + i), de.1);
-
-            i += 8;
+            vst1q_s16(even_out.as_mut_ptr().cast::<i16>(), de.0);
+            vst1q_s16(odd_out.as_mut_ptr().cast::<i16>(), de.1);
         }
     }
 
@@ -493,17 +495,20 @@ pub(crate) fn unpack(halves: &[FieldElement; parameters::N]) -> [FieldElement; p
     // 16-`i16` window of `natural` (16 windows tile 256), all in bounds.
     // `vld1q`/`vst2q` are unaligned. NEON is baseline on aarch64.
     unsafe {
-        let in_ptr = halves.as_ptr().cast::<i16>();
-        let out_ptr = natural.as_mut_ptr().cast::<i16>();
+        let (even_half, odd_half) = halves.split_at(parameters::N / 2);
 
-        let mut i = 0;
-        while i < parameters::N / 2 {
-            let even = vld1q_s16(in_ptr.add(i));
-            let odd = vld1q_s16(in_ptr.add(128 + i));
+        let windows = even_half
+            .chunks_exact(8)
+            .zip(odd_half.chunks_exact(8))
+            .zip(natural.chunks_exact_mut(16));
+        for ((even_window, odd_window), out_window) in windows {
+            let even = vld1q_s16(even_window.as_ptr().cast::<i16>());
+            let odd = vld1q_s16(odd_window.as_ptr().cast::<i16>());
 
-            vst2q_s16(out_ptr.add(2 * i), int16x8x2_t(even, odd));
-
-            i += 8;
+            vst2q_s16(
+                out_window.as_mut_ptr().cast::<i16>(),
+                int16x8x2_t(even, odd),
+            );
         }
     }
 
@@ -556,43 +561,42 @@ pub(crate) fn multiply(
     f: &[FieldElement; parameters::N],
     g: &[FieldElement; parameters::N],
 ) -> [FieldElement; parameters::N] {
-    let mut h = core::mem::MaybeUninit::<[FieldElement; parameters::N]>::uninit();
+    let mut h = [FieldElement::ZERO; parameters::N];
 
     // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so the three
-    // length-256 arrays and the length-128 `GAMMA_MONT` reinterpret as `[i16]`.
-    // Each iteration reads the two even/odd 8-`i16` halves of each base-pair
-    // window of `f`/`g` and writes the matching halves of `h` (offsets `pair`
-    // and `128 + pair`; 16 windows tile 256), and reads an 8-`i16` window of
-    // the gammas, all in bounds. The half writes tile the full 256-element
-    // `h`, so the `assume_init` at the end reads only initialized bytes.
+    // length-256 arrays and the length-128 `GAMMA_MONT` reinterpret as
+    // `[i16]`. Every load and store uses a pointer derived from an 8-element
+    // chunk of the half it covers, so it is in bounds by construction.
     // `vld1q`/`vst1q` are unaligned. NEON is baseline on aarch64.
     unsafe {
-        let f_ptr = f.as_ptr().cast::<i16>();
-        let g_ptr = g.as_ptr().cast::<i16>();
-        let h_ptr = h.as_mut_ptr().cast::<i16>();
-        let gamma_ptr = super::GAMMA_MONT.as_ptr().cast::<i16>();
+        let (f0_half, f1_half) = f.split_at(parameters::N / 2);
+        let (g0_half, g1_half) = g.split_at(parameters::N / 2);
+        let (h0_half, h1_half) = h.split_at_mut(parameters::N / 2);
 
-        let mut pair = 0;
-        while pair < 128 {
+        let windows = f0_half
+            .chunks_exact(8)
+            .zip(f1_half.chunks_exact(8))
+            .zip(g0_half.chunks_exact(8).zip(g1_half.chunks_exact(8)))
+            .zip(super::GAMMA_MONT.chunks_exact(8))
+            .zip(h0_half.chunks_exact_mut(8).zip(h1_half.chunks_exact_mut(8)));
+        for ((((f0_w, f1_w), (g0_w, g1_w)), gamma_w), (h0_w, h1_w)) in windows {
             // Even (degree-0) and odd (degree-1) halves.
-            let a0 = vld1q_s16(f_ptr.add(pair));
-            let a1 = vld1q_s16(f_ptr.add(128 + pair));
-            let b0 = vld1q_s16(g_ptr.add(pair));
-            let b1 = vld1q_s16(g_ptr.add(128 + pair));
-            let gamma = vld1q_s16(gamma_ptr.add(pair));
+            let a0 = vld1q_s16(f0_w.as_ptr().cast::<i16>());
+            let a1 = vld1q_s16(f1_w.as_ptr().cast::<i16>());
+            let b0 = vld1q_s16(g0_w.as_ptr().cast::<i16>());
+            let b1 = vld1q_s16(g1_w.as_ptr().cast::<i16>());
+            let gamma = vld1q_s16(gamma_w.as_ptr().cast::<i16>());
 
             // c0 = a0*b0 + a1*b1*gamma ; c1 = a0*b1 + a1*b0
             let c0 = vaddq_s16(fqmul(a0, b0), fqmul(fqmul(a1, b1), gamma));
             let c1 = vaddq_s16(fqmul(a0, b1), fqmul(a1, b0));
 
-            vst1q_s16(h_ptr.add(pair), c0);
-            vst1q_s16(h_ptr.add(128 + pair), c1);
-
-            pair += 8;
+            vst1q_s16(h0_w.as_mut_ptr().cast::<i16>(), c0);
+            vst1q_s16(h1_w.as_mut_ptr().cast::<i16>(), c1);
         }
-
-        h.assume_init()
     }
+
+    h
 }
 
 /// Accumulates one component of an asymmetric base-multiplication dot product
@@ -613,41 +617,47 @@ pub(crate) fn basemul_accumulate(
     // with pair + 8 <= 128), all in bounds. `vld1q`/`vst1q` are unaligned.
     // NEON is baseline on aarch64.
     unsafe {
-        let f_ptr = f.as_ptr().cast::<i16>();
-        let g_ptr = g.as_ptr().cast::<i16>();
-        let cache_ptr = cache.as_ptr().cast::<i16>();
-        let even_ptr = acc.even.as_mut_ptr();
-        let odd_ptr = acc.odd.as_mut_ptr();
+        let (f0_half, f1_half) = f.split_at(parameters::N / 2);
+        let (g0_half, g1_half) = g.split_at(parameters::N / 2);
 
-        let mut pair = 0;
-        while pair < 128 {
-            let f0 = vld1q_s16(f_ptr.add(pair));
-            let f1 = vld1q_s16(f_ptr.add(128 + pair));
-            let g0 = vld1q_s16(g_ptr.add(pair));
-            let g1 = vld1q_s16(g_ptr.add(128 + pair));
-            let c = vld1q_s16(cache_ptr.add(pair));
+        let windows = f0_half
+            .chunks_exact(8)
+            .zip(f1_half.chunks_exact(8))
+            .zip(g0_half.chunks_exact(8).zip(g1_half.chunks_exact(8)))
+            .zip(cache.chunks_exact(8))
+            .zip(
+                acc.even
+                    .chunks_exact_mut(8)
+                    .zip(acc.odd.chunks_exact_mut(8)),
+            );
+        for ((((f0_w, f1_w), (g0_w, g1_w)), cache_w), (even_w, odd_w)) in windows {
+            let f0 = vld1q_s16(f0_w.as_ptr().cast::<i16>());
+            let f1 = vld1q_s16(f1_w.as_ptr().cast::<i16>());
+            let g0 = vld1q_s16(g0_w.as_ptr().cast::<i16>());
+            let g1 = vld1q_s16(g1_w.as_ptr().cast::<i16>());
+            let c = vld1q_s16(cache_w.as_ptr().cast::<i16>());
 
             // even += f0*g0 + f1*cache, in i32 lanes.
-            let mut even_lo = vld1q_s32(even_ptr.add(pair));
-            let mut even_hi = vld1q_s32(even_ptr.add(pair + 4));
+            let even_ptr = even_w.as_mut_ptr();
+            let mut even_lo = vld1q_s32(even_ptr);
+            let mut even_hi = vld1q_s32(even_ptr.add(4));
             even_lo = vmlal_s16(even_lo, vget_low_s16(f0), vget_low_s16(g0));
             even_hi = vmlal_high_s16(even_hi, f0, g0);
             even_lo = vmlal_s16(even_lo, vget_low_s16(f1), vget_low_s16(c));
             even_hi = vmlal_high_s16(even_hi, f1, c);
-            vst1q_s32(even_ptr.add(pair), even_lo);
-            vst1q_s32(even_ptr.add(pair + 4), even_hi);
+            vst1q_s32(even_ptr, even_lo);
+            vst1q_s32(even_ptr.add(4), even_hi);
 
             // odd += f0*g1 + f1*g0, in i32 lanes.
-            let mut odd_lo = vld1q_s32(odd_ptr.add(pair));
-            let mut odd_hi = vld1q_s32(odd_ptr.add(pair + 4));
+            let odd_ptr = odd_w.as_mut_ptr();
+            let mut odd_lo = vld1q_s32(odd_ptr);
+            let mut odd_hi = vld1q_s32(odd_ptr.add(4));
             odd_lo = vmlal_s16(odd_lo, vget_low_s16(f0), vget_low_s16(g1));
             odd_hi = vmlal_high_s16(odd_hi, f0, g1);
             odd_lo = vmlal_s16(odd_lo, vget_low_s16(f1), vget_low_s16(g0));
             odd_hi = vmlal_high_s16(odd_hi, f1, g0);
-            vst1q_s32(odd_ptr.add(pair), odd_lo);
-            vst1q_s32(odd_ptr.add(pair + 4), odd_hi);
-
-            pair += 8;
+            vst1q_s32(odd_ptr, odd_lo);
+            vst1q_s32(odd_ptr.add(4), odd_hi);
         }
     }
 }
@@ -666,28 +676,31 @@ pub(crate) fn basemul_reduce(acc: &super::ProductAccumulator) -> [FieldElement; 
     // all in bounds. `vld1q`/`vst1q` are unaligned. NEON is baseline on
     // aarch64.
     unsafe {
-        let even_ptr = acc.even.as_ptr();
-        let odd_ptr = acc.odd.as_ptr();
-        let h_ptr = h.as_mut_ptr().cast::<i16>();
-
         let q = vdup_n_s16(Q);
         let qinv = vdup_n_s16(QINV);
 
-        let mut pair = 0;
-        while pair < 128 {
+        let (h0_half, h1_half) = h.split_at_mut(parameters::N / 2);
+
+        let windows = acc
+            .even
+            .chunks_exact(8)
+            .zip(acc.odd.chunks_exact(8))
+            .zip(h0_half.chunks_exact_mut(8).zip(h1_half.chunks_exact_mut(8)));
+        for ((even_w, odd_w), (h0_w, h1_w)) in windows {
+            let even_ptr = even_w.as_ptr();
+            let odd_ptr = odd_w.as_ptr();
+
             let c0 = vcombine_s16(
-                montgomery_reduce(vld1q_s32(even_ptr.add(pair)), q, qinv),
-                montgomery_reduce(vld1q_s32(even_ptr.add(pair + 4)), q, qinv),
+                montgomery_reduce(vld1q_s32(even_ptr), q, qinv),
+                montgomery_reduce(vld1q_s32(even_ptr.add(4)), q, qinv),
             );
             let c1 = vcombine_s16(
-                montgomery_reduce(vld1q_s32(odd_ptr.add(pair)), q, qinv),
-                montgomery_reduce(vld1q_s32(odd_ptr.add(pair + 4)), q, qinv),
+                montgomery_reduce(vld1q_s32(odd_ptr), q, qinv),
+                montgomery_reduce(vld1q_s32(odd_ptr.add(4)), q, qinv),
             );
 
-            vst1q_s16(h_ptr.add(pair), c0);
-            vst1q_s16(h_ptr.add(128 + pair), c1);
-
-            pair += 8;
+            vst1q_s16(h0_w.as_mut_ptr().cast::<i16>(), c0);
+            vst1q_s16(h1_w.as_mut_ptr().cast::<i16>(), c1);
         }
     }
 

@@ -103,9 +103,6 @@ pub(crate) fn pack(natural: &[FieldElement; parameters::N]) -> [FieldElement; pa
     // (offsets `i` and `128 + i`; 8 windows tile 256), all in bounds.
     // `loadu`/`storeu` are unaligned; the module is AVX2.
     unsafe {
-        let in_ptr = natural.as_ptr().cast::<i16>();
-        let out_ptr = halves.as_mut_ptr().cast::<i16>();
-
         // Per-128-bit-lane byte mask gathering even `i16`s into the low half
         // and odds into the high half.
         let deinterleave = _mm256_setr_epi8(
@@ -113,24 +110,29 @@ pub(crate) fn pack(natural: &[FieldElement; parameters::N]) -> [FieldElement; pa
             0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15,
         );
 
-        let mut i = 0;
-        while i < parameters::N / 2 {
-            let v0 = _mm256_loadu_si256(in_ptr.add(2 * i).cast::<__m256i>());
-            let v1 = _mm256_loadu_si256(in_ptr.add(2 * i + 16).cast::<__m256i>());
+        let (even_half, odd_half) = halves.split_at_mut(parameters::N / 2);
+
+        let windows = natural.chunks_exact(32).zip(
+            even_half
+                .chunks_exact_mut(16)
+                .zip(odd_half.chunks_exact_mut(16)),
+        );
+        for (window, (even_out, odd_out)) in windows {
+            let in_ptr = window.as_ptr().cast::<i16>();
+            let v0 = _mm256_loadu_si256(in_ptr.cast::<__m256i>());
+            let v1 = _mm256_loadu_si256(in_ptr.add(16).cast::<__m256i>());
 
             let d0 = _mm256_permute4x64_epi64::<0xD8>(_mm256_shuffle_epi8(v0, deinterleave));
             let d1 = _mm256_permute4x64_epi64::<0xD8>(_mm256_shuffle_epi8(v1, deinterleave));
 
             _mm256_storeu_si256(
-                out_ptr.add(i).cast::<__m256i>(),
+                even_out.as_mut_ptr().cast::<__m256i>(),
                 _mm256_permute2x128_si256::<0x20>(d0, d1),
             );
             _mm256_storeu_si256(
-                out_ptr.add(128 + i).cast::<__m256i>(),
+                odd_out.as_mut_ptr().cast::<__m256i>(),
                 _mm256_permute2x128_si256::<0x31>(d0, d1),
             );
-
-            i += 16;
         }
     }
 
@@ -148,27 +150,28 @@ pub(crate) fn unpack(halves: &[FieldElement; parameters::N]) -> [FieldElement; p
     // 32-`i16` window of `natural` (8 windows tile 256), all in bounds.
     // `loadu`/`storeu` are unaligned; the module is AVX2.
     unsafe {
-        let in_ptr = halves.as_ptr().cast::<i16>();
-        let out_ptr = natural.as_mut_ptr().cast::<i16>();
+        let (even_half, odd_half) = halves.split_at(parameters::N / 2);
 
-        let mut i = 0;
-        while i < parameters::N / 2 {
-            let even = _mm256_loadu_si256(in_ptr.add(i).cast::<__m256i>());
-            let odd = _mm256_loadu_si256(in_ptr.add(128 + i).cast::<__m256i>());
+        let windows = even_half
+            .chunks_exact(16)
+            .zip(odd_half.chunks_exact(16))
+            .zip(natural.chunks_exact_mut(32));
+        for ((even_window, odd_window), out_window) in windows {
+            let even = _mm256_loadu_si256(even_window.as_ptr().cast::<__m256i>());
+            let odd = _mm256_loadu_si256(odd_window.as_ptr().cast::<__m256i>());
 
             let lo = _mm256_unpacklo_epi16(even, odd);
             let hi = _mm256_unpackhi_epi16(even, odd);
 
+            let out_ptr = out_window.as_mut_ptr();
             _mm256_storeu_si256(
-                out_ptr.add(2 * i).cast::<__m256i>(),
+                out_ptr.cast::<__m256i>(),
                 _mm256_permute2x128_si256::<0x20>(lo, hi),
             );
             _mm256_storeu_si256(
-                out_ptr.add(2 * i + 16).cast::<__m256i>(),
+                out_ptr.add(16).cast::<__m256i>(),
                 _mm256_permute2x128_si256::<0x31>(lo, hi),
             );
-
-            i += 16;
         }
     }
 
@@ -410,44 +413,47 @@ pub(crate) fn multiply(
     f: &[FieldElement; parameters::N],
     g: &[FieldElement; parameters::N],
 ) -> [FieldElement; parameters::N] {
-    let mut h = core::mem::MaybeUninit::<[FieldElement; parameters::N]>::uninit();
+    let mut h = [FieldElement::ZERO; parameters::N];
 
     // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so the three
     // length-256 arrays and the length-128 `GAMMA_MONT` reinterpret as
-    // `[i16]`. Each iteration reads the two even/odd 16-`i16` halves of each
-    // base-pair window of `f`/`g` and writes the matching halves of `h`
-    // (offsets `pair` and `128 + pair`; 8 windows tile 256), and reads a
-    // 16-`i16` window of the gammas, all in bounds. The half writes tile
-    // the full 256-element `h`, so the `assume_init` at the end reads only
-    // initialized bytes. `loadu`/`storeu` are unaligned; the module is AVX2.
+    // `[i16]`. Every load and store uses a pointer derived from a 16-element
+    // chunk of the half it covers, so it is in bounds by construction.
+    // `loadu`/`storeu` are unaligned; the module is AVX2.
     unsafe {
-        let f_ptr = f.as_ptr().cast::<i16>();
-        let g_ptr = g.as_ptr().cast::<i16>();
-        let h_ptr = h.as_mut_ptr().cast::<i16>();
-        let gamma_ptr = super::GAMMA_MONT.as_ptr().cast::<i16>();
+        let (f0_half, f1_half) = f.split_at(parameters::N / 2);
+        let (g0_half, g1_half) = g.split_at(parameters::N / 2);
+        let (h0_half, h1_half) = h.split_at_mut(parameters::N / 2);
 
-        let mut pair = 0;
-        while pair < 128 {
+        let windows = f0_half
+            .chunks_exact(16)
+            .zip(f1_half.chunks_exact(16))
+            .zip(g0_half.chunks_exact(16).zip(g1_half.chunks_exact(16)))
+            .zip(super::GAMMA_MONT.chunks_exact(16))
+            .zip(
+                h0_half
+                    .chunks_exact_mut(16)
+                    .zip(h1_half.chunks_exact_mut(16)),
+            );
+        for ((((f0_w, f1_w), (g0_w, g1_w)), gamma_w), (h0_w, h1_w)) in windows {
             // Even (degree-0) and odd (degree-1) halves.
-            let a0 = _mm256_loadu_si256(f_ptr.add(pair).cast::<__m256i>());
-            let a1 = _mm256_loadu_si256(f_ptr.add(128 + pair).cast::<__m256i>());
-            let b0 = _mm256_loadu_si256(g_ptr.add(pair).cast::<__m256i>());
-            let b1 = _mm256_loadu_si256(g_ptr.add(128 + pair).cast::<__m256i>());
+            let a0 = _mm256_loadu_si256(f0_w.as_ptr().cast::<__m256i>());
+            let a1 = _mm256_loadu_si256(f1_w.as_ptr().cast::<__m256i>());
+            let b0 = _mm256_loadu_si256(g0_w.as_ptr().cast::<__m256i>());
+            let b1 = _mm256_loadu_si256(g1_w.as_ptr().cast::<__m256i>());
 
-            let gamma = _mm256_loadu_si256(gamma_ptr.add(pair).cast::<__m256i>());
+            let gamma = _mm256_loadu_si256(gamma_w.as_ptr().cast::<__m256i>());
 
             // c0 = a0*b0 + a1*b1*gamma ; c1 = a0*b1 + a1*b0
             let c0 = _mm256_add_epi16(fqmul(a0, b0), fqmul(fqmul(a1, b1), gamma));
             let c1 = _mm256_add_epi16(fqmul(a0, b1), fqmul(a1, b0));
 
-            _mm256_storeu_si256(h_ptr.add(pair).cast::<__m256i>(), c0);
-            _mm256_storeu_si256(h_ptr.add(128 + pair).cast::<__m256i>(), c1);
-
-            pair += 16;
+            _mm256_storeu_si256(h0_w.as_mut_ptr().cast::<__m256i>(), c0);
+            _mm256_storeu_si256(h1_w.as_mut_ptr().cast::<__m256i>(), c1);
         }
-
-        h.assume_init()
     }
+
+    h
 }
 
 /// Widens two 16-lane `i16` products into eight-lane `i32` sums-of-products,
@@ -512,26 +518,32 @@ pub(crate) fn basemul_accumulate(
     // plane (pair and pair + 8, with pair + 16 <= 128), all in bounds.
     // `loadu`/`storeu` are unaligned; the module is AVX2.
     unsafe {
-        let f_ptr = f.as_ptr().cast::<i16>();
-        let g_ptr = g.as_ptr().cast::<i16>();
-        let cache_ptr = cache.as_ptr().cast::<i16>();
-        let even_ptr = acc.even.as_mut_ptr();
-        let odd_ptr = acc.odd.as_mut_ptr();
+        let (f0_half, f1_half) = f.split_at(parameters::N / 2);
+        let (g0_half, g1_half) = g.split_at(parameters::N / 2);
 
-        let mut pair = 0;
-        while pair < 128 {
-            let a0 = _mm256_loadu_si256(f_ptr.add(pair).cast::<__m256i>());
-            let a1 = _mm256_loadu_si256(f_ptr.add(128 + pair).cast::<__m256i>());
-            let b0 = _mm256_loadu_si256(g_ptr.add(pair).cast::<__m256i>());
-            let b1 = _mm256_loadu_si256(g_ptr.add(128 + pair).cast::<__m256i>());
+        let windows = f0_half
+            .chunks_exact(16)
+            .zip(f1_half.chunks_exact(16))
+            .zip(g0_half.chunks_exact(16).zip(g1_half.chunks_exact(16)))
+            .zip(cache.chunks_exact(16))
+            .zip(
+                acc.even
+                    .chunks_exact_mut(16)
+                    .zip(acc.odd.chunks_exact_mut(16)),
+            );
+        for ((((f0_w, f1_w), (g0_w, g1_w)), cache_w), (even_w, odd_w)) in windows {
+            let a0 = _mm256_loadu_si256(f0_w.as_ptr().cast::<__m256i>());
+            let a1 = _mm256_loadu_si256(f1_w.as_ptr().cast::<__m256i>());
+            let b0 = _mm256_loadu_si256(g0_w.as_ptr().cast::<__m256i>());
+            let b1 = _mm256_loadu_si256(g1_w.as_ptr().cast::<__m256i>());
 
-            let c = _mm256_loadu_si256(cache_ptr.add(pair).cast::<__m256i>());
+            let c = _mm256_loadu_si256(cache_w.as_ptr().cast::<__m256i>());
 
             // even += a0*b0 + a1*cache, in i32 lanes.
             let even_gain_lo = _mm256_add_epi32(widening_mul_lo(a0, b0), widening_mul_lo(a1, c));
             let even_gain_hi = _mm256_add_epi32(widening_mul_hi(a0, b0), widening_mul_hi(a1, c));
-            let even_lo_ptr = even_ptr.add(pair).cast::<__m256i>();
-            let even_hi_ptr = even_ptr.add(pair + 8).cast::<__m256i>();
+            let even_lo_ptr = even_w.as_mut_ptr().cast::<__m256i>();
+            let even_hi_ptr = even_w.as_mut_ptr().add(8).cast::<__m256i>();
             _mm256_storeu_si256(
                 even_lo_ptr,
                 _mm256_add_epi32(_mm256_loadu_si256(even_lo_ptr), even_gain_lo),
@@ -544,8 +556,8 @@ pub(crate) fn basemul_accumulate(
             // odd += a0*b1 + a1*b0, in i32 lanes.
             let odd_gain_lo = _mm256_add_epi32(widening_mul_lo(a0, b1), widening_mul_lo(a1, b0));
             let odd_gain_hi = _mm256_add_epi32(widening_mul_hi(a0, b1), widening_mul_hi(a1, b0));
-            let odd_lo_ptr = odd_ptr.add(pair).cast::<__m256i>();
-            let odd_hi_ptr = odd_ptr.add(pair + 8).cast::<__m256i>();
+            let odd_lo_ptr = odd_w.as_mut_ptr().cast::<__m256i>();
+            let odd_hi_ptr = odd_w.as_mut_ptr().add(8).cast::<__m256i>();
             _mm256_storeu_si256(
                 odd_lo_ptr,
                 _mm256_add_epi32(_mm256_loadu_si256(odd_lo_ptr), odd_gain_lo),
@@ -554,8 +566,6 @@ pub(crate) fn basemul_accumulate(
                 odd_hi_ptr,
                 _mm256_add_epi32(_mm256_loadu_si256(odd_hi_ptr), odd_gain_hi),
             );
-
-            pair += 16;
         }
     }
 }
