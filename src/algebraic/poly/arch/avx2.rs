@@ -188,13 +188,11 @@ pub(crate) fn compress(
     let mut out = [0u16; parameters::N];
 
     // SAFETY: `FieldElement` is `repr(transparent)` over `i16` and the `u16`
-    // outputs are below `2^d`, so both arrays reinterpret as `[i16]`. Each
-    // iteration reads and writes one 16-`i16` window (16 windows tile 256).
+    // outputs are below `2^d`, so both element types reinterpret as `i16`.
+    // Every load and store uses a pointer derived from a 16-element chunk of
+    // the array it covers, so it is in bounds by construction.
     // `loadu`/`storeu` are unaligned; the module is AVX2.
     unsafe {
-        let in_ptr = coefficients.as_ptr().cast::<i16>();
-        let out_ptr = out.as_mut_ptr().cast::<i16>();
-
         let up = _mm_set1_epi64x(d as i64);
         let half_q = _mm256_set1_epi32(i32::from(parameters::Q / 2));
         let mask = _mm256_set1_epi32((1 << d) - 1);
@@ -206,16 +204,17 @@ pub(crate) fn compress(
             _mm256_and_si256(divide_by_q(a), mask)
         };
 
-        let mut i = 0;
-        while i < parameters::N {
-            let x = canonical_lanes(_mm256_loadu_si256(in_ptr.add(i).cast::<__m256i>()));
+        let windows = coefficients.chunks_exact(16).zip(out.chunks_exact_mut(16));
+        for (window, out_window) in windows {
+            let x = canonical_lanes(_mm256_loadu_si256(window.as_ptr().cast::<__m256i>()));
 
             let lo = divide(_mm256_extracti128_si256::<0>(x));
             let hi = divide(_mm256_extracti128_si256::<1>(x));
 
-            _mm256_storeu_si256(out_ptr.add(i).cast::<__m256i>(), pack_lanes(lo, hi));
-
-            i += 16;
+            _mm256_storeu_si256(
+                out_window.as_mut_ptr().cast::<__m256i>(),
+                pack_lanes(lo, hi),
+            );
         }
     }
 
@@ -231,14 +230,12 @@ pub(crate) fn decompress(values: &[u16; parameters::N], d: usize) -> [FieldEleme
     let mut out = [FieldElement::ZERO; parameters::N];
 
     // SAFETY: the `u16` inputs are below `2^12` and the outputs canonical, so
-    // both arrays reinterpret as `[i16]` (`FieldElement` is
-    // `repr(transparent)` over `i16`). Each iteration reads and writes one
-    // 16-`i16` window (16 windows tile 256). `loadu`/`storeu` are unaligned;
-    // the module is AVX2.
+    // both element types reinterpret as `i16` (`FieldElement` is
+    // `repr(transparent)` over `i16`). Every load and store uses a pointer
+    // derived from a 16-element chunk of the array it covers, so it is in
+    // bounds by construction. `loadu`/`storeu` are unaligned; the module is
+    // AVX2.
     unsafe {
-        let in_ptr = values.as_ptr().cast::<i16>();
-        let out_ptr = out.as_mut_ptr().cast::<i16>();
-
         let down = _mm_set1_epi64x(d as i64);
         let half = _mm256_set1_epi32(1 << (d - 1));
         let q = _mm256_set1_epi32(i32::from(parameters::Q));
@@ -250,16 +247,17 @@ pub(crate) fn decompress(values: &[u16; parameters::N], d: usize) -> [FieldEleme
             _mm256_srl_epi32(a, down)
         };
 
-        let mut i = 0;
-        while i < parameters::N {
-            let y = _mm256_loadu_si256(in_ptr.add(i).cast::<__m256i>());
+        let windows = values.chunks_exact(16).zip(out.chunks_exact_mut(16));
+        for (window, out_window) in windows {
+            let y = _mm256_loadu_si256(window.as_ptr().cast::<__m256i>());
 
             let lo = scale(_mm256_extracti128_si256::<0>(y));
             let hi = scale(_mm256_extracti128_si256::<1>(y));
 
-            _mm256_storeu_si256(out_ptr.add(i).cast::<__m256i>(), pack_lanes(lo, hi));
-
-            i += 16;
+            _mm256_storeu_si256(
+                out_window.as_mut_ptr().cast::<__m256i>(),
+                pack_lanes(lo, hi),
+            );
         }
     }
 
@@ -276,19 +274,15 @@ pub(crate) fn canonical(coefficients: &[FieldElement; parameters::N]) -> [u16; p
     let mut out = [0u16; parameters::N];
 
     // SAFETY: `FieldElement` is `repr(transparent)` over `i16` and the
-    // canonical outputs are below q, so both arrays reinterpret as `[i16]`.
-    // Each iteration reads and writes one 16-`i16` window (16 windows tile
-    // 256). `loadu`/`storeu` are unaligned; the module is AVX2.
+    // canonical outputs are below q, so both element types reinterpret as
+    // `i16`. Every load and store uses a pointer derived from a 16-element
+    // chunk of the array it covers, so it is in bounds by construction.
+    // `loadu`/`storeu` are unaligned; the module is AVX2.
     unsafe {
-        let in_ptr = coefficients.as_ptr().cast::<i16>();
-        let out_ptr = out.as_mut_ptr().cast::<i16>();
-
-        let mut i = 0;
-        while i < parameters::N {
-            let x = canonical_lanes(_mm256_loadu_si256(in_ptr.add(i).cast::<__m256i>()));
-            _mm256_storeu_si256(out_ptr.add(i).cast::<__m256i>(), x);
-
-            i += 16;
+        let windows = coefficients.chunks_exact(16).zip(out.chunks_exact_mut(16));
+        for (window, out_window) in windows {
+            let x = canonical_lanes(_mm256_loadu_si256(window.as_ptr().cast::<__m256i>()));
+            _mm256_storeu_si256(out_window.as_mut_ptr().cast::<__m256i>(), x);
         }
     }
 
