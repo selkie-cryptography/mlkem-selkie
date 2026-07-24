@@ -117,9 +117,22 @@ pub(crate) fn decompress(values: &[u16; parameters::N], d: usize) -> [FieldEleme
 }
 
 /// The canonical representative in `[0, q)` of every coefficient
-/// (`FieldElement::value`, one output per coefficient).
+/// (`FieldElement::value`), re-interleaved to natural order for
+/// serialization.
+// reason: indices 2i, 2i + 1, i, and 128 + i are provably in 0..256 for i in
+// 0..128.
+#[allow(clippy::indexing_slicing, clippy::needless_range_loop)]
 pub(crate) fn canonical(coefficients: &[FieldElement; parameters::N]) -> [u16; parameters::N] {
-    coefficients.map(FieldElement::value)
+    const HALF: usize = parameters::N / 2;
+
+    let mut natural = [0u16; parameters::N];
+
+    for i in 0..HALF {
+        natural[2 * i] = coefficients[i].value();
+        natural[2 * i + 1] = coefficients[HALF + i].value();
+    }
+
+    natural
 }
 
 /// Pointwise base multiplication of two NTT representations, reducing to 128
@@ -132,34 +145,71 @@ pub(crate) fn canonical(coefficients: &[FieldElement; parameters::N]) -> [u16; p
 ///
 /// [Algorithm 11, `MultiplyNTTs`]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.11
 /// [Algorithm 12, `BaseCaseMultiply`]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.12
-// reason: indices 2i and 2i+1 are provably in 0..256 for i in 0..128, and the
-// pairwise indexing is clearer than a chunked-iterator rewrite over the arrays.
+// reason: indices i and 128 + i are provably in 0..256 for i in 0..128, and
+// the even/odd-half indexing is clearer than a split-iterator rewrite.
 #[allow(clippy::indexing_slicing, clippy::needless_range_loop)]
 pub(crate) fn multiply(
     f: &[FieldElement; parameters::N],
     g: &[FieldElement; parameters::N],
 ) -> [FieldElement; parameters::N] {
+    const HALF: usize = parameters::N / 2;
+
     let mut h = [FieldElement::ZERO; parameters::N];
 
-    for i in 0..128 {
-        let (even, odd) = (2 * i, 2 * i + 1);
+    for i in 0..HALF {
         let gamma = GAMMA_MONT[i];
 
-        h[even] = (f[even] * g[even]) + (f[odd] * g[odd] * gamma);
-        h[odd] = (f[even] * g[odd]) + (f[odd] * g[even]);
+        h[i] = (f[i] * g[i]) + (f[HALF + i] * g[HALF + i] * gamma);
+        h[HALF + i] = (f[i] * g[HALF + i]) + (f[HALF + i] * g[i]);
     }
 
     h
 }
 
+/// Splits natural coefficient order into Tq's evens-then-odds storage.
+// reason: indices 2i, 2i + 1, i, and 128 + i are provably in 0..256 for i in
+// 0..128.
+#[allow(clippy::indexing_slicing, clippy::needless_range_loop)]
+pub(crate) fn pack(natural: &[FieldElement; parameters::N]) -> [FieldElement; parameters::N] {
+    const HALF: usize = parameters::N / 2;
+
+    let mut halves = [FieldElement::ZERO; parameters::N];
+
+    for i in 0..HALF {
+        halves[i] = natural[2 * i];
+        halves[HALF + i] = natural[2 * i + 1];
+    }
+
+    halves
+}
+
+/// Re-interleaves Tq's evens-then-odds storage back to natural order: the
+/// inverse of [`pack`].
+// reason: as [`pack`] — every index is provably in 0..256.
+#[allow(clippy::indexing_slicing, clippy::needless_range_loop)]
+pub(crate) fn unpack(halves: &[FieldElement; parameters::N]) -> [FieldElement; parameters::N] {
+    const HALF: usize = parameters::N / 2;
+
+    let mut natural = [FieldElement::ZERO; parameters::N];
+
+    for i in 0..HALF {
+        natural[2 * i] = halves[i];
+        natural[2 * i + 1] = halves[HALF + i];
+    }
+
+    natural
+}
+
 /// Accumulates one component of an asymmetric base-multiplication dot product
 /// into `acc`: raw `i32` products, no reduction.
 ///
-/// Per pair, the degree-0 plane gains `f_e * g_e + f_o * cache_i` and the
-/// degree-1 plane `f_e * g_o + f_o * g_e`, where `cache` holds the
-/// precomputed `gamma_i * g_(2i+1)` products. [`basemul_reduce`] later
-/// performs the single Montgomery reduction per coefficient; the deferred sum
-/// matches per-component reduction mod q.
+/// Per base pair, the degree-0 plane gains `f_e * g_e + f_o * cache_i` and
+/// the degree-1 plane `f_e * g_o + f_o * g_e`, with the pair halves read
+/// straight from the evens-then-odds storage halves and `cache` holding the
+/// precomputed
+/// `gamma_i * g_o` products. [`basemul_reduce`] later performs the single
+/// Montgomery reduction per coefficient; the deferred sum matches
+/// per-component reduction mod q.
 // reason: indices 2i+1 and i are provably in bounds for i in 0..128, and the
 // pairwise indexing matches `multiply`.
 #[allow(clippy::indexing_slicing, clippy::needless_range_loop)]
@@ -169,16 +219,16 @@ pub(crate) fn basemul_accumulate(
     g: &[FieldElement; parameters::N],
     cache: &[FieldElement; parameters::N / 2],
 ) {
-    for i in 0..128 {
-        let (even, odd) = (2 * i, 2 * i + 1);
+    const HALF: usize = parameters::N / 2;
 
-        acc.even[i] += f[even].widening_mul(g[even]) + f[odd].widening_mul(cache[i]);
-        acc.odd[i] += f[even].widening_mul(g[odd]) + f[odd].widening_mul(g[even]);
+    for i in 0..HALF {
+        acc.even[i] += f[i].widening_mul(g[i]) + f[HALF + i].widening_mul(cache[i]);
+        acc.odd[i] += f[i].widening_mul(g[HALF + i]) + f[HALF + i].widening_mul(g[i]);
     }
 }
 
-/// Montgomery-reduces the accumulated product sums to interleaved
-/// coefficients, one reduction per coefficient. The result is scaled by
+/// Montgomery-reduces the accumulated product sums into the evens-then-odds
+/// storage halves, one reduction per coefficient. The result is scaled by
 /// `R^-1` (Montgomery convention), as [`multiply`]'s is.
 // reason: indices 2i+1 and i are provably in bounds for i in 0..128, and the
 // pairwise indexing matches `multiply`.
@@ -186,9 +236,11 @@ pub(crate) fn basemul_accumulate(
 pub(crate) fn basemul_reduce(acc: &ProductAccumulator) -> [FieldElement; parameters::N] {
     let mut h = [FieldElement::ZERO; parameters::N];
 
-    for i in 0..128 {
-        h[2 * i] = FieldElement::from_product_sum(acc.even[i]);
-        h[2 * i + 1] = FieldElement::from_product_sum(acc.odd[i]);
+    const HALF: usize = parameters::N / 2;
+
+    for i in 0..HALF {
+        h[i] = FieldElement::from_product_sum(acc.even[i]);
+        h[HALF + i] = FieldElement::from_product_sum(acc.odd[i]);
     }
 
     h

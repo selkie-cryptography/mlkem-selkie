@@ -159,7 +159,16 @@ impl From<TqElement> for RqElement {
 /// Zq. The NTT is the computationally efficient isomorphism between them. See
 /// [section 4.3] of FIPS 203.
 ///
+/// For performance, coefficients are stored evens-then-odds — the 128
+/// even-position (degree-0) coefficients, then the 128 odd-position
+/// (degree-1) — so base multiplication loads each pair half as a contiguous
+/// run instead of shuffling every pair apart per multiplication: the
+/// `nttpack` technique of the [Kyber AVX2 reference implementation]. The
+/// layout is internal; every public surface speaks natural coefficient
+/// order, converting at the boundaries.
+///
 /// [section 4.3]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.3
+/// [Kyber AVX2 reference implementation]: https://github.com/pq-crystals/kyber/tree/main/avx2
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TqElement([FieldElement; parameters::N]);
 
@@ -188,10 +197,11 @@ impl TqElement {
     /// accumulated basemul products reach.
     ///
     /// [Algorithm 10, `NTT⁻¹(f_hat)`]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.10
-    pub fn ntt_inverse(mut self) -> RqElement {
-        arch::ntt_inverse(&mut self.0);
+    pub fn ntt_inverse(self) -> RqElement {
+        let mut coefficients = arch::unpack(&self.0);
+        arch::ntt_inverse(&mut coefficients);
 
-        RqElement::new(self.0)
+        RqElement::new(coefficients)
     }
 
     /// Scales every coefficient by `R`, undoing the `R^-1` left by base
@@ -204,10 +214,12 @@ impl TqElement {
     /// Precomputes this polynomial's asymmetric base-multiplication cache.
     #[must_use]
     pub fn mul_cache(&self) -> TqMulCache {
-        // reason: indices 2i+1 and i are provably in bounds for i in 0..128,
-        // and the pairwise indexing matches `multiply`.
+        // reason: indices 128 + i and i are provably in bounds for i in
+        // 0..128; the second (odd) half holds the degree-1 coefficients.
         #[allow(clippy::indexing_slicing)]
-        TqMulCache(array::from_fn(|i| self.0[2 * i + 1] * arch::GAMMA_MONT[i]))
+        TqMulCache(array::from_fn(|i| {
+            self.0[parameters::N / 2 + i] * arch::GAMMA_MONT[i]
+        }))
     }
 
     /// Computes the accumulated dot product `sum_j f_j * g_j` of two
@@ -243,22 +255,27 @@ impl TqElement {
 impl PolynomialRingElement for TqElement {
     const ZERO: Self = Self([FieldElement::ZERO; parameters::N]);
 
+    // Splits the natural-order input into the evens-then-odds storage.
     fn new(coefficients: [FieldElement; parameters::N]) -> Self {
-        Self(coefficients)
+        Self(arch::pack(&coefficients))
     }
 
+    // Re-interleaves the storage back to natural coefficient order.
     fn coefficients(&self) -> [FieldElement; parameters::N] {
-        self.0
+        arch::unpack(&self.0)
     }
 }
 
 impl Index<usize> for TqElement {
     type Output = FieldElement;
 
-    // reason: see `RqElement`'s `Index` impl — indexing is the trait's contract.
+    /// Indexes by natural coefficient position, mapped onto the split
+    /// storage.
+    // reason: see `RqElement`'s `Index` impl — indexing is the trait's
+    // contract; the mapped index stays below `N`.
     #[allow(clippy::indexing_slicing)]
     fn index(&self, index: usize) -> &FieldElement {
-        &self.0[index]
+        &self.0[(index % 2) * (parameters::N / 2) + index / 2]
     }
 }
 

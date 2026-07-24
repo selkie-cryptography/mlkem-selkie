@@ -25,15 +25,17 @@ mod neon;
 #[cfg(mlkem_selkie_arch = "avx2")]
 use avx2::{basemul_accumulate, basemul_reduce};
 #[cfg(mlkem_selkie_arch = "avx2")]
-pub(crate) use avx2::{canonical, compress, decompress, multiply, ntt, ntt_inverse};
+pub(crate) use avx2::{canonical, compress, decompress, multiply, ntt, ntt_inverse, pack, unpack};
 #[cfg(not(any(mlkem_selkie_arch = "neon", mlkem_selkie_arch = "avx2")))]
 use generic::{basemul_accumulate, basemul_reduce};
 #[cfg(not(any(mlkem_selkie_arch = "neon", mlkem_selkie_arch = "avx2")))]
 pub(crate) use generic::{canonical, compress, decompress, multiply, ntt, ntt_inverse};
+#[cfg(not(any(mlkem_selkie_arch = "neon", mlkem_selkie_arch = "avx2")))]
+pub(crate) use generic::{pack, unpack};
 #[cfg(mlkem_selkie_arch = "neon")]
 use neon::{basemul_accumulate, basemul_reduce};
 #[cfg(mlkem_selkie_arch = "neon")]
-pub(crate) use neon::{canonical, compress, decompress, multiply, ntt, ntt_inverse};
+pub(crate) use neon::{canonical, compress, decompress, multiply, ntt, ntt_inverse, pack, unpack};
 
 use crate::parameters;
 
