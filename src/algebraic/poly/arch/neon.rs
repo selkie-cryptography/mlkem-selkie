@@ -421,9 +421,9 @@ pub(crate) fn decompress(values: &[u16; parameters::N], d: usize) -> [FieldEleme
     out
 }
 
-/// The canonical representative in `[0, q)` of every coefficient,
-/// thirty-two eight-lane groups: the vector form of `FieldElement::value`
-/// over a polynomial.
+/// The canonical representative in `[0, q)` of every coefficient
+/// (`FieldElement::value`), re-interleaved to natural order for
+/// serialization, sixteen eight-lane groups.
 ///
 /// Matches [`super::generic::canonical`]. Constant-time: branch-free per
 /// lane.
@@ -432,21 +432,82 @@ pub(crate) fn canonical(coefficients: &[FieldElement; parameters::N]) -> [u16; p
 
     // SAFETY: `FieldElement` is `repr(transparent)` over `i16` and the
     // canonical outputs are below q, so both arrays reinterpret as `[i16]`.
-    // Each iteration reads and writes one 8-`i16` window (32 windows tile
-    // 256). `vld1q`/`vst1q` are unaligned. NEON is baseline on aarch64.
+    // Each iteration reads the two even/odd 8-`i16` halves of a base-pair
+    // window (offsets `i` and `128 + i`) and writes one interleaved 16-`i16`
+    // window of `out` (16 windows tile 256), all in bounds. `vld1q`/`vst2q`
+    // are unaligned. NEON is baseline on aarch64.
     unsafe {
         let in_ptr = coefficients.as_ptr().cast::<i16>();
         let out_ptr = out.as_mut_ptr().cast::<i16>();
 
         let mut i = 0;
-        while i < parameters::N {
-            vst1q_s16(out_ptr.add(i), canonical_lanes(vld1q_s16(in_ptr.add(i))));
+        while i < parameters::N / 2 {
+            let even = canonical_lanes(vld1q_s16(in_ptr.add(i)));
+            let odd = canonical_lanes(vld1q_s16(in_ptr.add(128 + i)));
+
+            vst2q_s16(out_ptr.add(2 * i), int16x8x2_t(even, odd));
 
             i += 8;
         }
     }
 
     out
+}
+
+/// Splits natural coefficient order into Tq's evens-then-odds storage,
+/// eight base pairs at a time. Matches [`super::generic::pack`].
+pub(crate) fn pack(natural: &[FieldElement; parameters::N]) -> [FieldElement; parameters::N] {
+    let mut halves = [FieldElement::ZERO; parameters::N];
+
+    // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so both
+    // arrays reinterpret as `[i16]`. Each iteration reads one interleaved
+    // 16-`i16` window of `natural` and writes the two even/odd 8-`i16` halves
+    // (offsets `i` and `128 + i`; 16 windows tile 256), all in bounds.
+    // `vld2q`/`vst1q` are unaligned. NEON is baseline on aarch64.
+    unsafe {
+        let in_ptr = natural.as_ptr().cast::<i16>();
+        let out_ptr = halves.as_mut_ptr().cast::<i16>();
+
+        let mut i = 0;
+        while i < parameters::N / 2 {
+            let de = vld2q_s16(in_ptr.add(2 * i));
+
+            vst1q_s16(out_ptr.add(i), de.0);
+            vst1q_s16(out_ptr.add(128 + i), de.1);
+
+            i += 8;
+        }
+    }
+
+    halves
+}
+
+/// Re-interleaves Tq's evens-then-odds storage back to natural order, eight
+/// base pairs at a time. Matches [`super::generic::unpack`].
+pub(crate) fn unpack(halves: &[FieldElement; parameters::N]) -> [FieldElement; parameters::N] {
+    let mut natural = [FieldElement::ZERO; parameters::N];
+
+    // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so both
+    // arrays reinterpret as `[i16]`. Each iteration reads the two halves
+    // 8-`i16` halves (offsets `i` and `128 + i`) and writes one interleaved
+    // 16-`i16` window of `natural` (16 windows tile 256), all in bounds.
+    // `vld1q`/`vst2q` are unaligned. NEON is baseline on aarch64.
+    unsafe {
+        let in_ptr = halves.as_ptr().cast::<i16>();
+        let out_ptr = natural.as_mut_ptr().cast::<i16>();
+
+        let mut i = 0;
+        while i < parameters::N / 2 {
+            let even = vld1q_s16(in_ptr.add(i));
+            let odd = vld1q_s16(in_ptr.add(128 + i));
+
+            vst2q_s16(out_ptr.add(2 * i), int16x8x2_t(even, odd));
+
+            i += 8;
+        }
+    }
+
+    natural
 }
 
 /// One Cooley-Tukey butterfly over eight lanes: returns `(a + t, a - t)` for
@@ -499,12 +560,12 @@ pub(crate) fn multiply(
 
     // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so the three
     // length-256 arrays and the length-128 `GAMMA_MONT` reinterpret as `[i16]`.
-    // Each iteration reads a 16-`i16` window of `f`/`g` and writes a 16-`i16`
-    // window of `h` (16 windows tile 256), and reads an 8-`i16` window of the
-    // gammas (16 windows tile 128), all in bounds. The `vst2q` writes tile the
-    // full 256-element `h`, so the `assume_init` at the end reads only
-    // initialized bytes. `vld1q`/`vld2q`/`vst2q` are unaligned. NEON is
-    // baseline on aarch64.
+    // Each iteration reads the two even/odd 8-`i16` halves of each base-pair
+    // window of `f`/`g` and writes the matching halves of `h` (offsets `pair`
+    // and `128 + pair`; 16 windows tile 256), and reads an 8-`i16` window of
+    // the gammas, all in bounds. The half writes tile the full 256-element
+    // `h`, so the `assume_init` at the end reads only initialized bytes.
+    // `vld1q`/`vst1q` are unaligned. NEON is baseline on aarch64.
     unsafe {
         let f_ptr = f.as_ptr().cast::<i16>();
         let g_ptr = g.as_ptr().cast::<i16>();
@@ -513,20 +574,19 @@ pub(crate) fn multiply(
 
         let mut pair = 0;
         while pair < 128 {
-            // Deinterleave eight pairs: `.0` is the even (degree-0) coefficient,
-            // `.1` the odd (degree-1).
-            let f_de = vld2q_s16(f_ptr.add(2 * pair));
-            let g_de = vld2q_s16(g_ptr.add(2 * pair));
+            // Even (degree-0) and odd (degree-1) halves.
+            let a0 = vld1q_s16(f_ptr.add(pair));
+            let a1 = vld1q_s16(f_ptr.add(128 + pair));
+            let b0 = vld1q_s16(g_ptr.add(pair));
+            let b1 = vld1q_s16(g_ptr.add(128 + pair));
             let gamma = vld1q_s16(gamma_ptr.add(pair));
-
-            let (a0, a1) = (f_de.0, f_de.1);
-            let (b0, b1) = (g_de.0, g_de.1);
 
             // c0 = a0*b0 + a1*b1*gamma ; c1 = a0*b1 + a1*b0
             let c0 = vaddq_s16(fqmul(a0, b0), fqmul(fqmul(a1, b1), gamma));
             let c1 = vaddq_s16(fqmul(a0, b1), fqmul(a1, b0));
 
-            vst2q_s16(h_ptr.add(2 * pair), int16x8x2_t(c0, c1));
+            vst1q_s16(h_ptr.add(pair), c0);
+            vst1q_s16(h_ptr.add(128 + pair), c1);
 
             pair += 8;
         }
@@ -546,11 +606,12 @@ pub(crate) fn basemul_accumulate(
     cache: &[FieldElement; parameters::N / 2],
 ) {
     // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so `f`/`g`/
-    // `cache` reinterpret as `[i16]`. Each iteration reads 16-`i16` windows of
-    // `f`/`g` (16 windows tile 256), an 8-`i16` window of `cache`, and
-    // read-modify-writes two 4-`i32` windows of each 128-`i32` accumulator
-    // plane (pair and pair + 4, with pair + 8 <= 128), all in bounds.
-    // `vld1q`/`vld2q`/`vst1q` are unaligned. NEON is baseline on aarch64.
+    // `cache` reinterpret as `[i16]`. Each iteration reads the two halves
+    // 8-`i16` halves of each base-pair window of `f`/`g` (offsets `pair` and
+    // `128 + pair`), an 8-`i16` window of `cache`, and read-modify-writes two
+    // 4-`i32` windows of each 128-`i32` accumulator plane (pair and pair + 4,
+    // with pair + 8 <= 128), all in bounds. `vld1q`/`vst1q` are unaligned.
+    // NEON is baseline on aarch64.
     unsafe {
         let f_ptr = f.as_ptr().cast::<i16>();
         let g_ptr = g.as_ptr().cast::<i16>();
@@ -560,12 +621,11 @@ pub(crate) fn basemul_accumulate(
 
         let mut pair = 0;
         while pair < 128 {
-            let f_de = vld2q_s16(f_ptr.add(2 * pair));
-            let g_de = vld2q_s16(g_ptr.add(2 * pair));
+            let f0 = vld1q_s16(f_ptr.add(pair));
+            let f1 = vld1q_s16(f_ptr.add(128 + pair));
+            let g0 = vld1q_s16(g_ptr.add(pair));
+            let g1 = vld1q_s16(g_ptr.add(128 + pair));
             let c = vld1q_s16(cache_ptr.add(pair));
-
-            let (f0, f1) = (f_de.0, f_de.1);
-            let (g0, g1) = (g_de.0, g_de.1);
 
             // even += f0*g0 + f1*cache, in i32 lanes.
             let mut even_lo = vld1q_s32(even_ptr.add(pair));
@@ -592,8 +652,8 @@ pub(crate) fn basemul_accumulate(
     }
 }
 
-/// Montgomery-reduces the accumulated product sums to interleaved
-/// coefficients, eight pairs at a time.
+/// Montgomery-reduces the accumulated product sums into the evens-then-odds
+/// storage halves, eight pairs at a time.
 ///
 /// Matches [`super::generic::basemul_reduce`].
 pub(crate) fn basemul_reduce(acc: &super::ProductAccumulator) -> [FieldElement; parameters::N] {
@@ -601,9 +661,10 @@ pub(crate) fn basemul_reduce(acc: &super::ProductAccumulator) -> [FieldElement; 
 
     // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so `h`
     // reinterprets as `[i16]`. Each iteration reads two 4-`i32` windows of
-    // each 128-`i32` accumulator plane and writes a 16-`i16` window of `h`
-    // (16 windows tile 256), all in bounds. `vld1q`/`vst2q` are unaligned.
-    // NEON is baseline on aarch64.
+    // each 128-`i32` accumulator plane and writes the two even/odd 8-`i16`
+    // halves of `h` (offsets `pair` and `128 + pair`; 16 windows tile 256),
+    // all in bounds. `vld1q`/`vst1q` are unaligned. NEON is baseline on
+    // aarch64.
     unsafe {
         let even_ptr = acc.even.as_ptr();
         let odd_ptr = acc.odd.as_ptr();
@@ -623,7 +684,8 @@ pub(crate) fn basemul_reduce(acc: &super::ProductAccumulator) -> [FieldElement; 
                 montgomery_reduce(vld1q_s32(odd_ptr.add(pair + 4)), q, qinv),
             );
 
-            vst2q_s16(h_ptr.add(2 * pair), int16x8x2_t(c0, c1));
+            vst1q_s16(h_ptr.add(pair), c0);
+            vst1q_s16(h_ptr.add(128 + pair), c1);
 
             pair += 8;
         }

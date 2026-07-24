@@ -90,6 +90,91 @@ fn barrett_const_mul(a: __m256i, b: __m256i, b_bar: __m256i) -> __m256i {
     }
 }
 
+/// Splits natural coefficient order into Tq's evens-then-odds storage,
+/// sixteen base pairs at a time. Matches [`super::generic::pack`]; the one
+/// surviving deinterleave shuffle, once per forward transform instead of in
+/// every base multiplication.
+pub(crate) fn pack(natural: &[FieldElement; parameters::N]) -> [FieldElement; parameters::N] {
+    let mut halves = [FieldElement::ZERO; parameters::N];
+
+    // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so both
+    // arrays reinterpret as `[i16]`. Each iteration reads one interleaved
+    // 32-`i16` window of `natural` and writes the two even/odd 16-`i16` halves
+    // (offsets `i` and `128 + i`; 8 windows tile 256), all in bounds.
+    // `loadu`/`storeu` are unaligned; the module is AVX2.
+    unsafe {
+        let in_ptr = natural.as_ptr().cast::<i16>();
+        let out_ptr = halves.as_mut_ptr().cast::<i16>();
+
+        // Per-128-bit-lane byte mask gathering even `i16`s into the low half
+        // and odds into the high half.
+        let deinterleave = _mm256_setr_epi8(
+            0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15, //
+            0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15,
+        );
+
+        let mut i = 0;
+        while i < parameters::N / 2 {
+            let v0 = _mm256_loadu_si256(in_ptr.add(2 * i).cast::<__m256i>());
+            let v1 = _mm256_loadu_si256(in_ptr.add(2 * i + 16).cast::<__m256i>());
+
+            let d0 = _mm256_permute4x64_epi64::<0xD8>(_mm256_shuffle_epi8(v0, deinterleave));
+            let d1 = _mm256_permute4x64_epi64::<0xD8>(_mm256_shuffle_epi8(v1, deinterleave));
+
+            _mm256_storeu_si256(
+                out_ptr.add(i).cast::<__m256i>(),
+                _mm256_permute2x128_si256::<0x20>(d0, d1),
+            );
+            _mm256_storeu_si256(
+                out_ptr.add(128 + i).cast::<__m256i>(),
+                _mm256_permute2x128_si256::<0x31>(d0, d1),
+            );
+
+            i += 16;
+        }
+    }
+
+    halves
+}
+
+/// Re-interleaves Tq's evens-then-odds storage back to natural order,
+/// sixteen base pairs at a time. Matches [`super::generic::unpack`].
+pub(crate) fn unpack(halves: &[FieldElement; parameters::N]) -> [FieldElement; parameters::N] {
+    let mut natural = [FieldElement::ZERO; parameters::N];
+
+    // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so both
+    // arrays reinterpret as `[i16]`. Each iteration reads the two halves
+    // 16-`i16` halves (offsets `i` and `128 + i`) and writes one interleaved
+    // 32-`i16` window of `natural` (8 windows tile 256), all in bounds.
+    // `loadu`/`storeu` are unaligned; the module is AVX2.
+    unsafe {
+        let in_ptr = halves.as_ptr().cast::<i16>();
+        let out_ptr = natural.as_mut_ptr().cast::<i16>();
+
+        let mut i = 0;
+        while i < parameters::N / 2 {
+            let even = _mm256_loadu_si256(in_ptr.add(i).cast::<__m256i>());
+            let odd = _mm256_loadu_si256(in_ptr.add(128 + i).cast::<__m256i>());
+
+            let lo = _mm256_unpacklo_epi16(even, odd);
+            let hi = _mm256_unpackhi_epi16(even, odd);
+
+            _mm256_storeu_si256(
+                out_ptr.add(2 * i).cast::<__m256i>(),
+                _mm256_permute2x128_si256::<0x20>(lo, hi),
+            );
+            _mm256_storeu_si256(
+                out_ptr.add(2 * i + 16).cast::<__m256i>(),
+                _mm256_permute2x128_si256::<0x31>(lo, hi),
+            );
+
+            i += 16;
+        }
+    }
+
+    natural
+}
+
 /// One Cooley-Tukey butterfly over sixteen lanes: returns `(a + t, a - t)`
 /// for `t = b * zeta`, with the zeta given as its `(raw, Barrett)` broadcast
 /// pair.
@@ -264,9 +349,9 @@ pub(crate) fn decompress(values: &[u16; parameters::N], d: usize) -> [FieldEleme
     out
 }
 
-/// The canonical representative in `[0, q)` of every coefficient, sixteen
-/// sixteen-lane groups: the vector form of `FieldElement::value` over a
-/// polynomial.
+/// The canonical representative in `[0, q)` of every coefficient
+/// (`FieldElement::value`), re-interleaved to natural order for
+/// serialization, eight sixteen-lane group pairs.
 ///
 /// Matches [`super::generic::canonical`]. Constant-time: branch-free per
 /// lane.
@@ -275,14 +360,35 @@ pub(crate) fn canonical(coefficients: &[FieldElement; parameters::N]) -> [u16; p
 
     // SAFETY: `FieldElement` is `repr(transparent)` over `i16` and the
     // canonical outputs are below q, so both element types reinterpret as
-    // `i16`. Every load and store uses a pointer derived from a 16-element
-    // chunk of the array it covers, so it is in bounds by construction.
+    // `i16`. Every load and store uses a pointer derived from a chunk of the
+    // half or array it covers (even and odd 16-element chunks in, one
+    // 32-element chunk out), so it is in bounds by construction.
     // `loadu`/`storeu` are unaligned; the module is AVX2.
     unsafe {
-        let windows = coefficients.chunks_exact(16).zip(out.chunks_exact_mut(16));
-        for (window, out_window) in windows {
-            let x = canonical_lanes(_mm256_loadu_si256(window.as_ptr().cast::<__m256i>()));
-            _mm256_storeu_si256(out_window.as_mut_ptr().cast::<__m256i>(), x);
+        let (even_half, odd_half) = coefficients.split_at(parameters::N / 2);
+
+        let windows = even_half
+            .chunks_exact(16)
+            .zip(odd_half.chunks_exact(16))
+            .zip(out.chunks_exact_mut(32));
+        for ((even_window, odd_window), out_window) in windows {
+            let even = canonical_lanes(_mm256_loadu_si256(even_window.as_ptr().cast::<__m256i>()));
+            let odd = canonical_lanes(_mm256_loadu_si256(odd_window.as_ptr().cast::<__m256i>()));
+
+            // Interleave (e, o) pairs: unpack within 128-bit lanes, then
+            // gather the lane halves into sequential order.
+            let lo = _mm256_unpacklo_epi16(even, odd);
+            let hi = _mm256_unpackhi_epi16(even, odd);
+
+            let out_ptr = out_window.as_mut_ptr();
+            _mm256_storeu_si256(
+                out_ptr.cast::<__m256i>(),
+                _mm256_permute2x128_si256::<0x20>(lo, hi),
+            );
+            _mm256_storeu_si256(
+                out_ptr.add(16).cast::<__m256i>(),
+                _mm256_permute2x128_si256::<0x31>(lo, hi),
+            );
         }
     }
 
@@ -293,10 +399,9 @@ pub(crate) fn canonical(coefficients: &[FieldElement; parameters::N]) -> [u16; p
 /// products modulo the quadratics `X^2 - gamma`, computed sixteen pairs at a
 /// time.
 ///
-/// Matches [`super::generic::multiply`]. AVX2 has no deinterleaving
-/// load, so even (degree-0) and odd (degree-1) coefficients are separated with
-/// a `shuffle_epi8` + `permute4x64`/`permute2x128` sequence and re-interleaved
-/// on store. The result is scaled by `R^-1`, which `ntt_inverse` later undoes.
+/// Matches [`super::generic::multiply`]. The evens-then-odds storage yields
+/// each pair's halves as contiguous vectors: no shuffles. The result is scaled
+/// by `R^-1`, which `ntt_inverse` later undoes.
 ///
 /// `h` is stack-allocated `MaybeUninit`, not `[ZERO; N]`, so we skip the
 /// 16-`vmovups` array wipe LLVM otherwise emits — it can't see through the
@@ -308,11 +413,12 @@ pub(crate) fn multiply(
     let mut h = core::mem::MaybeUninit::<[FieldElement; parameters::N]>::uninit();
 
     // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so the three
-    // length-256 arrays and the length-128 `GAMMA_MONT` reinterpret as `[i16]`.
-    // Each iteration reads a 32-`i16` window of `f`/`g` and writes a 32-`i16`
-    // window of `h` (8 windows tile 256), and reads a 16-`i16` window of the
-    // gammas (8 windows tile 128), all in bounds. The `storeu` writes tile the
-    // full 256-element `h`, so the `assume_init` at the end reads only
+    // length-256 arrays and the length-128 `GAMMA_MONT` reinterpret as
+    // `[i16]`. Each iteration reads the two even/odd 16-`i16` halves of each
+    // base-pair window of `f`/`g` and writes the matching halves of `h`
+    // (offsets `pair` and `128 + pair`; 8 windows tile 256), and reads a
+    // 16-`i16` window of the gammas, all in bounds. The half writes tile
+    // the full 256-element `h`, so the `assume_init` at the end reads only
     // initialized bytes. `loadu`/`storeu` are unaligned; the module is AVX2.
     unsafe {
         let f_ptr = f.as_ptr().cast::<i16>();
@@ -320,36 +426,13 @@ pub(crate) fn multiply(
         let h_ptr = h.as_mut_ptr().cast::<i16>();
         let gamma_ptr = super::GAMMA_MONT.as_ptr().cast::<i16>();
 
-        // Per-128-bit-lane byte masks (repeated across both lanes): gather the
-        // even `i16`s into the low half and odds into the high half, and the
-        // inverse that re-interleaves them.
-        let deinterleave = _mm256_setr_epi8(
-            0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15, //
-            0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15,
-        );
-        let interleave = _mm256_setr_epi8(
-            0, 1, 8, 9, 2, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15, //
-            0, 1, 8, 9, 2, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15,
-        );
-
         let mut pair = 0;
         while pair < 128 {
-            let f0 = _mm256_loadu_si256(f_ptr.add(2 * pair).cast::<__m256i>());
-            let f1 = _mm256_loadu_si256(f_ptr.add(2 * pair + 16).cast::<__m256i>());
-            let g0 = _mm256_loadu_si256(g_ptr.add(2 * pair).cast::<__m256i>());
-            let g1 = _mm256_loadu_si256(g_ptr.add(2 * pair + 16).cast::<__m256i>());
-
-            // Each load holds 8 pairs; deinterleave to `[8 even | 8 odd]`.
-            let f0d = _mm256_permute4x64_epi64::<0xD8>(_mm256_shuffle_epi8(f0, deinterleave));
-            let f1d = _mm256_permute4x64_epi64::<0xD8>(_mm256_shuffle_epi8(f1, deinterleave));
-            let g0d = _mm256_permute4x64_epi64::<0xD8>(_mm256_shuffle_epi8(g0, deinterleave));
-            let g1d = _mm256_permute4x64_epi64::<0xD8>(_mm256_shuffle_epi8(g1, deinterleave));
-
-            // Gather 16 pairs' even (a0/b0) and odd (a1/b1) coefficients.
-            let a0 = _mm256_permute2x128_si256::<0x20>(f0d, f1d);
-            let a1 = _mm256_permute2x128_si256::<0x31>(f0d, f1d);
-            let b0 = _mm256_permute2x128_si256::<0x20>(g0d, g1d);
-            let b1 = _mm256_permute2x128_si256::<0x31>(g0d, g1d);
+            // Even (degree-0) and odd (degree-1) halves.
+            let a0 = _mm256_loadu_si256(f_ptr.add(pair).cast::<__m256i>());
+            let a1 = _mm256_loadu_si256(f_ptr.add(128 + pair).cast::<__m256i>());
+            let b0 = _mm256_loadu_si256(g_ptr.add(pair).cast::<__m256i>());
+            let b1 = _mm256_loadu_si256(g_ptr.add(128 + pair).cast::<__m256i>());
 
             let gamma = _mm256_loadu_si256(gamma_ptr.add(pair).cast::<__m256i>());
 
@@ -357,14 +440,8 @@ pub(crate) fn multiply(
             let c0 = _mm256_add_epi16(fqmul(a0, b0), fqmul(fqmul(a1, b1), gamma));
             let c1 = _mm256_add_epi16(fqmul(a0, b1), fqmul(a1, b0));
 
-            // Re-interleave even (c0) and odd (c1) coefficients back to pairs.
-            let lo = _mm256_permute2x128_si256::<0x20>(c0, c1);
-            let hi = _mm256_permute2x128_si256::<0x31>(c0, c1);
-            let h0 = _mm256_shuffle_epi8(_mm256_permute4x64_epi64::<0xD8>(lo), interleave);
-            let h1 = _mm256_shuffle_epi8(_mm256_permute4x64_epi64::<0xD8>(hi), interleave);
-
-            _mm256_storeu_si256(h_ptr.add(2 * pair).cast::<__m256i>(), h0);
-            _mm256_storeu_si256(h_ptr.add(2 * pair + 16).cast::<__m256i>(), h1);
+            _mm256_storeu_si256(h_ptr.add(pair).cast::<__m256i>(), c0);
+            _mm256_storeu_si256(h_ptr.add(128 + pair).cast::<__m256i>(), c1);
 
             pair += 16;
         }
@@ -428,8 +505,9 @@ pub(crate) fn basemul_accumulate(
     cache: &[FieldElement; parameters::N / 2],
 ) {
     // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so `f`/`g`/
-    // `cache` reinterpret as `[i16]`. Each iteration reads 32-`i16` windows of
-    // `f`/`g` (8 windows tile 256), a 16-`i16` window of `cache`, and
+    // `cache` reinterpret as `[i16]`. Each iteration reads the two halves
+    // 16-`i16` halves of each base-pair window of `f`/`g` (offsets `pair` and
+    // `128 + pair`; 8 windows tile 256), a 16-`i16` window of `cache`, and
     // read-modify-writes two 8-`i32` windows of each 128-`i32` accumulator
     // plane (pair and pair + 8, with pair + 16 <= 128), all in bounds.
     // `loadu`/`storeu` are unaligned; the module is AVX2.
@@ -440,29 +518,12 @@ pub(crate) fn basemul_accumulate(
         let even_ptr = acc.even.as_mut_ptr();
         let odd_ptr = acc.odd.as_mut_ptr();
 
-        // As in `multiply`: gather the even `i16`s into the low half and odds
-        // into the high half of each 128-bit lane.
-        let deinterleave = _mm256_setr_epi8(
-            0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15, //
-            0, 1, 4, 5, 8, 9, 12, 13, 2, 3, 6, 7, 10, 11, 14, 15,
-        );
-
         let mut pair = 0;
         while pair < 128 {
-            let f0 = _mm256_loadu_si256(f_ptr.add(2 * pair).cast::<__m256i>());
-            let f1 = _mm256_loadu_si256(f_ptr.add(2 * pair + 16).cast::<__m256i>());
-            let g0 = _mm256_loadu_si256(g_ptr.add(2 * pair).cast::<__m256i>());
-            let g1 = _mm256_loadu_si256(g_ptr.add(2 * pair + 16).cast::<__m256i>());
-
-            let f0d = _mm256_permute4x64_epi64::<0xD8>(_mm256_shuffle_epi8(f0, deinterleave));
-            let f1d = _mm256_permute4x64_epi64::<0xD8>(_mm256_shuffle_epi8(f1, deinterleave));
-            let g0d = _mm256_permute4x64_epi64::<0xD8>(_mm256_shuffle_epi8(g0, deinterleave));
-            let g1d = _mm256_permute4x64_epi64::<0xD8>(_mm256_shuffle_epi8(g1, deinterleave));
-
-            let a0 = _mm256_permute2x128_si256::<0x20>(f0d, f1d);
-            let a1 = _mm256_permute2x128_si256::<0x31>(f0d, f1d);
-            let b0 = _mm256_permute2x128_si256::<0x20>(g0d, g1d);
-            let b1 = _mm256_permute2x128_si256::<0x31>(g0d, g1d);
+            let a0 = _mm256_loadu_si256(f_ptr.add(pair).cast::<__m256i>());
+            let a1 = _mm256_loadu_si256(f_ptr.add(128 + pair).cast::<__m256i>());
+            let b0 = _mm256_loadu_si256(g_ptr.add(pair).cast::<__m256i>());
+            let b1 = _mm256_loadu_si256(g_ptr.add(128 + pair).cast::<__m256i>());
 
             let c = _mm256_loadu_si256(cache_ptr.add(pair).cast::<__m256i>());
 
@@ -499,8 +560,8 @@ pub(crate) fn basemul_accumulate(
     }
 }
 
-/// Montgomery-reduces the accumulated product sums to interleaved
-/// coefficients, sixteen pairs at a time.
+/// Montgomery-reduces the accumulated product sums into the evens-then-odds
+/// storage halves, sixteen pairs at a time.
 ///
 /// Matches [`super::generic::basemul_reduce`] mod q. `packs_epi32` packs
 /// within 128-bit lanes, which exactly inverts the unpack order the
@@ -512,19 +573,13 @@ pub(crate) fn basemul_reduce(acc: &super::ProductAccumulator) -> [FieldElement; 
 
     // SAFETY: `FieldElement` is `repr(transparent)` over `i16`, so `h`
     // reinterprets as `[i16]`. Each iteration reads two 8-`i32` windows of
-    // each 128-`i32` accumulator plane and writes a 32-`i16` window of `h`
-    // (8 windows tile 256), all in bounds. `loadu`/`storeu` are unaligned; the
-    // module is AVX2.
+    // each 128-`i32` accumulator plane and writes the two even/odd 16-`i16`
+    // halves of `h` (offsets `pair` and `128 + pair`; 8 windows tile 256),
+    // all in bounds. `loadu`/`storeu` are unaligned; the module is AVX2.
     unsafe {
         let even_ptr = acc.even.as_ptr();
         let odd_ptr = acc.odd.as_ptr();
         let h_ptr = h.as_mut_ptr().cast::<i16>();
-
-        // As in `multiply`: re-interleave even (c0) and odd (c1) coefficients.
-        let interleave = _mm256_setr_epi8(
-            0, 1, 8, 9, 2, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15, //
-            0, 1, 8, 9, 2, 3, 10, 11, 4, 5, 12, 13, 6, 7, 14, 15,
-        );
 
         let mut pair = 0;
         while pair < 128 {
@@ -538,17 +593,12 @@ pub(crate) fn basemul_reduce(acc: &super::ProductAccumulator) -> [FieldElement; 
             let odd_hi =
                 montgomery_reduce_wide(_mm256_loadu_si256(odd_ptr.add(pair + 8).cast::<__m256i>()));
 
-            // Pack the i32 residues back to the 16-pair `i16` block order.
+            // Pack the i32 residues back to pair order: the halves halves.
             let c0 = _mm256_packs_epi32(even_lo, even_hi);
             let c1 = _mm256_packs_epi32(odd_lo, odd_hi);
 
-            let lo = _mm256_permute2x128_si256::<0x20>(c0, c1);
-            let hi = _mm256_permute2x128_si256::<0x31>(c0, c1);
-            let h0 = _mm256_shuffle_epi8(_mm256_permute4x64_epi64::<0xD8>(lo), interleave);
-            let h1 = _mm256_shuffle_epi8(_mm256_permute4x64_epi64::<0xD8>(hi), interleave);
-
-            _mm256_storeu_si256(h_ptr.add(2 * pair).cast::<__m256i>(), h0);
-            _mm256_storeu_si256(h_ptr.add(2 * pair + 16).cast::<__m256i>(), h1);
+            _mm256_storeu_si256(h_ptr.add(pair).cast::<__m256i>(), c0);
+            _mm256_storeu_si256(h_ptr.add(128 + pair).cast::<__m256i>(), c1);
 
             pair += 16;
         }

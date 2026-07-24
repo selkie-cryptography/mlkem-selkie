@@ -131,3 +131,20 @@ fn schoolbook_multiply(f: RqElement, g: RqElement) -> RqElement {
 
     RqElement::new(result)
 }
+
+/// `TqElement`'s public surfaces speak natural coefficient order over the
+/// split evens-then-odds storage: construction round-trips through
+/// `coefficients`, and
+/// `Index` returns the same coefficient the natural-order input held.
+#[test]
+fn tq_split_storage_preserves_natural_order_semantics() {
+    let natural: [FieldElement; parameters::N] =
+        array::from_fn(|i| FieldElement::new((13 * i as u16 + 7) % parameters::Q));
+
+    let tq = TqElement::new(natural);
+
+    assert_eq!(tq.coefficients(), natural);
+    for (i, &expected) in natural.iter().enumerate() {
+        assert_eq!(tq[i], expected, "index {i}");
+    }
+}
