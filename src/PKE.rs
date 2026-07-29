@@ -15,7 +15,7 @@ use crate::{
     algebraic::{
         CachedTqVector, PolynomialRingElement, RqElement, RqVector, TqElement, TqMatrix, TqVector,
     },
-    functions::{G, PRF, shake256_x4},
+    functions::{G, PRF, PRF_x2, PRF_x4},
     parameters::{Eta, ParameterSet},
 };
 
@@ -296,16 +296,12 @@ impl<P: ParameterSet> TqMatrix<P> {
         let mut entries = core::iter::from_fn(move || {
             if taken == 4 {
                 let base = next;
-                let seeds: [[u8; 34]; 4] = core::array::from_fn(|lane| {
+                let indices: [(u8, u8); 4] = core::array::from_fn(|lane| {
                     let n = base + lane;
-                    let mut seed = [0u8; 34];
-                    let (prefix, suffix) = seed.split_at_mut(32);
-                    prefix.copy_from_slice(rho);
-                    suffix.copy_from_slice(&[(n % k) as u8, (n / k) as u8]);
 
-                    seed
+                    ((n % k) as u8, (n / k) as u8)
                 });
-                batch = TqElement::sample_ntt_x4(&seeds);
+                batch = TqElement::sample_ntt_x4(rho, indices);
                 taken = 0;
                 next += 4;
             }
@@ -325,37 +321,38 @@ impl<P: ParameterSet> RqVector<P> {
     /// `D_eta`, advancing the PRF counter `n` once per component.
     ///
     /// The `K` `PRF` squeezes (`seed ‖ (n+0..n+K)`) run in one batched Keccak
-    /// call; lanes past `K` are computed and discarded. Each lane squeezes the
-    /// `64 * eta`-byte CBD input (the buffer is sized for the largest `eta`).
+    /// call; lanes past `K` are computed and discarded.
+    ///
+    /// `K = 2` fills exactly two lanes, so a four-way permutation would spend
+    /// half its work on lanes nobody reads. `K = 3` would not gain from the
+    /// narrower path — one four-way permutation still beats a two-way plus a
+    /// scalar one — so only `K = 2` takes it.
     fn sample_cbd(eta: Eta, seed: &[u8; 32], n: &mut u8) -> Self {
-        let prf_len = 64 * usize::from(eta);
+        let batch = if P::K == 2 {
+            let outputs = PRF_x2(eta, seed, *n);
+            let [l0, l1] = outputs.lanes();
 
-        let inputs: [[u8; 33]; 4] = core::array::from_fn(|lane| {
-            let mut input = [0u8; 33];
-            let (prefix, suffix) = input.split_at_mut(32);
-            prefix.copy_from_slice(seed);
-            suffix.copy_from_slice(&[n.wrapping_add(lane as u8)]);
+            Self::from_lanes(eta, [l0, l1, &[], &[]])
+        } else {
+            let outputs = PRF_x4(eta, seed, *n);
 
-            input
-        });
+            Self::from_lanes(eta, outputs.lanes())
+        };
         *n += P::K as u8;
 
-        let mut outputs = [[0u8; 64 * 3]; 4];
-        let [o0, o1, o2, o3] = &mut outputs;
-        shake256_x4(
-            inputs.each_ref().map(<[u8; 33]>::as_slice),
-            [
-                o0.as_mut_slice(),
-                o1.as_mut_slice(),
-                o2.as_mut_slice(),
-                o3.as_mut_slice(),
-            ],
-        );
+        batch
+    }
 
-        let mut outputs = outputs.into_iter();
+    /// Samples one vector component per lane, in lane order. Lanes past `K` are
+    /// never drawn, so the two-lane path can leave its unused two empty.
+    fn from_lanes(eta: Eta, lanes: [&[u8]; 4]) -> Self {
+        let mut lanes = lanes.into_iter();
+
         Self::from_fn(|_| {
-            let output = outputs.next().unwrap_or([0u8; 64 * 3]);
-            let (bytes, _) = output.split_at(prf_len);
+            // `from_fn` draws `K <= 4` components, so the lanes never run out.
+            let Some(bytes) = lanes.next() else {
+                return RqElement::ZERO;
+            };
 
             RqElement::sample_cbd(eta, bytes)
         })

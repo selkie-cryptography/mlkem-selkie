@@ -95,23 +95,17 @@ fn sample_ntt_matches_manual_unpack() {
 }
 
 /// The batched matrix-expansion path `sample_ntt_x4` agrees with the serial
-/// `sample_ntt` on the same `(rho, i, j)` seed. Guards against `reject_into`'s
+/// `sample_ntt` on the same `(rho, i, j)`. Guards against `reject_into`'s
 /// bit-op / bounds mutations by pinning each lane's output to the scalar impl.
 #[test]
 fn sample_ntt_x4_matches_serial() {
     let rho = [0x91u8; 32];
-    let seeds: [[u8; 34]; 4] = array::from_fn(|k| {
-        let mut seed = [0u8; 34];
-        seed[..32].copy_from_slice(&rho);
-        seed[32] = k as u8; // matches `XOF`'s `i` byte
-        seed[33] = 2 * k as u8; // matches `XOF`'s `j` byte
-        seed
-    });
+    let indices: [(u8, u8); 4] = array::from_fn(|k| (k as u8, 2 * k as u8));
 
-    let batched = TqElement::sample_ntt_x4(&seeds);
+    let batched = TqElement::sample_ntt_x4(&rho, indices);
 
-    for (k, (lane, seed)) in batched.iter().zip(seeds.iter()).enumerate() {
-        let serial = TqElement::sample_ntt(&rho, seed[32], seed[33]);
+    for (k, (lane, &(i, j))) in batched.iter().zip(indices.iter()).enumerate() {
+        let serial = TqElement::sample_ntt(&rho, i, j);
         assert_eq!(*lane, serial, "lane {k}");
     }
 }

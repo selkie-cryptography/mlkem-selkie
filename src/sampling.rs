@@ -17,11 +17,15 @@ use core::array;
 use self::arch::{EMPTY_REJECT_BUFFER, RejectBuffer};
 use crate::{
     algebraic::{FieldElement, PolynomialRingElement, RqElement, TqElement},
-    functions::{SHAKE128_BLOCK, Shake128X4, XOF},
+    functions::{Shake128, Shake128X4, XOF, XOF_x4},
     parameters::{self, Eta},
 };
 
 mod arch;
+
+/// The first `SampleNTT` squeeze: three SHAKE128 blocks, enough to fill a ring
+/// element with overwhelming probability before the top-up loop runs at all.
+const THREE_BLOCKS: usize = 3 * Shake128X4::RATE;
 
 #[cfg(test)]
 mod tests;
@@ -44,7 +48,7 @@ impl TqElement {
         let mut reader = XOF(rho, i, j);
         let mut buffer = EMPTY_REJECT_BUFFER;
         let mut count = 0;
-        let mut block = [0u8; SHAKE128_BLOCK];
+        let mut block = [0u8; Shake128::RATE];
 
         while count < parameters::N {
             reader.read(&mut block);
@@ -63,22 +67,26 @@ impl TqElement {
     }
 
     /// Batched `SampleNTT`: rejection-samples four uniform Tq elements in
-    /// parallel, one per 34-byte seed (`rho ‖ j ‖ i`), driving the platform's
-    /// batched Keccak through [`Shake128X4`].
+    /// parallel, one per `(i, j)` pair, driving the platform's batched Keccak
+    /// through [`XOF_x4`].
     ///
-    /// Each output equals [`Self::sample_ntt`] on that seed's SHAKE128 stream;
-    /// this is the matrix-expansion hot path (`TqMatrix::expand`).
+    /// Each output equals [`Self::sample_ntt`] on the same `(rho, i, j)`; this
+    /// is the matrix-expansion hot path (`TqMatrix::expand`).
     #[must_use]
-    pub fn sample_ntt_x4(seeds: &[[u8; 34]; 4]) -> [Self; 4] {
-        let mut state = Shake128X4::absorb(seeds);
+    pub fn sample_ntt_x4(rho: &[u8; 32], indices: [(u8, u8); 4]) -> [Self; 4] {
+        let mut state = XOF_x4(rho, indices);
         let mut buffers = [EMPTY_REJECT_BUFFER; 4];
         let mut counts = [0usize; 4];
 
-        let blocks = state.squeeze_first_three_blocks();
+        let mut blocks = [[0u8; THREE_BLOCKS]; 4];
+        let [b0, b1, b2, b3] = &mut blocks;
+        state.squeeze([b0, b1, b2, b3]);
         let mut done = Self::reject_into(&blocks, &mut buffers, &mut counts);
 
         while !done {
-            let blocks = state.squeeze_next_block();
+            let mut blocks = [[0u8; Shake128X4::RATE]; 4];
+            let [b0, b1, b2, b3] = &mut blocks;
+            state.squeeze([b0, b1, b2, b3]);
             done = Self::reject_into(&blocks, &mut buffers, &mut counts);
         }
 
