@@ -15,8 +15,9 @@ use crate::{
     algebraic::{
         CachedTqVector, PolynomialRingElement, RqElement, RqVector, TqElement, TqMatrix, TqVector,
     },
-    functions::{G, PRF, PRF_x2, PRF_x4},
-    parameters::{Eta, ParameterSet},
+    functions::G,
+    parameters::ParameterSet,
+    sampling::CbdSampler,
 };
 
 #[cfg(test)]
@@ -99,10 +100,13 @@ impl<P: ParameterSet> EncryptionKey<P> {
     ///
     /// [Algorithm 14]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.14
     pub fn encrypt(&self, message: &[u8; 32], randomness: &[u8; 32]) -> Ciphertext<P> {
-        let mut n = 0u8;
-        let y = RqVector::<P>::sample_cbd(P::ETA_1, randomness, &mut n);
-        let e1 = RqVector::<P>::sample_cbd(P::ETA_2, randomness, &mut n);
-        let e2 = RqElement::sample_cbd(P::ETA_2, &PRF(P::ETA_2, randomness, n));
+        // y takes PRF streams 0..K at eta_1; e1 and e2 share eta_2, so their
+        // K + 1 streams (K..2K, then 2K) run as one batched group.
+        let y = CbdSampler::new(P::ETA_1, randomness, 0, P::K as u8).sample_vector();
+
+        let mut noise = CbdSampler::new(P::ETA_2, randomness, P::K as u8, P::K as u8 + 1);
+        let e1 = noise.sample_vector();
+        let e2 = noise.sample_element();
 
         // `y_hat` is the reused operand of both products below; cache its
         // base-multiplication terms once.
@@ -243,10 +247,13 @@ impl<P: ParameterSet> KeyPair<P> {
 
         let a_hat = TqMatrix::<P>::expand(&rho);
 
-        let mut n = 0u8;
-        let s = RqVector::<P>::sample_cbd(P::ETA_1, &sigma, &mut n);
-        let e = RqVector::<P>::sample_cbd(P::ETA_1, &sigma, &mut n);
-        // sigma is no longer needed after CBD sampling.
+        // s takes PRF streams 0..K and e takes K..2K; they share eta_1, so
+        // all 2K streams run as one batched group.
+        let mut noise = CbdSampler::new(P::ETA_1, &sigma, 0, 2 * P::K as u8);
+        let s = noise.sample_vector();
+        let e = noise.sample_vector();
+        // Dropping the sampler zeroizes its copy of sigma.
+        drop(noise);
         sigma.zeroize();
 
         // `s_hat` is reused by every row of `A . s_hat` and then by every
@@ -313,48 +320,5 @@ impl<P: ParameterSet> TqMatrix<P> {
         });
 
         Self::from_fn(|_| TqVector::<P>::from_fn(|_| entries.next().unwrap_or(TqElement::ZERO)))
-    }
-}
-
-impl<P: ParameterSet> RqVector<P> {
-    /// Samples a length-`K` vector from the centered binomial distribution
-    /// `D_eta`, advancing the PRF counter `n` once per component.
-    ///
-    /// The `K` `PRF` squeezes (`seed ‖ (n+0..n+K)`) run in one batched Keccak
-    /// call; lanes past `K` are computed and discarded.
-    ///
-    /// `K = 2` fills exactly two lanes, so a four-way permutation would spend
-    /// half its work on lanes nobody reads. `K = 3` would not gain from the
-    /// narrower path — one four-way permutation still beats a two-way plus a
-    /// scalar one — so only `K = 2` takes it.
-    fn sample_cbd(eta: Eta, seed: &[u8; 32], n: &mut u8) -> Self {
-        let batch = if P::K == 2 {
-            let outputs = PRF_x2(eta, seed, *n);
-            let [l0, l1] = outputs.lanes();
-
-            Self::from_lanes(eta, [l0, l1, &[], &[]])
-        } else {
-            let outputs = PRF_x4(eta, seed, *n);
-
-            Self::from_lanes(eta, outputs.lanes())
-        };
-        *n += P::K as u8;
-
-        batch
-    }
-
-    /// Samples one vector component per lane, in lane order. Lanes past `K` are
-    /// never drawn, so the two-lane path can leave its unused two empty.
-    fn from_lanes(eta: Eta, lanes: [&[u8]; 4]) -> Self {
-        let mut lanes = lanes.into_iter();
-
-        Self::from_fn(|_| {
-            // `from_fn` draws `K <= 4` components, so the lanes never run out.
-            let Some(bytes) = lanes.next() else {
-                return RqElement::ZERO;
-            };
-
-            RqElement::sample_cbd(eta, bytes)
-        })
     }
 }
