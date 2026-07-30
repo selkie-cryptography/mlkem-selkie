@@ -1753,7 +1753,7 @@ dependencies = [
 [[package]]
 name = "sha3-selkie"
 version = "0.1.0"
-source = "git+https://github.com/selkie-cryptography/sha3-selkie#6da935805dc87364f159240f41ccdf6f3f5ca3e4"
+source = "git+https://github.com/selkie-cryptography/sha3-selkie?rev=6da935805dc87364f159240f41ccdf6f3f5ca3e4#6da935805dc87364f159240f41ccdf6f3f5ca3e4"
 
 [[package]]
 name = "shlex"

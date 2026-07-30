@@ -69,10 +69,21 @@ jobs:
             EXCLUDE=(":(exclude)src/algebraic/poly/arch/avx2.rs" ":(exclude)src/sampling/arch/avx2.rs")
           fi
           git diff "origin/${{ github.base_ref }}" -- . "${EXCLUDE[@]}" > pr.diff
-          # Exit 3 is "timeouts occurred, none missed": spin mutants in the
-          # unbounded rejection-sampling loops are caught by the timeout cap
-          # by design, so only missed mutants (exit 2) fail the job.
-          $RUNNER cargo mutants -j ${{ matrix.arch == 'x86_64' && '2' || '3' }} --in-diff pr.diff || [ $? -eq 3 ]
+          # Exit 3 is "timeouts occurred": spin mutants in the unbounded
+          # rejection-sampling loops are caught by the timeout cap by design.
+          # Any other non-zero (2 = missed, 4 = baseline failure) is real.
+          set +e
+          $RUNNER cargo mutants -j ${{ matrix.arch == 'x86_64' && '2' || '3' }} --in-diff pr.diff
+          code=$?
+          set -e
+          case "$code" in 0|3) ;; *) exit "$code" ;; esac
+          # A run reports one exit code, and timeouts outrank missed mutants,
+          # so exit 3 can still hide misses. Gate on the file, not the code.
+          if [ -s mutants.out/missed.txt ]; then
+            echo "missed mutants:"
+            cat mutants.out/missed.txt
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:

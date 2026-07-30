@@ -109,3 +109,12 @@ fn sample_ntt_x4_matches_serial() {
         assert_eq!(*lane, serial, "lane {k}");
     }
 }
+
+/// The batched first squeeze is three whole SHAKE128 blocks. 256 coefficients
+/// need 384 bytes of 12-bit pairs before rejections; three blocks give 504.
+/// Shrinking `THREE_BLOCKS` changes no output, only how many times the top-up
+/// loop has to squeeze, so no behavioral test pins it.
+#[test]
+fn first_squeeze_is_three_blocks() {
+    assert_eq!(THREE_BLOCKS, 3 * Shake128X4::RATE);
+}
