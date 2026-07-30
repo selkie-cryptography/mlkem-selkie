@@ -1,7 +1,10 @@
 //! Unit tests for ring-element sampling.
 
 use super::*;
-use crate::{functions::XOF, parameters::Q};
+use crate::{
+    functions::{PRF, XOF},
+    parameters::Q,
+};
 
 /// All-zero CBD input yields the zero polynomial.
 #[test]
@@ -117,4 +120,42 @@ fn sample_ntt_x4_matches_serial() {
 #[test]
 fn first_squeeze_is_three_blocks() {
     assert_eq!(THREE_BLOCKS, 3 * Shake128X4::RATE);
+}
+
+/// `CbdSampler` reproduces the scalar `SamplePolyCBD_eta(PRF(seed, n))` chain
+/// on consecutive stream counters, for both `eta` values and a nonzero
+/// starting counter. Counts 9 and 6 exercise every refill width: 4 + 4 + 1
+/// and 4 + 2.
+#[test]
+fn cbd_sampler_matches_scalar() {
+    let seed: [u8; 32] = array::from_fn(|i| i as u8);
+
+    for eta in [Eta::Two, Eta::Three] {
+        for count in [6u8, 9] {
+            let first = 5u8;
+            let mut sampler = CbdSampler::new(eta, &seed, first, count);
+
+            for n in first..first + count {
+                let expected = RqElement::sample_cbd(eta, &PRF(eta, &seed, n));
+
+                assert_eq!(
+                    sampler.sample_element(),
+                    expected,
+                    "count {count} stream {n}"
+                );
+            }
+        }
+    }
+}
+
+/// Each `PrfLanes` width reports its lane count; the refill cursor trusts it,
+/// and a wrong count only changes how often the sampler squeezes, never its
+/// output — so no behavioral test can pin it.
+#[test]
+fn prf_lanes_len_matches_width() {
+    let seed = [0u8; 32];
+
+    assert_eq!(PrfLanes::Four(PRF_x4(Eta::Two, &seed, 0)).len(), 4);
+    assert_eq!(PrfLanes::Two(PRF_x2(Eta::Two, &seed, 0)).len(), 2);
+    assert_eq!(PrfLanes::One(PRF(Eta::Two, &seed, 0)).len(), 1);
 }
