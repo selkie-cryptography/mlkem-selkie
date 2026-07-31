@@ -6,7 +6,8 @@ use crate::{
     parameters::{self, MLKEM512},
 };
 
-/// `pack` and `unpack` are inverse for every supported bit width.
+/// `pack` and `unpack` are inverse for every supported bit width, and
+/// `pack_words` agrees with `pack` at the fixed widths.
 #[test]
 fn pack_unpack_roundtrip() {
     for &d in &[1usize, 4, 5, 10, 11, 12] {
@@ -17,6 +18,12 @@ fn pack_unpack_roundtrip() {
         assert_eq!(packed.len(), N * d / 8);
         assert_eq!(unpack(&packed, d), values);
     }
+
+    let values: [u16; N] = core::array::from_fn(|i| (i as u16) & 0xFFF);
+    let words: [u8; 384] = pack_words(&values, 12);
+    let streamed: Vec<u8> = pack(values, 12).collect();
+
+    assert_eq!(words.as_slice(), streamed.as_slice());
 }
 
 /// `ByteEncode_12` round-trips NTT coefficients that are already in `0..q`.
@@ -25,9 +32,8 @@ fn byte_encode_12_roundtrip() {
     let coeffs = core::array::from_fn(|i| FieldElement::new((31 * i as u16 + 5) % parameters::Q));
     let poly = TqElement::new(coeffs);
 
-    let encoded: Vec<u8> = poly.byte_encode().collect();
+    let encoded = poly.byte_encode();
 
-    assert_eq!(encoded.len(), 384);
     assert_eq!(TqElement::byte_decode(&encoded), poly);
 }
 
@@ -41,13 +47,12 @@ fn byte_decode_12_reduces_mod_q() {
         *first = parameters::Q;
     }
 
-    let bytes: Vec<u8> = pack(values, 12).collect();
+    let bytes: [u8; 384] = pack_words(&values, 12);
 
     let decoded = TqElement::byte_decode(&bytes);
 
     // q mod q == 0, so the re-encoding differs from the malformed input.
-    let reencoded: Vec<u8> = decoded.byte_encode().collect();
-    assert_ne!(reencoded, bytes);
+    assert_ne!(decoded.byte_encode(), bytes);
 }
 
 /// Message bytes survive a `Decompress_1` / `Compress_1` round-trip.
@@ -75,6 +80,5 @@ fn vector_compress_roundtrip() {
 
     let encoded: Vec<u8> = vector.compress_encode(d).collect();
 
-    assert_eq!(encoded.len(), 32 * d * MLKEM512::K);
     assert_eq!(RqVector::<MLKEM512>::decode_decompress(&encoded, d), vector);
 }

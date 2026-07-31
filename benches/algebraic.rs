@@ -83,13 +83,13 @@ fn sample_ntt(bencher: Bencher<'_, '_>) {
 fn byte_encode(bencher: Bencher<'_, '_>) {
     let f = sample_poly().ntt();
 
-    bencher.bench(|| black_box(f).byte_encode().collect::<Vec<u8>>());
+    bencher.bench(|| black_box(f).byte_encode());
 }
 
 /// `ByteDecode_12` back into an NTT-domain polynomial.
 #[divan::bench]
 fn byte_decode(bencher: Bencher<'_, '_>) {
-    let bytes: Vec<u8> = sample_poly().ntt().byte_encode().collect();
+    let bytes = sample_poly().ntt().byte_encode();
 
     bencher.bench(|| TqElement::byte_decode(black_box(&bytes)));
 }

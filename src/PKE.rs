@@ -60,11 +60,19 @@ pub struct EncryptionKey<P: ParameterSet> {
 }
 
 impl<P: ParameterSet> EncryptionKey<P> {
-    /// Returns an iterator over the encryption key's serialized bytes,
-    /// `ByteEncode_12(t_hat) ‖ rho`, yielded lazily so a fixed buffer can be
-    /// packed without an intermediate allocation.
-    pub(crate) fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
-        self.t_hat.byte_encode().chain(self.rho)
+    /// Serializes the encryption key, `ByteEncode_12(t_hat) ‖ rho`, as its
+    /// `384 * K + 32` bytes.
+    #[must_use]
+    pub(crate) fn to_bytes(&self) -> P::EncapsKeySerialization {
+        let mut out = P::encaps_key_zeroed();
+
+        let (t_part, rho_part) = out.as_mut().split_at_mut(384 * P::K);
+        for (chunk, element) in t_part.chunks_exact_mut(384).zip(self.t_hat.as_slice()) {
+            chunk.copy_from_slice(&element.byte_encode());
+        }
+        rho_part.copy_from_slice(&self.rho);
+
+        out
     }
 
     /// Parses an encryption key from `384 * K + 32` bytes.
@@ -121,12 +129,7 @@ impl<P: ParameterSet> EncryptionKey<P> {
         // v = NTT⁻¹(t_hat^T . y_hat) + e2 + mu
         let v = (&self.t_hat * &y_hat).ntt_inverse() + e2 + mu;
 
-        // Serialize Compress(u) ‖ Compress(v) straight into the fixed-size
-        // ciphertext buffer; both halves yield their bytes lazily, so no
-        // intermediate heap allocation backs the encoding.
-        let mut bytes = u.compress_encode(P::D_U).chain(v.compress_encode(P::D_V));
-
-        Ciphertext(P::ciphertext_from_fn(|_| bytes.next().unwrap_or(0)))
+        Ciphertext::from_uv(&u, &v)
     }
 }
 
@@ -143,10 +146,10 @@ pub struct DecryptionKey<P: ParameterSet> {
 }
 
 impl<P: ParameterSet> DecryptionKey<P> {
-    /// Returns an iterator over the decryption key's serialized bytes,
-    /// `ByteEncode_12(s_hat)`, yielded lazily.
-    pub(crate) fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
-        self.s_hat.vector().byte_encode()
+    /// Returns the NTT-domain secret vector, for serialization by the
+    /// decapsulation-key owner.
+    pub(crate) fn vector(&self) -> &TqVector<P> {
+        self.s_hat.vector()
     }
 
     /// Parses a decryption key from `384 * K` bytes.
@@ -202,9 +205,24 @@ impl<P: ParameterSet> Ciphertext<P> {
     pub fn from_bytes(bytes: &[u8]) -> Self {
         debug_assert_eq!(bytes.len(), P::CIPHERTEXT_SIZE);
 
-        Self(P::ciphertext_from_fn(|i| {
-            bytes.get(i).copied().unwrap_or(0)
-        }))
+        let mut out = P::ciphertext_zeroed();
+        out.as_mut().copy_from_slice(bytes);
+
+        Self(out)
+    }
+
+    /// Serializes `ByteEncode(Compress(u)) ‖ ByteEncode(Compress(v))` into the
+    /// fixed-size ciphertext buffer (Algorithm 14 lines 21-22); no heap
+    /// allocation backs the encoding.
+    fn from_uv(u: &RqVector<P>, v: &RqElement) -> Self {
+        let mut out = P::ciphertext_zeroed();
+
+        let bytes = u.compress_encode(P::D_U).chain(v.compress_encode(P::D_V));
+        for (slot, byte) in out.as_mut().iter_mut().zip(bytes) {
+            *slot = byte;
+        }
+
+        Self(out)
     }
 
     /// Returns the serialized ciphertext bytes.
