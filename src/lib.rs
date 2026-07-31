@@ -431,11 +431,11 @@ impl<P: ParameterSet> DecapsulationKey<P> {
         let mut out = P::decaps_key_zeroed();
 
         let (dk_part, rest) = out.as_mut().split_at_mut(P::PKE::DECRYPTION_KEY_SIZE);
-        for (chunk, element) in dk_part
+        for (chunk, block) in dk_part
             .chunks_exact_mut(384)
-            .zip(self.dk_pke.vector().as_slice())
+            .zip(self.dk_pke.byte_encoded())
         {
-            chunk.copy_from_slice(&element.byte_encode());
+            chunk.copy_from_slice(&block);
         }
 
         let (ek_part, rest) = rest.split_at_mut(P::PKE::ENCRYPTION_KEY_SIZE);

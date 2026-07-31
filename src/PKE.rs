@@ -67,8 +67,8 @@ impl<P: ParameterSet> EncryptionKey<P> {
         let mut out = P::encaps_key_zeroed();
 
         let (t_part, rho_part) = out.as_mut().split_at_mut(384 * P::K);
-        for (chunk, element) in t_part.chunks_exact_mut(384).zip(self.t_hat.as_slice()) {
-            chunk.copy_from_slice(&element.byte_encode());
+        for (chunk, block) in t_part.chunks_exact_mut(384).zip(self.t_hat.byte_encoded()) {
+            chunk.copy_from_slice(&block);
         }
         rho_part.copy_from_slice(&self.rho);
 
@@ -146,10 +146,10 @@ pub struct DecryptionKey<P: ParameterSet> {
 }
 
 impl<P: ParameterSet> DecryptionKey<P> {
-    /// Returns the NTT-domain secret vector, for serialization by the
-    /// decapsulation-key owner.
-    pub(crate) fn vector(&self) -> &TqVector<P> {
-        self.s_hat.vector()
+    /// `ByteEncode_12(s_hat)` (Algorithm 13's decryption-key serialization)
+    /// as `K` 384-byte blocks.
+    pub(crate) fn byte_encoded(&self) -> impl Iterator<Item = [u8; 384]> + '_ {
+        self.s_hat.vector().byte_encoded()
     }
 
     /// Parses a decryption key from `384 * K` bytes.
