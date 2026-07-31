@@ -182,6 +182,11 @@ impl RqElement {
 }
 
 impl<P: ParameterSet> TqVector<P> {
+    /// `ByteEncode_12` applied componentwise, one 384-byte block per element.
+    pub(crate) fn byte_encoded(&self) -> impl Iterator<Item = [u8; 384]> + '_ {
+        self.as_slice().iter().map(TqElement::byte_encode)
+    }
+
     /// `ByteDecode_12` applied componentwise to `384 * K` bytes.
     pub fn byte_decode(bytes: &[u8]) -> Self {
         let mut chunks = bytes.chunks_exact(384);
