@@ -215,10 +215,7 @@ impl<P: ParameterSet> From<PKE::EncryptionKey<P>> for EncapsulationKey<P> {
 impl<P: ParameterSet> From<&PKE::EncryptionKey<P>> for EncapsulationKeyHash {
     /// Computes `H(ek)` over the encryption key's serialized bytes.
     fn from(ek_pke: &PKE::EncryptionKey<P>) -> Self {
-        let mut bytes = ek_pke.bytes();
-        let encoded = P::encaps_key_from_fn(|_| bytes.next().unwrap_or(0));
-
-        Self(H(encoded.as_ref()))
+        Self(H(ek_pke.to_bytes().as_ref()))
     }
 }
 
@@ -228,8 +225,7 @@ impl<P: ParameterSet> EncapsulationKey<P> {
     /// allocation.
     #[must_use]
     pub fn to_bytes(&self) -> P::EncapsKeySerialization {
-        let mut bytes = self.ek_pke.bytes();
-        P::encaps_key_from_fn(|_| bytes.next().unwrap_or(0))
+        self.ek_pke.to_bytes()
     }
 
     /// Parses an encapsulation key from bytes; see the [`TryFrom`] impl for the
@@ -323,10 +319,9 @@ impl<P: ParameterSet> TryFrom<&[u8]> for EncapsulationKey<P> {
         // Modulus check (FIPS 203 section 7.2, encapsulation key check 2,
         // equation 7.1): ByteEncode_12(ByteDecode_12(ek)) must equal ek. The
         // round-trip differs iff a coefficient decoded from a value >= q, so a
-        // mismatch yields `EncapsulationKeyModulusCheckFailed`. Streamed rather
-        // than materialized: the input `bytes` is public and this comparison
-        // short-circuits on the first mismatch either way.
-        if !ek_pke.bytes().eq(bytes.iter().copied()) {
+        // mismatch yields `EncapsulationKeyModulusCheckFailed`. The input is
+        // public, so a variable-time comparison is fine.
+        if ek_pke.to_bytes().as_ref() != bytes {
             return Err(Error::EncapsulationKeyModulusCheckFailed);
         }
 
@@ -433,14 +428,24 @@ impl<P: ParameterSet> DecapsulationKey<P> {
     /// on the stack with no heap allocation.
     #[must_use]
     pub fn to_bytes(&self) -> P::DecapsKeySerialization {
-        let mut bytes = self
-            .dk_pke
-            .bytes()
-            .chain(self.ek.ek_pke.bytes())
-            .chain(*self.h_ek.as_bytes())
-            .chain(*self.z.as_bytes());
+        let mut out = P::decaps_key_zeroed();
 
-        P::decaps_key_from_fn(|_| bytes.next().unwrap_or(0))
+        let (dk_part, rest) = out.as_mut().split_at_mut(P::PKE::DECRYPTION_KEY_SIZE);
+        for (chunk, element) in dk_part
+            .chunks_exact_mut(384)
+            .zip(self.dk_pke.vector().as_slice())
+        {
+            chunk.copy_from_slice(&element.byte_encode());
+        }
+
+        let (ek_part, rest) = rest.split_at_mut(P::PKE::ENCRYPTION_KEY_SIZE);
+        ek_part.copy_from_slice(self.ek.ek_pke.to_bytes().as_ref());
+
+        let (h_part, z_part) = rest.split_at_mut(32);
+        h_part.copy_from_slice(self.h_ek.as_bytes());
+        z_part.copy_from_slice(self.z.as_bytes());
+
+        out
     }
 
     /// Parses a decapsulation key from bytes; see the [`TryFrom`] impl for the

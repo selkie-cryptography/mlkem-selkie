@@ -93,7 +93,7 @@ proptest! {
     fn byte_encode_roundtrip(coeffs in vec(0u16..Q, N)) {
         let f = TqElement::new(core::array::from_fn(|i| fe(coeffs[i])));
 
-        let encoded: Vec<u8> = f.byte_encode().collect();
+        let encoded = f.byte_encode();
         prop_assert_eq!(TqElement::byte_decode(&encoded), f);
     }
 
