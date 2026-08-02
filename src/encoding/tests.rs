@@ -82,3 +82,15 @@ fn vector_compress_roundtrip() {
 
     assert_eq!(RqVector::<MLKEM512>::decode_decompress(&encoded, d), vector);
 }
+
+/// A short input zero-pads: nine `0xFF` bytes at `d = 12` fill values 0..=5
+/// (the 8-byte word plus the tail byte reach bit 72), and value 6 onward is
+/// zero. Losing the partial-word tail would zero value 5's top eight bits.
+#[test]
+fn unpack_zero_pads_short_input() {
+    let values = unpack(&[0xFF; 9], 12);
+
+    assert_eq!(values[4], 0xFFF);
+    assert_eq!(values[5], 0xFFF);
+    assert_eq!(values[6], 0);
+}

@@ -83,7 +83,7 @@ pub trait PKE: ParameterSet {
 /// section 7.
 ///
 /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
-// TODO: collapse the *Serialization associated types and their `*_zeroed`
+// TODO: collapse the *Serialization associated types and their `*_from_fn`
 // builders into plain `[u8; SIZE]` return types once `generic_const_exprs` is
 // stable — they exist only because a generic `[u8; Self::SIZE]` is not yet
 // expressible on stable Rust.
@@ -174,11 +174,12 @@ pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
 
     /// Decapsulation key byte serialization, a byte array of fixed length
     /// [`Self::DECAPS_KEY_SIZE`].
-    type DecapsKeySerialization: AsRef<[u8]> + AsMut<[u8]>;
+    type DecapsKeySerialization: AsRef<[u8]>;
 
-    /// Returns a zeroed [`Self::DecapsKeySerialization`] for the owner to
-    /// fill. Concrete per parameter set, like [`Self::ciphertext_zeroed`].
-    fn decaps_key_zeroed() -> Self::DecapsKeySerialization;
+    /// Builds a [`Self::DecapsKeySerialization`] on the stack by applying `f`
+    /// to each byte index. Concrete per parameter set, like
+    /// [`Self::ciphertext_from_fn`].
+    fn decaps_key_from_fn(f: impl FnMut(usize) -> u8) -> Self::DecapsKeySerialization;
 
     /// The derived public encapsulation key size in bytes.
     const ENCAPS_KEY_SIZE: usize = (384 * Self::K) + 32;
@@ -189,12 +190,13 @@ pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
     /// `Send + Sync` (like [`Self::CiphertextSerialization`]) so the value
     /// `EncapsulationKey::to_bytes` returns can cross threads — the divan
     /// benchmarks capture it.
-    type EncapsKeySerialization: AsRef<[u8]> + AsMut<[u8]> + Send + Sync;
+    type EncapsKeySerialization: AsRef<[u8]> + Send + Sync;
 
-    /// Returns a zeroed [`Self::EncapsKeySerialization`] for the owner to
-    /// fill, so `to_bytes` and `H(ek)` need no heap. Concrete per parameter
-    /// set, like [`Self::ciphertext_zeroed`].
-    fn encaps_key_zeroed() -> Self::EncapsKeySerialization;
+    /// Builds a [`Self::EncapsKeySerialization`] by applying `f` to each byte
+    /// index, assembling the encapsulation-key buffer on the stack so
+    /// `to_bytes` and `H(ek)` need no heap. Concrete per parameter set,
+    /// like [`Self::ciphertext_from_fn`].
+    fn encaps_key_from_fn(f: impl FnMut(usize) -> u8) -> Self::EncapsKeySerialization;
 
     /// The derived public ciphertext size in bytes.
     const CIPHERTEXT_SIZE: usize = 32 * ((Self::D_U * Self::K) + Self::D_V);
@@ -205,15 +207,18 @@ pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
     /// Carries `Send + Sync` (like [`Self::KArray`]) so the heap-free
     /// ciphertext type that wraps it stays thread-safe — the divan benchmarks
     /// move ciphertexts across threads.
-    type CiphertextSerialization: AsRef<[u8]> + AsMut<[u8]> + Send + Sync;
+    type CiphertextSerialization: AsRef<[u8]> + Send + Sync;
 
-    /// Returns a zeroed [`Self::CiphertextSerialization`] for the owner to
-    /// fill, so `K-PKE.Encrypt` can serialize the compressed `(u, v)` pair
-    /// on the stack without a heap allocation. Concrete in each parameter
-    /// set for the same reason as [`Self::k_array_from_fn`]: a generic
-    /// `[u8; Self::CIPHERTEXT_SIZE]` would otherwise require the unstable
+    /// Builds a [`Self::CiphertextSerialization`] by applying `f` to each byte
+    /// index in `0..CIPHERTEXT_SIZE`.
+    ///
+    /// Assembles the fixed-size ciphertext buffer on the stack, so
+    /// `K-PKE.Encrypt` can serialize the compressed `(u, v)` pair straight into
+    /// it without a heap allocation. Concrete in each parameter set for the
+    /// same reason as [`Self::k_array_from_fn`]: a generic `[u8;
+    /// Self::CIPHERTEXT_SIZE]` would otherwise require the unstable
     /// `generic_const_exprs`.
-    fn ciphertext_zeroed() -> Self::CiphertextSerialization;
+    fn ciphertext_from_fn(f: impl FnMut(usize) -> u8) -> Self::CiphertextSerialization;
 }
 
 /// The ML-KEM-512 parameter set defined in [FIPS 203], section 7.
@@ -254,16 +259,16 @@ impl ParameterSet for MLKEM512 {
         core::array::from_fn(f)
     }
 
-    fn ciphertext_zeroed() -> [u8; Self::CIPHERTEXT_SIZE] {
-        [0u8; Self::CIPHERTEXT_SIZE]
+    fn ciphertext_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::CIPHERTEXT_SIZE] {
+        core::array::from_fn(f)
     }
 
-    fn encaps_key_zeroed() -> [u8; Self::ENCAPS_KEY_SIZE] {
-        [0u8; Self::ENCAPS_KEY_SIZE]
+    fn encaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::ENCAPS_KEY_SIZE] {
+        core::array::from_fn(f)
     }
 
-    fn decaps_key_zeroed() -> [u8; Self::DECAPS_KEY_SIZE] {
-        [0u8; Self::DECAPS_KEY_SIZE]
+    fn decaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::DECAPS_KEY_SIZE] {
+        core::array::from_fn(f)
     }
 
     type EncapsKeySerialization = [u8; Self::ENCAPS_KEY_SIZE];
@@ -309,16 +314,16 @@ impl ParameterSet for MLKEM768 {
         core::array::from_fn(f)
     }
 
-    fn ciphertext_zeroed() -> [u8; Self::CIPHERTEXT_SIZE] {
-        [0u8; Self::CIPHERTEXT_SIZE]
+    fn ciphertext_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::CIPHERTEXT_SIZE] {
+        core::array::from_fn(f)
     }
 
-    fn encaps_key_zeroed() -> [u8; Self::ENCAPS_KEY_SIZE] {
-        [0u8; Self::ENCAPS_KEY_SIZE]
+    fn encaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::ENCAPS_KEY_SIZE] {
+        core::array::from_fn(f)
     }
 
-    fn decaps_key_zeroed() -> [u8; Self::DECAPS_KEY_SIZE] {
-        [0u8; Self::DECAPS_KEY_SIZE]
+    fn decaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::DECAPS_KEY_SIZE] {
+        core::array::from_fn(f)
     }
 
     type EncapsKeySerialization = [u8; Self::ENCAPS_KEY_SIZE];
@@ -364,16 +369,16 @@ impl ParameterSet for MLKEM1024 {
         core::array::from_fn(f)
     }
 
-    fn ciphertext_zeroed() -> [u8; Self::CIPHERTEXT_SIZE] {
-        [0u8; Self::CIPHERTEXT_SIZE]
+    fn ciphertext_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::CIPHERTEXT_SIZE] {
+        core::array::from_fn(f)
     }
 
-    fn encaps_key_zeroed() -> [u8; Self::ENCAPS_KEY_SIZE] {
-        [0u8; Self::ENCAPS_KEY_SIZE]
+    fn encaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::ENCAPS_KEY_SIZE] {
+        core::array::from_fn(f)
     }
 
-    fn decaps_key_zeroed() -> [u8; Self::DECAPS_KEY_SIZE] {
-        [0u8; Self::DECAPS_KEY_SIZE]
+    fn decaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::DECAPS_KEY_SIZE] {
+        core::array::from_fn(f)
     }
 
     type EncapsKeySerialization = [u8; Self::ENCAPS_KEY_SIZE];
