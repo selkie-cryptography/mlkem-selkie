@@ -47,4 +47,8 @@ exclude_re = [
     # Debug formatting is a diagnostic aid, not a correctness property; mutating
     # it to a no-op fails no functional test.
     "impl Debug for",
+    # `<` -> `<=` on `unpack`'s word-refill guard is equivalent: refilling one
+    # value early shifts the same word to the same bit positions, so every
+    # output (zero-padded tails included) is unchanged.
+    "replace < with <= in unpack",
 ]
