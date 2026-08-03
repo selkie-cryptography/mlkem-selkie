@@ -4,4 +4,4 @@ avoid-breaking-exported-api = false
 # Pin clippy's version-dependent lints (msrv-gated suggestions, incompatible_msrv)
 # so the gate is deterministic across toolchain versions, the clippy analog of
 # rustfmt's `style_edition`.
-msrv = "1.85"
+msrv = "1.88" # slice::as_chunks

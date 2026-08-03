@@ -9,6 +9,7 @@
 //!
 //! [section 5]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#section.5
 
+use subtle::{Choice, ConstantTimeEq};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::{
@@ -238,6 +239,26 @@ impl<P: ParameterSet> Ciphertext<P> {
     /// Returns the serialized ciphertext bytes.
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_ref()
+    }
+}
+
+impl<P: ParameterSet> ConstantTimeEq for Ciphertext<P> {
+    /// Constant-time equality for the FO re-encryption check: XOR-folds the
+    /// serializations word-wise into one accumulator — data-independent by
+    /// construction — with a single `subtle` comparison at the end, faster
+    /// than `subtle`'s per-byte slice comparison.
+    fn ct_eq(&self, other: &Self) -> Choice {
+        let (a, b) = (self.as_bytes(), other.as_bytes());
+        debug_assert_eq!(a.len() % 8, 0);
+
+        let mut acc = 0u64;
+        let (a_words, _) = a.as_chunks::<8>();
+        let (b_words, _) = b.as_chunks::<8>();
+        for (x, y) in a_words.iter().zip(b_words) {
+            acc |= u64::from_le_bytes(*x) ^ u64::from_le_bytes(*y);
+        }
+
+        acc.ct_eq(&0)
     }
 }
 

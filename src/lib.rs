@@ -7,6 +7,10 @@
 // Everything outside those modules stays unsafe-free.
 #![deny(unsafe_code)]
 #![warn(rust_2018_idioms, unused_lifetimes, unused_qualifications)]
+// TODO(#51): convert the crate's constant-size `chunks_exact` loops to
+// `as_chunks` (MSRV is now 1.88) and drop this allow; the SIMD kernel loops
+// need a perf pass alongside the conversion.
+#![allow(clippy::chunks_exact_to_as_chunks)]
 
 use subtle::{ConditionallySelectable, ConstantTimeEq};
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -499,7 +503,7 @@ impl<P: ParameterSet> DecapsulationKey<P> {
         // else the rejection secret K_bar — compared and selected in constant
         // time so the outcome over secret-derived bytes never branches or
         // short-circuits.
-        let matches = ciphertext.as_bytes().ct_eq(c_prime.as_bytes());
+        let matches = ciphertext.0.ct_eq(&c_prime);
 
         let mut secret = [0u8; 32];
         for (out, (kp, kb)) in secret.iter_mut().zip(k_prime.iter().zip(k_bar.iter())) {
