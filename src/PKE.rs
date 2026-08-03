@@ -39,6 +39,20 @@ impl<P: ParameterSet> KeyGenRandomnessSeed<P> {
     }
 }
 
+/// The largest [`PKE::ENCRYPTION_KEY_SIZE`] across parameter sets (`K = 4`):
+/// `384 * 4 + 32`.
+///
+/// [`PKE::ENCRYPTION_KEY_SIZE`]: crate::parameters::PKE::ENCRYPTION_KEY_SIZE
+const MAX_PKE_ENCRYPTION_KEY_SIZE: usize = 1568;
+
+/// The K-PKE encryption key's serialization type: the encapsulation key's,
+/// byte for byte (Algorithm 16 line 3).
+pub(crate) type EncryptionKeySerialization<P> = <P as ParameterSet>::EncapsKeySerialization;
+
+/// The K-PKE decryption key's serialization type, `[u8; 384 * K]`.
+pub(crate) type DecryptionKeySerialization<P> =
+    <<P as ParameterSet>::PKE as crate::parameters::PKE>::DecryptionKeySerialization;
+
 /// A K-PKE encryption key: the NTT-domain vector `t_hat`, the matrix seed
 /// `rho`, and the expanded transpose `A^T` cached for encryption (section 5 of
 /// FIPS 203).
@@ -60,21 +74,22 @@ pub struct EncryptionKey<P: ParameterSet> {
 }
 
 impl<P: ParameterSet> EncryptionKey<P> {
-    /// Serialized bytes `ByteEncode_12(t_hat) ‖ rho`, yielded lazily from
-    /// 384-byte blocks.
-    pub(crate) fn bytes(&self) -> impl Iterator<Item = u8> + '_ {
-        self.t_hat.byte_encoded().flatten().chain(self.rho)
-    }
+    /// Serializes the encryption key block-wise on the stack.
+    pub(crate) fn to_bytes(&self) -> EncryptionKeySerialization<P> {
+        let mut assembled = [0u8; MAX_PKE_ENCRYPTION_KEY_SIZE];
+        debug_assert!(P::PKE::ENCRYPTION_KEY_SIZE <= assembled.len());
 
-    /// `ByteEncode_12(t_hat)` as 384-byte blocks, for assembling `H(ek)`'s
-    /// preimage.
-    pub(crate) fn byte_encoded(&self) -> impl Iterator<Item = [u8; 384]> + '_ {
-        self.t_hat.byte_encoded()
-    }
+        let (encoded, _) = assembled.split_at_mut(P::PKE::ENCRYPTION_KEY_SIZE);
+        let (t_part, rho_part) = encoded.split_at_mut(384 * P::K);
+        for (chunk, block) in t_part
+            .chunks_exact_mut(384)
+            .zip(self.t_hat.byte_encoded_elements())
+        {
+            chunk.copy_from_slice(&block);
+        }
+        rho_part.copy_from_slice(&self.rho);
 
-    /// The matrix seed `rho`, the serialization's 32-byte tail.
-    pub(crate) fn rho(&self) -> &[u8; 32] {
-        &self.rho
+        P::encaps_key_from_fn(|i| assembled.get(i).copied().unwrap_or(0))
     }
 
     /// Parses an encryption key from `384 * K + 32` bytes.
@@ -153,10 +168,13 @@ pub struct DecryptionKey<P: ParameterSet> {
 }
 
 impl<P: ParameterSet> DecryptionKey<P> {
-    /// `ByteEncode_12(s_hat)` (Algorithm 13's decryption-key serialization)
-    /// as `K` 384-byte blocks.
-    pub(crate) fn byte_encoded(&self) -> impl Iterator<Item = [u8; 384]> + '_ {
-        self.s_hat.vector().byte_encoded()
+    /// Serializes the decryption key, `ByteEncode_12(s_hat)` (Algorithm 13
+    /// line 19), block-wise on the stack.
+    pub(crate) fn to_bytes(&self) -> DecryptionKeySerialization<P> {
+        let blocks = self.s_hat.vector().byte_encoded();
+        let bytes = blocks.as_ref().as_flattened();
+
+        P::PKE::decryption_key_from_fn(|i| bytes.get(i).copied().unwrap_or(0))
     }
 
     /// Parses a decryption key from `384 * K` bytes.
