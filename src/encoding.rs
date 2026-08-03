@@ -183,8 +183,19 @@ impl RqElement {
 
 impl<P: ParameterSet> TqVector<P> {
     /// `ByteEncode_12` applied componentwise, one 384-byte block per element.
-    pub(crate) fn byte_encoded(&self) -> impl Iterator<Item = [u8; 384]> + '_ {
+    pub(crate) fn byte_encoded_elements(&self) -> impl Iterator<Item = [u8; 384]> + '_ {
         self.as_slice().iter().map(TqElement::byte_encode)
+    }
+
+    /// `ByteEncode_12` applied componentwise, the `K` 384-byte blocks as an
+    /// array.
+    pub(crate) fn byte_encoded(&self) -> P::KArray<[u8; 384]> {
+        let mut blocks = self.byte_encoded_elements();
+
+        // `k_array_from_fn` drives `K` iterations and the vector holds `K`
+        // elements, so every `next()` yields a block; the zero fallback is
+        // unreachable.
+        P::k_array_from_fn(|_| blocks.next().unwrap_or([0u8; 384]))
     }
 
     /// `ByteDecode_12` applied componentwise to `384 * K` bytes.
