@@ -62,7 +62,6 @@ impl From<Eta> for usize {
 /// as [`ParameterSet::PKE`].
 ///
 /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#section.5
-// reason: matches the `PKE` module and FIPS 203's name for the scheme.
 #[allow(clippy::upper_case_acronyms)]
 pub trait PKE: ParameterSet {
     /// The derived K-PKE decryption key size in bytes.
