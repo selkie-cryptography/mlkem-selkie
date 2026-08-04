@@ -6,12 +6,18 @@ use crate::{
     parameters::{self, MLKEM512},
 };
 
+/// `N` values spread across the full `d`-bit range: the odd multiplier
+/// reaches the high bits that a bare index (at most 255) never sets.
+fn spread_values(d: usize) -> [u16; N] {
+    core::array::from_fn(|i| ((i * 2557) & ((1 << d) - 1)) as u16)
+}
+
 /// `pack` and `unpack` are inverse for every supported bit width, and
 /// `pack_words` agrees with `pack` at the fixed widths.
 #[test]
 fn pack_unpack_roundtrip() {
     for &d in &[1usize, 4, 5, 10, 11, 12] {
-        let values: [u16; N] = core::array::from_fn(|i| (i as u16) & ((1 << d) - 1));
+        let values = spread_values(d);
 
         let packed: Vec<u8> = pack(values, d).collect();
 
@@ -19,7 +25,7 @@ fn pack_unpack_roundtrip() {
         assert_eq!(unpack(&packed, d), values);
     }
 
-    let values: [u16; N] = core::array::from_fn(|i| (i as u16) & 0xFFF);
+    let values = spread_values(12);
     let words: [u8; 384] = pack_words(&values, 12);
     let streamed: Vec<u8> = pack(values, 12).collect();
 
