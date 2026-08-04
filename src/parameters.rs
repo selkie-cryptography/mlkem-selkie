@@ -57,6 +57,29 @@ impl From<Eta> for usize {
     }
 }
 
+/// The K-PKE parameter surface ([FIPS 203] section 5): the sizes and
+/// serialization types the inner public-key scheme derives from `K`, reached
+/// as [`ParameterSet::PKE`].
+///
+/// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#section.5
+// reason: matches the `PKE` module and FIPS 203's name for the scheme.
+#[allow(clippy::upper_case_acronyms)]
+pub trait PKE: ParameterSet {
+    /// The derived K-PKE decryption key size in bytes.
+    const DECRYPTION_KEY_SIZE: usize = 384 * Self::K;
+
+    /// The derived K-PKE encryption key size in bytes.
+    const ENCRYPTION_KEY_SIZE: usize = (384 * Self::K) + 32;
+
+    /// Decryption key byte serialization, a byte array of fixed length
+    /// [`Self::DECRYPTION_KEY_SIZE`].
+    type DecryptionKeySerialization: AsRef<[u8]> + Send + Sync;
+
+    /// Builds a [`Self::DecryptionKeySerialization`] on the stack by applying
+    /// `f` to each byte index.
+    fn decryption_key_from_fn(f: impl FnMut(usize) -> u8) -> Self::DecryptionKeySerialization;
+}
+
 /// Parameter sets for ML-KEM as defined in the NIST [FIPS 203] standard,
 /// section 7.
 ///
@@ -75,6 +98,11 @@ impl From<Eta> for usize {
 // the key/ciphertext types thread-safe (and let the divan benchmarks run their
 // closures across threads).
 pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
+    /// The K-PKE parameter surface ([FIPS 203] section 5).
+    ///
+    /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#section.5
+    type PKE: PKE;
+
     /// Represents the dimensions of the vectors *s* and *e* in `K-PKE.KeyGen()`
     /// and the dimensions of the matrix *Â* and the vectors *r*, *e_1*, and
     /// *e_2* in `K-PKE.Encrypt()`, as defined in section 5 of the NIST
@@ -142,24 +170,6 @@ pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
     /// [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
     const D_V: usize;
 
-    /// The derived K-PKE decryption key size in bytes.
-    ///
-    /// Load-bearing at the KEM boundary: `DecapsulationKey::from_bytes`
-    /// splits its input at this offset. There is no standalone
-    /// `PKEDecryptionKeySerialization` because the K-PKE decryption key
-    /// reaches the wire only through `DecapsulationKey::to_bytes`, which
-    /// chains its byte-encoding iterator into [`Self::decaps_key_from_fn`].
-    const PKE_DECRYPTION_KEY_SIZE: usize = 384 * Self::K;
-
-    /// The derived K-PKE encryption key size in bytes.
-    ///
-    /// Load-bearing at the K-PKE boundary: `EncryptionKey::from_bytes`
-    /// debug-asserts against it. No matching `PKEEncryptionKeySerialization`
-    /// type — the K-PKE encryption key reaches the wire only through its
-    /// streaming byte-encoding iterator, chained into
-    /// [`Self::encaps_key_from_fn`] at the KEM boundary.
-    const PKE_ENCRYPTION_KEY_SIZE: usize = (384 * Self::K) + 32;
-
     /// The derived secret decapsulation key size in bytes.
     const DECAPS_KEY_SIZE: usize = (768 * Self::K) + 96;
 
@@ -220,7 +230,18 @@ pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
 pub struct MLKEM512;
 
 #[cfg(feature = "mlkem512")]
+impl PKE for MLKEM512 {
+    type DecryptionKeySerialization = [u8; Self::DECRYPTION_KEY_SIZE];
+
+    fn decryption_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::DECRYPTION_KEY_SIZE] {
+        core::array::from_fn(f)
+    }
+}
+
+#[cfg(feature = "mlkem512")]
 impl ParameterSet for MLKEM512 {
+    type PKE = Self;
+
     const K: usize = 2;
     const ETA_1: Eta = Eta::Three;
     const ETA_2: Eta = Eta::Two;
@@ -264,7 +285,18 @@ impl ParameterSet for MLKEM512 {
 pub struct MLKEM768;
 
 #[cfg(feature = "mlkem768")]
+impl PKE for MLKEM768 {
+    type DecryptionKeySerialization = [u8; Self::DECRYPTION_KEY_SIZE];
+
+    fn decryption_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::DECRYPTION_KEY_SIZE] {
+        core::array::from_fn(f)
+    }
+}
+
+#[cfg(feature = "mlkem768")]
 impl ParameterSet for MLKEM768 {
+    type PKE = Self;
+
     const K: usize = 3;
     const ETA_1: Eta = Eta::Two;
     const ETA_2: Eta = Eta::Two;
@@ -308,7 +340,18 @@ impl ParameterSet for MLKEM768 {
 pub struct MLKEM1024;
 
 #[cfg(feature = "mlkem1024")]
+impl PKE for MLKEM1024 {
+    type DecryptionKeySerialization = [u8; Self::DECRYPTION_KEY_SIZE];
+
+    fn decryption_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::DECRYPTION_KEY_SIZE] {
+        core::array::from_fn(f)
+    }
+}
+
+#[cfg(feature = "mlkem1024")]
 impl ParameterSet for MLKEM1024 {
+    type PKE = Self;
+
     const K: usize = 4;
     const ETA_1: Eta = Eta::Two;
     const ETA_2: Eta = Eta::Two;

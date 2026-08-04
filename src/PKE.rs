@@ -16,7 +16,7 @@ use crate::{
         CachedTqVector, PolynomialRingElement, RqElement, RqVector, TqElement, TqMatrix, TqVector,
     },
     functions::G,
-    parameters::ParameterSet,
+    parameters::{PKE as _, ParameterSet},
     sampling::CbdSampler,
 };
 
@@ -74,7 +74,7 @@ impl<P: ParameterSet> EncryptionKey<P> {
     /// Debug-asserts the input length; callers in `ML-KEM` validate the length
     /// at the public boundary before parsing (FIPS 203 section 7.2).
     pub fn from_bytes(bytes: &[u8]) -> Self {
-        debug_assert_eq!(bytes.len(), P::PKE_ENCRYPTION_KEY_SIZE);
+        debug_assert_eq!(bytes.len(), P::PKE::ENCRYPTION_KEY_SIZE);
 
         let (encoded_t, rho_bytes) = bytes.split_at(384 * P::K);
 
@@ -155,7 +155,7 @@ impl<P: ParameterSet> DecryptionKey<P> {
     ///
     /// Debug-asserts the input length; callers validate at the public boundary.
     pub fn from_bytes(bytes: &[u8]) -> Self {
-        debug_assert_eq!(bytes.len(), P::PKE_DECRYPTION_KEY_SIZE);
+        debug_assert_eq!(bytes.len(), P::PKE::DECRYPTION_KEY_SIZE);
 
         Self {
             s_hat: CachedTqVector::from(TqVector::<P>::byte_decode(bytes)),
