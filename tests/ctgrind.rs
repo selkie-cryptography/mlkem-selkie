@@ -25,7 +25,10 @@
 use core::ffi::c_void;
 
 use crabgrind::memcheck::{self, MemState};
-use mlkem_selkie::{Ciphertext, DecapsulationKey, MLKEM512, ParameterSet, algebraic::FieldElement};
+use mlkem_selkie::{
+    Ciphertext, DecapsulationKey, MLKEM512, ParameterSet, algebraic::FieldElement,
+    parameters::PKE as _,
+};
 
 /// Marks a byte slice as "secret" (undefined) for Valgrind. A no-op when not
 /// running under Valgrind.
@@ -140,7 +143,7 @@ fn decapsulate_secret_independent() {
     // K-PKE decryption key `s_hat` (the prefix) and the rejection seed `z` (the
     // suffix). The embedded encapsulation key and its hash are public.
     let mut dk_bytes = keypair.to_bytes();
-    mark_secret(&dk_bytes[..MLKEM512::PKE_DECRYPTION_KEY_SIZE]);
+    mark_secret(&dk_bytes[..MLKEM512::DECRYPTION_KEY_SIZE]);
     mark_secret(&dk_bytes[MLKEM512::DECAPS_KEY_SIZE - 32..]);
 
     let decapsulation_key =

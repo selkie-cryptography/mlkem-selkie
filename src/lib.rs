@@ -64,6 +64,7 @@ pub use parameters::ParameterSet;
 use crate::{
     PKE::Ciphertext as PkeCiphertext,
     functions::{G, H, J},
+    parameters::PKE as _,
 };
 
 /// Errors returned by the public ML-KEM API.
@@ -534,7 +535,7 @@ impl<P: ParameterSet> TryFrom<&[u8]> for DecapsulationKey<P> {
         }
 
         // dk = dk_PKE ‖ ek ‖ H(ek) ‖ z
-        let (dk_pke_bytes, rest) = bytes.split_at(P::PKE_DECRYPTION_KEY_SIZE);
+        let (dk_pke_bytes, rest) = bytes.split_at(P::PKE::DECRYPTION_KEY_SIZE);
         let (ek_bytes, rest) = rest.split_at(P::ENCAPS_KEY_SIZE);
         let (h_ek_bytes, z_bytes) = rest.split_at(32);
 

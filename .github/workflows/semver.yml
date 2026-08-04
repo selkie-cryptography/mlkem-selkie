@@ -39,4 +39,6 @@ jobs:
       # on it) re-expose internal modules for white-box tests and benches —
       # explicitly not a stable API surface, so internal refactors there are
       # not semver breaks.
-      - run: cargo semver-checks --default-features --baseline-rev "${{ github.event.pull_request.base.sha }}"
+      # Pre-release: breaking changes are expected, so assume a major release.
+      # Drop `--release-type` at the first crates.io publish.
+      - run: cargo semver-checks --default-features --release-type major --baseline-rev "${{ github.event.pull_request.base.sha }}"
