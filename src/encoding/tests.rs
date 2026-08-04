@@ -1,5 +1,7 @@
 //! Unit tests for byte serialization and compression.
 
+use core::array;
+
 use super::*;
 use crate::{
     algebraic::FieldElement,
@@ -9,7 +11,7 @@ use crate::{
 /// `N` values spread across the full `d`-bit range: the odd multiplier
 /// reaches the high bits that a bare index (at most 255) never sets.
 fn spread_values(d: usize) -> [u16; N] {
-    core::array::from_fn(|i| ((i * 2557) & ((1 << d) - 1)) as u16)
+    array::from_fn(|i| ((i * 2557) & ((1 << d) - 1)) as u16)
 }
 
 /// `pack` and `unpack` are inverse for every supported bit width, and
@@ -35,7 +37,7 @@ fn pack_unpack_roundtrip() {
 /// `ByteEncode_12` round-trips NTT coefficients that are already in `0..q`.
 #[test]
 fn byte_encode_12_roundtrip() {
-    let coeffs = core::array::from_fn(|i| FieldElement::new((31 * i as u16 + 5) % parameters::Q));
+    let coeffs = array::from_fn(|i| FieldElement::new((31 * i as u16 + 5) % parameters::Q));
     let poly = TqElement::new(coeffs);
 
     let encoded = poly.byte_encode();
@@ -64,7 +66,7 @@ fn byte_decode_12_reduces_mod_q() {
 /// Message bytes survive a `Decompress_1` / `Compress_1` round-trip.
 #[test]
 fn message_polynomial_roundtrip() {
-    let message: [u8; 32] = core::array::from_fn(|i| (13 * i + 1) as u8);
+    let message: [u8; 32] = array::from_fn(|i| (13 * i + 1) as u8);
 
     let polynomial = RqElement::from_message(&message);
 
@@ -77,9 +79,8 @@ fn message_polynomial_roundtrip() {
 fn vector_compress_roundtrip() {
     let d = MLKEM512::D_U;
     let vector = RqVector::<MLKEM512>::from_fn(|p| {
-        let coeffs = core::array::from_fn(|i| {
-            FieldElement::decompress(((i + p) as u16) & ((1 << d) - 1), d)
-        });
+        let coeffs =
+            array::from_fn(|i| FieldElement::decompress(((i + p) as u16) & ((1 << d) - 1), d));
 
         RqElement::new(coeffs)
     });

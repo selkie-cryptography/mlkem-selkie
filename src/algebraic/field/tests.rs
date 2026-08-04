@@ -1,5 +1,7 @@
 //! Unit tests for prime-field arithmetic.
 
+use core::array;
+
 use proptest::prelude::*;
 
 use super::*;
@@ -116,8 +118,7 @@ fn from_u8_and_to_u16_roundtrip() {
 /// instrumentation sees the body.
 #[test]
 fn montgomery_table_matches_element_wise() {
-    let raw: [u16; 128] =
-        core::array::from_fn(|i| ((i as u16).wrapping_mul(57) + 11) % parameters::Q);
+    let raw: [u16; 128] = array::from_fn(|i| ((i as u16).wrapping_mul(57) + 11) % parameters::Q);
 
     let table = FieldElement::montgomery_table(raw);
 

@@ -17,6 +17,8 @@
 //! [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
 //! [section 4.2.1]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsubsection.4.2.1
 
+use core::array;
+
 use crate::{
     algebraic::{FieldElement, PolynomialRingElement, RqElement, RqVector, TqElement, TqVector},
     parameters::{N, ParameterSet},
@@ -117,7 +119,7 @@ fn unpack(bytes: &[u8], d: usize) -> [u16; N] {
     let mut accumulator: u128 = 0;
     let mut bits = 0usize;
 
-    core::array::from_fn(|_| {
+    array::from_fn(|_| {
         if bits < d {
             accumulator |= u128::from(next_word()) << bits;
             bits += 64;

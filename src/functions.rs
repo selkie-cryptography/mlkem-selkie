@@ -17,7 +17,7 @@
 //! [section 4.1]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.1
 //! [`SampleNTT`]: crate::sampling
 
-use core::ops::Deref;
+use core::{array, ops::Deref};
 
 use sha3_selkie::{Sha3_256, Sha3_512, Shake256, Shake256X2, Shake256X4};
 // Re-exported so `XOF` callers can name its return type: the same hasher, in
@@ -72,7 +72,7 @@ impl<const N: usize> PrfBatch<N> {
     /// Returns the `N` SHAKE256 inputs this batch squeezes from: `s ‖ (b + i)`
     /// for lane `i`, the consecutive domain separators of [`PRF`].
     fn inputs(s: &[u8; 32], b: u8) -> [[u8; 33]; N] {
-        core::array::from_fn(|lane| {
+        array::from_fn(|lane| {
             let mut input = [0u8; 33];
             let (prefix, suffix) = input.split_at_mut(32);
             prefix.copy_from_slice(s);
