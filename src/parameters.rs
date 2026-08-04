@@ -2,6 +2,9 @@
 //!
 //! [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
 
+// Only the feature-gated parameter-set impls call `array::from_fn`.
+#[cfg(any(feature = "mlkem512", feature = "mlkem768", feature = "mlkem1024"))]
+use core::array;
 use core::fmt::Debug;
 
 use zeroize::Zeroize;
@@ -233,7 +236,7 @@ impl PKE for MLKEM512 {
     type DecryptionKeySerialization = [u8; Self::DECRYPTION_KEY_SIZE];
 
     fn decryption_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::DECRYPTION_KEY_SIZE] {
-        core::array::from_fn(f)
+        array::from_fn(f)
     }
 }
 
@@ -256,19 +259,19 @@ impl ParameterSet for MLKEM512 {
     where
         T: KElement,
     {
-        core::array::from_fn(f)
+        array::from_fn(f)
     }
 
     fn ciphertext_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::CIPHERTEXT_SIZE] {
-        core::array::from_fn(f)
+        array::from_fn(f)
     }
 
     fn encaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::ENCAPS_KEY_SIZE] {
-        core::array::from_fn(f)
+        array::from_fn(f)
     }
 
     fn decaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::DECAPS_KEY_SIZE] {
-        core::array::from_fn(f)
+        array::from_fn(f)
     }
 
     type EncapsKeySerialization = [u8; Self::ENCAPS_KEY_SIZE];
@@ -288,7 +291,7 @@ impl PKE for MLKEM768 {
     type DecryptionKeySerialization = [u8; Self::DECRYPTION_KEY_SIZE];
 
     fn decryption_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::DECRYPTION_KEY_SIZE] {
-        core::array::from_fn(f)
+        array::from_fn(f)
     }
 }
 
@@ -311,19 +314,19 @@ impl ParameterSet for MLKEM768 {
     where
         T: KElement,
     {
-        core::array::from_fn(f)
+        array::from_fn(f)
     }
 
     fn ciphertext_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::CIPHERTEXT_SIZE] {
-        core::array::from_fn(f)
+        array::from_fn(f)
     }
 
     fn encaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::ENCAPS_KEY_SIZE] {
-        core::array::from_fn(f)
+        array::from_fn(f)
     }
 
     fn decaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::DECAPS_KEY_SIZE] {
-        core::array::from_fn(f)
+        array::from_fn(f)
     }
 
     type EncapsKeySerialization = [u8; Self::ENCAPS_KEY_SIZE];
@@ -343,7 +346,7 @@ impl PKE for MLKEM1024 {
     type DecryptionKeySerialization = [u8; Self::DECRYPTION_KEY_SIZE];
 
     fn decryption_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::DECRYPTION_KEY_SIZE] {
-        core::array::from_fn(f)
+        array::from_fn(f)
     }
 }
 
@@ -366,19 +369,19 @@ impl ParameterSet for MLKEM1024 {
     where
         T: KElement,
     {
-        core::array::from_fn(f)
+        array::from_fn(f)
     }
 
     fn ciphertext_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::CIPHERTEXT_SIZE] {
-        core::array::from_fn(f)
+        array::from_fn(f)
     }
 
     fn encaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::ENCAPS_KEY_SIZE] {
-        core::array::from_fn(f)
+        array::from_fn(f)
     }
 
     fn decaps_key_from_fn(f: impl FnMut(usize) -> u8) -> [u8; Self::DECAPS_KEY_SIZE] {
-        core::array::from_fn(f)
+        array::from_fn(f)
     }
 
     type EncapsKeySerialization = [u8; Self::ENCAPS_KEY_SIZE];

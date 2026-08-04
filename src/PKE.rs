@@ -9,6 +9,8 @@
 //!
 //! [section 5]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#section.5
 
+use core::array;
+
 use subtle::{Choice, ConstantTimeEq};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -352,7 +354,7 @@ impl<P: ParameterSet> TqMatrix<P> {
         let mut entries = core::iter::from_fn(move || {
             if taken == 4 {
                 let base = next;
-                let indices: [(u8, u8); 4] = core::array::from_fn(|lane| {
+                let indices: [(u8, u8); 4] = array::from_fn(|lane| {
                     let n = base + lane;
 
                     ((n % k) as u8, (n / k) as u8)
