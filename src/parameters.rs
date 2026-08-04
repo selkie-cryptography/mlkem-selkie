@@ -385,3 +385,36 @@ impl ParameterSet for MLKEM1024 {
     type DecapsKeySerialization = [u8; Self::DECAPS_KEY_SIZE];
     type CiphertextSerialization = [u8; Self::CIPHERTEXT_SIZE];
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `decryption_key_from_fn` feeds `f` every index in order and fills all
+    /// [`PKE::DECRYPTION_KEY_SIZE`] bytes.
+    fn decryption_key_builder_fills_by_index<P: PKE>() {
+        let serialized = P::decryption_key_from_fn(|i| i as u8);
+
+        let bytes = serialized.as_ref();
+        assert_eq!(bytes.len(), P::DECRYPTION_KEY_SIZE);
+        assert!(bytes.iter().enumerate().all(|(i, &b)| b == i as u8));
+    }
+
+    #[cfg(feature = "mlkem512")]
+    #[test]
+    fn mlkem512_decryption_key_builder() {
+        decryption_key_builder_fills_by_index::<MLKEM512>();
+    }
+
+    #[cfg(feature = "mlkem768")]
+    #[test]
+    fn mlkem768_decryption_key_builder() {
+        decryption_key_builder_fills_by_index::<MLKEM768>();
+    }
+
+    #[cfg(feature = "mlkem1024")]
+    #[test]
+    fn mlkem1024_decryption_key_builder() {
+        decryption_key_builder_fills_by_index::<MLKEM1024>();
+    }
+}
