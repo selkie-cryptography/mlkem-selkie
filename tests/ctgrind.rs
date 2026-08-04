@@ -140,7 +140,7 @@ fn decapsulate_secret_independent() {
     // K-PKE decryption key `s_hat` (the prefix) and the rejection seed `z` (the
     // suffix). The embedded encapsulation key and its hash are public.
     let mut dk_bytes = keypair.to_bytes();
-    mark_secret(&dk_bytes[..MLKEM512::PKE_DECRYPTION_KEY_SIZE]);
+    mark_secret(&dk_bytes[..MLKEM512::PKE::DECRYPTION_KEY_SIZE]);
     mark_secret(&dk_bytes[MLKEM512::DECAPS_KEY_SIZE - 32..]);
 
     let decapsulation_key =
