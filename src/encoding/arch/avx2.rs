@@ -8,7 +8,7 @@
 //! down to its bit offset with `srlv`, masks to `d` bits, and packs back to
 //! `u16`. Only fixed-index shuffles and public-length branches touch the
 //! data, so the kernels are constant-time; `ByteDecode_12` runs over secret
-//! decryption-key bytes when parsing a decapsulation key.
+//! decryption key bytes when parsing a decapsulation key.
 #![allow(unsafe_code)]
 
 use core::{
