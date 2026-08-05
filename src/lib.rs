@@ -12,6 +12,11 @@
 // need a perf pass alongside the conversion.
 #![allow(clippy::chunks_exact_to_as_chunks)]
 
+#[cfg(not(any(feature = "mlkem512", feature = "mlkem768", feature = "mlkem1024")))]
+compile_error!(
+    "enable at least one ML-KEM parameter set feature: `mlkem512`, `mlkem768`, or `mlkem1024`"
+);
+
 use subtle::{ConditionallySelectable, ConstantTimeEq};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 

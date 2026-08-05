@@ -2,10 +2,7 @@
 //!
 //! [FIPS 203]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf
 
-// Only the feature-gated parameter-set impls call `array::from_fn`.
-#[cfg(any(feature = "mlkem512", feature = "mlkem768", feature = "mlkem1024"))]
-use core::array;
-use core::fmt::Debug;
+use core::{array, fmt::Debug};
 
 use zeroize::Zeroize;
 
