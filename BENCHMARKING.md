@@ -3,7 +3,19 @@
 Build both binaries first, run them alternated in one sitting, compare
 medians, and trust ordering consistency over magnitude.
 
-## A/B: did my change help?
+## A/B Measurement
+
+Builds the baseline in a temporary detached worktree (uncommitted changes
+cannot leak into it), alternates the runs, discards warmup, and prints
+per-op median deltas:
+
+```sh
+scripts/ab-bench.sh main                    # baseline main vs the working tree
+scripts/ab-bench.sh main my-branch          # baseline main vs a ref
+scripts/ab-bench.sh main '' MLKEM1024 5     # filter and round count
+```
+
+The manual procedure it encodes:
 
 1. Build the baseline binary.
 
@@ -68,16 +80,44 @@ medians, and trust ordering consistency over magnitude.
   branch-per-index alternatives. Measure; do not reason your way to a
   verdict.
 
-## Profiling: where does the time go?
+## Profiling
 
-samply runs on macOS, Linux, and Windows and opens the Firefox Profiler
-with per-function sample counts:
+1. Pick the operation with the divan per-operation benchmarks. `keygen_derand`,
+   `encaps_derand`, `decaps`, `parse_*`, and `serialize_*` isolate each
+   phase, so a gap against a competitor or an expectation already names the
+   neighborhood before any profiler runs.
 
-```sh
-samply record /tmp/bench_a --bench MLKEM768
-```
+2. Profile that operation with the repo driver:
 
-Native alternatives:
+   ```sh
+   rustc -O scripts/profile.rs -o /tmp/mlkem-profile
+   /tmp/mlkem-profile samply decaps 20000    # CPU profile -> Firefox Profiler
+   /tmp/mlkem-profile dhat keygen            # heap profile -> dhat-heap.json
+   /tmp/mlkem-profile flamegraph decaps      # flamegraph.svg
+   ```
+
+   `mode` is `keygen | encaps | decaps | all`; the number is iterations.
+
+3. Read the inverted call tree (self time per function), not the top-down
+   view. Things that have mattered here:
+
+   - `memmove`/`memcpy` self time is data movement: staging buffers,
+     serialization, typed-value placement. Compare its share against the
+     arithmetic.
+   - Iterator adapters (`from_fn`, `flat_map`, `chain` frames) with real
+     self time mean a per-byte chain did not compile to block copies.
+   - Keccak share is the floor set by hashing; arithmetic wins cannot
+     shrink it.
+   - Attribution error is real: a hot leaf often bills its cost to an
+     inlined caller. Treat percentages as pointers, not verdicts.
+
+4. For a single hot loop (not where time goes, but why it is slow),
+   `scripts/mca.rs` runs llvm-mca over its release asm and reports
+   throughput bottlenecks and port pressure.
+
+samply runs on macOS, Linux, and Windows; install with `cargo install
+samply` (likewise `cargo install cargo-instruments flamegraph` for the
+alternatives below). Native alternatives when samply does not fit:
 
 - macOS: Instruments, via `cargo instruments -t time` (cargo-instruments).
 - Linux: `perf record --call-graph dwarf` then `perf report`, or
