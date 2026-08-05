@@ -18,8 +18,7 @@
 //! (`"apple-m4"`, or `"apple"` when unknown), for kernels that specialize
 //! per-core as schedules accumulate.
 //!
-//! The only `unsafe` in the crate lives in this module (and the future `avx2`
-//! sibling): NEON is baseline on aarch64, so each intrinsic call is sound, as
+//! NEON is baseline on aarch64, so each `unsafe` intrinsic call is sound, as
 //! the per-block `SAFETY` notes record.
 #![allow(unsafe_code)]
 
