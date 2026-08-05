@@ -1,11 +1,13 @@
 //! Architecture-dispatched bit-unpacking kernels.
 //!
 //! Every backend exposes [`unpack`], the bit recomposition of `ByteDecode_d`
-//! (Algorithm 6) shared by the key and ciphertext decode paths. The active
+//! ([Algorithm 6]) shared by the key and ciphertext decode paths. The active
 //! backend is chosen at compile time from the `mlkem_selkie_arch` cfg that
 //! `build.rs` emits; absent it, the portable scalar [`generic`] backend is
 //! used. The SIMD backends fall back to [`generic`] for widths without a
 //! kernel and for the zero-padded short inputs the scalar form tolerates.
+//!
+//! [Algorithm 6]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.6
 
 #[cfg(mlkem_selkie_arch = "avx2")]
 mod avx2;
