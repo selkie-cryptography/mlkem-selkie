@@ -7,9 +7,11 @@ use crate::parameters::N;
 /// Unpacks `N` `d`-bit values from bytes, least-significant bit first.
 ///
 /// Inverse of the packing in [`crate::encoding`]; implements the bit
-/// recomposition of `ByteDecode_d` (Algorithm 6). Reads the leading
+/// recomposition of `ByteDecode_d` ([Algorithm 6]). Reads the leading
 /// `N * d / 8` bytes in 64-bit words, each value in `0..2^d`; a short input
 /// is zero-padded.
+///
+/// [Algorithm 6]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.6
 pub(crate) fn unpack(bytes: &[u8], d: usize) -> [u16; N] {
     let mask = (1u32 << d) - 1;
 
