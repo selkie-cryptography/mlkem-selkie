@@ -14,24 +14,19 @@ fn spread_values(d: usize) -> [u16; N] {
     array::from_fn(|i| ((i * 2557) & ((1 << d) - 1)) as u16)
 }
 
-/// `pack` and `unpack` are inverse for every supported bit width, and
-/// `pack_words` agrees with `pack` at the fixed widths.
+/// `pack` and `unpack` are inverse for every supported bit width,
+/// through the zero tail of an oversized array.
 #[test]
 fn pack_unpack_roundtrip() {
     for &d in &[1usize, 4, 5, 10, 11, 12] {
         let values = spread_values(d);
 
-        let packed: Vec<u8> = pack(values, d).collect();
+        let packed: [u8; 384] = pack(&values, d);
+        let (exact, tail) = packed.split_at(N * d / 8);
 
-        assert_eq!(packed.len(), N * d / 8);
-        assert_eq!(unpack(&packed, d), values);
+        assert_eq!(unpack(exact, d), values);
+        assert!(tail.iter().all(|&byte| byte == 0));
     }
-
-    let values = spread_values(12);
-    let words: [u8; 384] = pack_words(&values, 12);
-    let streamed: Vec<u8> = pack(values, 12).collect();
-
-    assert_eq!(words.as_slice(), streamed.as_slice());
 }
 
 /// `ByteEncode_12` round-trips NTT coefficients that are already in `0..q`.
@@ -55,7 +50,7 @@ fn byte_decode_12_reduces_mod_q() {
         *first = parameters::Q;
     }
 
-    let bytes: [u8; 384] = pack_words(&values, 12);
+    let bytes: [u8; 384] = pack(&values, 12);
 
     let decoded = TqElement::byte_decode(&bytes);
 
@@ -85,7 +80,11 @@ fn vector_compress_roundtrip() {
         RqElement::new(coeffs)
     });
 
-    let encoded: Vec<u8> = vector.compress_encode(d).collect();
+    let mut encoded = Vec::new();
+    for poly in vector.as_slice() {
+        let packed = poly.compress_encode(d);
+        encoded.extend_from_slice(packed.split_at(32 * d).0);
+    }
 
     assert_eq!(RqVector::<MLKEM512>::decode_decompress(&encoded, d), vector);
 }

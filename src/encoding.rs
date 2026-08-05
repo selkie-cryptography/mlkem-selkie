@@ -31,20 +31,21 @@ mod tests;
 /// compression).
 const D_12: usize = 12;
 
-/// Packs `N` `d`-bit values as `BYTES` bytes, least-significant bit first.
+/// Packs `N` `d`-bit values into the leading `N * d / 8` bytes of a
+/// `BYTES`-byte array, least-significant bit first; the tail stays zero.
 ///
 /// Implements `BitsToBytes` composed with the bit decomposition of
 /// `ByteEncode_d` (Algorithm 5): the bit at position `j` of `values[i]` is
-/// written to global bit `i * d + j`. `BYTES` is an explicit const parameter
-/// because `N * d / 8` is not expressible as a return type on stable Rust;
-/// callers state the size their `d` implies.
+/// written to global bit `i * d + j`, in 64-bit words. `BYTES` is an explicit
+/// const parameter because `N * d / 8` is not expressible as a return type on
+/// stable Rust; callers with a parameter-dependent `d` size for the largest.
 ///
 /// # Panics
 ///
-/// Debug-asserts `BYTES == N * d / 8`.
+/// Debug-asserts `N * d / 8 <= BYTES`.
 #[must_use]
-fn pack_words<const BYTES: usize>(values: &[u16; N], d: usize) -> [u8; BYTES] {
-    debug_assert_eq!(BYTES, N * d / 8);
+fn pack<const BYTES: usize>(values: &[u16; N], d: usize) -> [u8; BYTES] {
+    debug_assert!(N * d / 8 <= BYTES);
 
     let mut out = [0u8; BYTES];
     let mut words = out.chunks_exact_mut(8);
@@ -67,35 +68,9 @@ fn pack_words<const BYTES: usize>(values: &[u16; N], d: usize) -> [u8; BYTES] {
     out
 }
 
-/// Packs `N` `d`-bit values into a byte stream, least-significant bit first,
-/// for the parameter-dependent ciphertext widths whose byte counts cannot be
-/// named as a return type on stable Rust; [`pack_words`] is the fixed-width
-/// form.
-fn pack(values: [u16; N], d: usize) -> impl Iterator<Item = u8> {
-    let mut values = values.into_iter();
-    let mut accumulator: u32 = 0;
-    let mut bits = 0usize;
-
-    core::iter::from_fn(move || {
-        loop {
-            if bits >= 8 {
-                let byte = (accumulator & 0xFF) as u8;
-                accumulator >>= 8;
-                bits -= 8;
-
-                return Some(byte);
-            }
-
-            let value = values.next()?;
-            accumulator |= u32::from(value) << bits;
-            bits += d;
-        }
-    })
-}
-
 /// Unpacks `N` `d`-bit values from bytes, least-significant bit first.
 ///
-/// Inverse of [`pack_words`] and [`pack`]; implements the bit recomposition of
+/// Inverse of [`pack`]; implements the bit recomposition of
 /// `ByteDecode_d` (Algorithm 6). Reads the leading `N * d / 8` bytes in
 /// 64-bit words, each value in `0..2^d`; a short input is zero-padded.
 fn unpack(bytes: &[u8], d: usize) -> [u16; N] {
@@ -137,7 +112,7 @@ impl TqElement {
     /// `ByteEncode_12`: serializes the 256 NTT coefficients as 384 bytes.
     #[must_use]
     pub fn byte_encode(&self) -> [u8; 384] {
-        pack_words(&self.canonical(), D_12)
+        pack(&self.canonical(), D_12)
     }
 
     /// `ByteDecode_12`: deserializes 384 bytes into 256 NTT coefficients.
@@ -155,11 +130,13 @@ impl TqElement {
 }
 
 impl RqElement {
-    /// `ByteEncode_d(Compress_d(self))`: compresses each coefficient to `d`
-    /// bits and packs the result as `32 * d` bytes, yielded lazily; `d` varies
-    /// by parameter set, so the width has no stable-Rust array type.
-    pub fn compress_encode(&self, d: usize) -> impl Iterator<Item = u8> {
-        pack(self.compressed(d), d)
+    /// `ByteEncode_d(Compress_d(self))` in the leading `32 * d` bytes of the
+    /// widest element serialization (`d = 11`); the tail stays zero. `d`
+    /// varies by parameter set, so the exact width has no stable-Rust array
+    /// type.
+    #[must_use]
+    pub fn compress_encode(&self, d: usize) -> [u8; 352] {
+        pack(&self.compressed(d), d)
     }
 
     /// `Decompress_d(ByteDecode_d(bytes))`: unpacks `d`-bit values and
@@ -179,7 +156,7 @@ impl RqElement {
     /// Deserializes this polynomial back into a 32-byte message via
     /// `Compress_1`, recovering `m` in `K-PKE.Decrypt`.
     pub fn compress_message(&self) -> [u8; 32] {
-        pack_words(&self.compressed(1), 1)
+        pack(&self.compressed(1), 1)
     }
 }
 
@@ -212,14 +189,6 @@ impl<P: ParameterSet> TqVector<P> {
 }
 
 impl<P: ParameterSet> RqVector<P> {
-    /// `ByteEncode_d(Compress_d(.))` applied componentwise: `32 * d * K` bytes,
-    /// yielded lazily.
-    pub fn compress_encode(&self, d: usize) -> impl Iterator<Item = u8> + '_ {
-        self.as_slice()
-            .iter()
-            .flat_map(move |poly| poly.compress_encode(d))
-    }
-
     /// `Decompress_d(ByteDecode_d(.))` applied componentwise.
     pub fn decode_decompress(bytes: &[u8], d: usize) -> Self {
         let mut chunks = bytes.chunks_exact(32 * d);

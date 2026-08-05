@@ -149,12 +149,7 @@ impl<P: ParameterSet> EncryptionKey<P> {
         // v = NTT⁻¹(t_hat^T . y_hat) + e2 + mu
         let v = (&self.t_hat * &y_hat).ntt_inverse() + e2 + mu;
 
-        // Serialize Compress(u) ‖ Compress(v) straight into the fixed-size
-        // ciphertext buffer; both halves yield their bytes lazily, so no
-        // intermediate heap allocation backs the encoding.
-        let mut bytes = u.compress_encode(P::D_U).chain(v.compress_encode(P::D_V));
-
-        Ciphertext(P::ciphertext_from_fn(|_| bytes.next().unwrap_or(0)))
+        Ciphertext::from_uv(&u, &v)
     }
 }
 
@@ -223,6 +218,35 @@ impl<P: ParameterSet> DecryptionKey<P> {
 pub struct Ciphertext<P: ParameterSet>(P::CiphertextSerialization);
 
 impl<P: ParameterSet> Ciphertext<P> {
+    /// Serializes `c = ByteEncode_{d_u}(Compress_{d_u}(u)) ‖
+    /// ByteEncode_{d_v}(Compress_{d_v}(v))` ([Algorithm 14] lines 21-23).
+    ///
+    /// [Algorithm 14]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.14
+    fn from_uv(u: &RqVector<P>, v: &RqElement) -> Self {
+        // The largest ciphertext across parameter sets: 32 * (11 * 4 + 5).
+        // The exact `[u8; P::CIPHERTEXT_SIZE]` local is not expressible on
+        // stable Rust, and the collector reading one contiguous staging
+        // buffer is what lets it compile to block copies.
+        const MAX_CIPHERTEXT_SIZE: usize = 1568;
+
+        let mut staged = [0u8; MAX_CIPHERTEXT_SIZE];
+        debug_assert!(P::CIPHERTEXT_SIZE <= staged.len());
+
+        let (u_part, v_part) = staged.split_at_mut(32 * P::D_U * P::K);
+        for (chunk, poly) in u_part.chunks_exact_mut(32 * P::D_U).zip(u.as_slice()) {
+            let packed = poly.compress_encode(P::D_U);
+            chunk.copy_from_slice(packed.split_at(chunk.len()).0);
+        }
+
+        let (v_exact, _) = v_part.split_at_mut(32 * P::D_V);
+        let packed = v.compress_encode(P::D_V);
+        v_exact.copy_from_slice(packed.split_at(v_exact.len()).0);
+
+        Self(P::ciphertext_from_fn(|i| {
+            staged.get(i).copied().unwrap_or(0)
+        }))
+    }
+
     /// Wraps `32 * (D_U * K + D_V)` ciphertext bytes, copying them into the
     /// fixed-size buffer.
     ///
