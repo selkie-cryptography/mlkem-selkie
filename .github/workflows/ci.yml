@@ -160,8 +160,8 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build with no parameter sets
-        run: cargo build --no-default-features
+      - name: No parameter sets is a compile error
+        run: (cargo build --no-default-features 2>&1 || true) | grep -q "at least one ML-KEM parameter set"
       - name: Build each parameter set alone
         run: |
           for set in mlkem512 mlkem768 mlkem1024; do
