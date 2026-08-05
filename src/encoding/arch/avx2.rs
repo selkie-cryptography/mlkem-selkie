@@ -80,7 +80,7 @@ fn unpack_gathered<const D: usize>(bytes: &[u8]) -> [u16; N] {
     let mut out = [0u16; N];
 
     // SAFETY: pure value ops on 32-byte constants; the store writes the
-    // 8-element chunk the loop hands out. `packus` saturation is inert: every
+    // 8-element chunk the loop hands out. `*_packus_*` saturation is inert: every
     // masked value fits `d <= 12` bits.
     unsafe {
         let idx: __m256i = _mm256_loadu_si256(idx.as_ptr().cast());
