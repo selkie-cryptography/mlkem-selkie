@@ -100,3 +100,21 @@ fn unpack_zero_pads_short_input() {
     assert_eq!(values[5], 0xFFF);
     assert_eq!(values[6], 0);
 }
+
+/// The active backend's `unpack` matches the scalar reference at every
+/// supported width, over bytes that exercise all bit positions.
+// On the portable backend the dispatched and reference paths are the same
+// function, so the comparison only means something under a SIMD backend.
+#[cfg(any(mlkem_selkie_arch = "neon", mlkem_selkie_arch = "avx2"))]
+#[test]
+fn unpack_matches_scalar_reference() {
+    for &d in &[1usize, 4, 5, 10, 11, 12] {
+        let bytes: Vec<u8> = (0..N * d / 8).map(|i| (i * 251) as u8).collect();
+
+        assert_eq!(
+            unpack(&bytes, d),
+            arch::generic::unpack(&bytes, d),
+            "d = {d}"
+        );
+    }
+}

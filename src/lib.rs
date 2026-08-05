@@ -2,9 +2,9 @@
 #![allow(non_snake_case)]
 #![allow(mixed_script_confusables)]
 #![deny(missing_docs, clippy::indexing_slicing, clippy::unwrap_used)]
-// `deny`, not `forbid`: the only `unsafe` in the crate is the SIMD intrinsics in
-// the `poly::arch::{neon,avx2}` backends, each call carrying a `// SAFETY:` note.
-// Everything outside those modules stays unsafe-free.
+// `deny`, not `forbid`: the only `unsafe` in the crate is the SIMD intrinsics
+// in the `poly::arch` and `encoding::arch` backends, each call carrying a
+// `// SAFETY:` note. Everything outside those modules stays unsafe-free.
 #![deny(unsafe_code)]
 #![warn(rust_2018_idioms, unused_lifetimes, unused_qualifications)]
 // TODO(#51): convert the crate's constant-size `chunks_exact` loops to
