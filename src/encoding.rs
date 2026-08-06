@@ -36,10 +36,10 @@ const D_12: usize = 12;
 /// `BYTES`-byte array, least-significant bit first; the tail stays zero.
 ///
 /// Implements `BitsToBytes` composed with the bit decomposition of
-/// `ByteEncode_d` (Algorithm 5): the bit at position `j` of `values[i]` is
-/// written to global bit `i * d + j`, in 64-bit words. `BYTES` is an explicit
-/// const parameter because `N * d / 8` is not expressible as a return type on
-/// stable Rust; callers with a parameter-dependent `d` size for the largest.
+/// `ByteEncode_d` (Algorithm 5), dispatched to the active [`arch`] backend.
+/// `BYTES` is an explicit const parameter because `N * d / 8` is not
+/// expressible as a return type on stable Rust; callers with a
+/// parameter-dependent `d` size for the largest.
 ///
 /// # Panics
 ///
@@ -48,23 +48,13 @@ const D_12: usize = 12;
 fn pack<const BYTES: usize>(values: &[u16; N], d: usize) -> [u8; BYTES] {
     debug_assert!(N * d / 8 <= BYTES);
 
+    let full = arch::pack(values, d);
+
     let mut out = [0u8; BYTES];
-    let mut words = out.chunks_exact_mut(8);
-    let mut accumulator: u128 = 0;
-    let mut bits = 0usize;
-
-    for &value in values {
-        accumulator |= u128::from(value) << bits;
-        bits += d;
-
-        if bits >= 64 {
-            if let Some(word) = words.next() {
-                word.copy_from_slice(&(accumulator as u64).to_le_bytes());
-            }
-            accumulator >>= 64;
-            bits -= 64;
-        }
-    }
+    let width = out.len().min(full.len());
+    out.split_at_mut(width)
+        .0
+        .copy_from_slice(full.split_at(width).0);
 
     out
 }

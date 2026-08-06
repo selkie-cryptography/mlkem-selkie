@@ -1,8 +1,36 @@
-//! Portable scalar bit-unpacking, reading the input in 64-bit words.
+//! Portable scalar bit-packing, moving 64-bit words in both directions.
 
 use core::array;
 
 use crate::parameters::N;
+
+/// Packs `N` `d`-bit values into the leading `N * d / 8` bytes of the widest
+/// packing (`d = 12`), least-significant bit first; the tail stays zero.
+///
+/// The bit at position `j` of `values[i]` lands at global bit `i * d + j`,
+/// accumulated and stored in 64-bit words.
+#[must_use]
+pub(crate) fn pack(values: &[u16; N], d: usize) -> [u8; 384] {
+    let mut out = [0u8; 384];
+    let mut words = out.chunks_exact_mut(8);
+    let mut accumulator: u128 = 0;
+    let mut bits = 0usize;
+
+    for &value in values {
+        accumulator |= u128::from(value) << bits;
+        bits += d;
+
+        if bits >= 64 {
+            if let Some(word) = words.next() {
+                word.copy_from_slice(&(accumulator as u64).to_le_bytes());
+            }
+            accumulator >>= 64;
+            bits -= 64;
+        }
+    }
+
+    out
+}
 
 /// Unpacks `N` `d`-bit values from bytes, least-significant bit first.
 ///

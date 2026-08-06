@@ -101,6 +101,24 @@ fn unpack_zero_pads_short_input() {
     assert_eq!(values[6], 0);
 }
 
+/// The active backend's `pack` matches the scalar reference at every
+/// supported width, zero tail included.
+// On the portable backend, the dispatched and reference paths are the same
+// function, so the comparison is only salient under a SIMD backend.
+#[cfg(any(mlkem_selkie_arch = "neon", mlkem_selkie_arch = "avx2"))]
+#[test]
+fn pack_matches_scalar_reference() {
+    for &d in &[1usize, 4, 5, 10, 11, 12] {
+        let values = spread_values(d);
+
+        assert_eq!(
+            arch::pack(&values, d),
+            arch::generic::pack(&values, d),
+            "d = {d}"
+        );
+    }
+}
+
 /// The active backend's `unpack` matches the scalar reference at every
 /// supported width, over bytes that exercise all bit positions, on
 /// full-length and short zero-padded inputs (the latter pins the

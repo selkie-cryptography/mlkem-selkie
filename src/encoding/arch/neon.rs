@@ -1,19 +1,26 @@
-//! NEON-vectorized bit-unpacking for aarch64: eight `ByteDecode_d` values per
-//! vector via constant-index table lookups and per-lane shifts.
+//! NEON-vectorized bit-packing for aarch64: eight lanes per vector via
+//! constant-index table lookups and per-lane shifts, in both directions.
 //!
-//! Eight consecutive `d`-bit values occupy exactly `d` bytes, so each
-//! iteration gathers the two (or, at `d = 11`, four) bytes containing every
-//! output value with `tbl`, shifts each lane down to its bit offset, and
-//! masks to `d` bits. Only fixed-index shuffles and public-length branches
-//! touch the data, so the impls are constant-time; `ByteDecode_12` runs
-//! over secret decryption-key bytes when parsing a decapsulation key.
+//! Eight consecutive `d`-bit values occupy exactly `d` bytes. Unpacking
+//! gathers the two (or, at `d = 11`, four) bytes containing every output
+//! value with `tbl`, shifts each lane down to its bit offset, and masks to
+//! `d` bits. Packing (`d >= 8`, where an output byte draws from at most two
+//! values) gathers the two contributing values per output byte, shifts them
+//! to the byte's bit positions, and keeps the low byte of their OR. Only
+//! fixed-index shuffles and public-length branches touch the data, so the
+//! impls are constant-time; `ByteDecode_12` runs over secret decryption-key
+//! bytes when parsing a decapsulation key.
 #![allow(unsafe_code)]
 
-use core::arch::aarch64::{
-    uint8x16_t, vandq_u8, vandq_u16, vandq_u32, vcombine_u16, vdupq_n_u8, vdupq_n_u16, vdupq_n_u32,
-    vget_low_u8, vld1q_s16, vld1q_s32, vld1q_u8, vmovl_high_u8, vmovl_u8, vmovn_u32, vqtbl1q_u8,
-    vreinterpretq_u16_u8, vreinterpretq_u32_u8, vshlq_u16, vshlq_u32, vshrq_n_u8, vst1q_u16,
-    vzip1q_u8, vzip2q_u8,
+use core::{
+    arch::aarch64::{
+        uint8x16_t, vandq_u8, vandq_u16, vandq_u32, vcombine_u16, vdupq_n_u8, vdupq_n_u16,
+        vdupq_n_u32, vget_low_u8, vld1q_s16, vld1q_s32, vld1q_u8, vld1q_u16, vmovl_high_u8,
+        vmovl_u8, vmovn_u16, vmovn_u32, vorrq_u16, vqtbl1q_u8, vreinterpretq_u8_u16,
+        vreinterpretq_u16_u8, vreinterpretq_u32_u8, vshlq_u16, vshlq_u32, vshrq_n_u8, vst1_u8,
+        vst1q_u16, vzip1q_u8, vzip2q_u8,
+    },
+    array,
 };
 
 use super::generic;
@@ -49,6 +56,88 @@ const IDX_11_HIGH: [u8; 16] = [5, 6, 7, 8, 6, 7, 8, 9, 8, 9, 10, 11, 9, 10, 11, 
 
 /// Per-lane right shifts for 11-bit values 4..8.
 const SHIFTS_11_HIGH: [i32; 4] = [-4, -7, -2, -5];
+
+/// Packs `N` `d`-bit values into the leading `N * d / 8` bytes of the widest
+/// packing, least-significant bit first: the NEON dispatch of
+/// [`generic::pack`].
+///
+/// Widths where an output byte can draw from three values (`d < 8`) take the
+/// scalar path.
+pub(crate) fn pack(values: &[u16; N], d: usize) -> [u8; 384] {
+    match d {
+        10 => pack_gathered::<10>(values),
+        11 => pack_gathered::<11>(values),
+        12 => pack_gathered::<12>(values),
+        _ => generic::pack(values, d),
+    }
+}
+
+/// The `tbl` indices and shifts scattering eight values into the output
+/// bytes `j0..j0 + 8`: byte `j` keeps the low byte of
+/// `(v[i] >> s) | (v[i + 1] << (d - s))` for `i = 8 * j / d` and
+/// `s = 8 * j - d * i`; index `0xFF` reads as zero for the lane past the
+/// window.
+fn pack_controls<const D: usize>(j0: usize) -> ([u8; 16], [i16; 8], [u8; 16], [i16; 8]) {
+    let value_index = |k: usize| (8 * (j0 + k)) / D;
+    let bit_offset = |k: usize| (8 * (j0 + k) - D * value_index(k)) as i16;
+
+    let idx_value = array::from_fn(|b| (2 * value_index(b / 2) + b % 2) as u8);
+    let shift_value = array::from_fn(|k| -bit_offset(k));
+
+    let idx_next = array::from_fn(|b| {
+        let next = value_index(b / 2) + 1;
+        if next < 8 {
+            (2 * next + b % 2) as u8
+        } else {
+            0xFF
+        }
+    });
+    let shift_next = array::from_fn(|k| D as i16 - bit_offset(k));
+
+    (idx_value, shift_value, idx_next, shift_next)
+}
+
+/// Packs the widths whose output bytes draw from at most two values
+/// (`d >= 8`): two `tbl` gathers per 8-byte group, shifted and OR-combined,
+/// low bytes kept. The two groups per iteration overlap to cover `d` bytes.
+fn pack_gathered<const D: usize>(values: &[u16; N]) -> [u8; 384] {
+    let low = pack_controls::<D>(0);
+    let high = pack_controls::<D>(D - 8);
+    let mut out = [0u8; 384];
+
+    // SAFETY: pure value ops on 16-byte constants; each iteration `i` writes
+    // the two 8-byte groups at `D * i` and `D * i + D - 8`, staying within
+    // the `32 * D <= 384` bytes the loop tiles.
+    unsafe {
+        let controls = [low, high].map(|(idx_value, shift_value, idx_next, shift_next)| {
+            (
+                vld1q_u8(idx_value.as_ptr()),
+                vld1q_s16(shift_value.as_ptr()),
+                vld1q_u8(idx_next.as_ptr()),
+                vld1q_s16(shift_next.as_ptr()),
+            )
+        });
+
+        for (i, chunk) in values.chunks_exact(8).enumerate() {
+            let data = vreinterpretq_u8_u16(vld1q_u16(chunk.as_ptr()));
+
+            for (group, &(idx_value, shift_value, idx_next, shift_next)) in
+                controls.iter().enumerate()
+            {
+                let value = vreinterpretq_u16_u8(vqtbl1q_u8(data, idx_value));
+                let next = vreinterpretq_u16_u8(vqtbl1q_u8(data, idx_next));
+                let bytes = vmovn_u16(vorrq_u16(
+                    vshlq_u16(value, shift_value),
+                    vshlq_u16(next, shift_next),
+                ));
+
+                vst1_u8(out.as_mut_ptr().add(D * i + group * (D - 8)), bytes);
+            }
+        }
+    }
+
+    out
+}
 
 /// Unpacks `N` `d`-bit values from bytes, least-significant bit first: the
 /// NEON dispatch of [`generic::unpack`].
