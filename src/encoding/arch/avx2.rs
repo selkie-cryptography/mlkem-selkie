@@ -7,7 +7,7 @@
 //! can span three bytes, so all widths share `u32` lanes), shifts each lane
 //! down to its bit offset with `srlv`, masks to `d` bits, and packs back to
 //! `u16`. Only fixed-index shuffles and public-length branches touch the
-//! data, so the kernels are constant-time; `ByteDecode_12` runs over secret
+//! data, so the impls are constant-time; `ByteDecode_12` runs over secret
 //! decryption key bytes when parsing a decapsulation key.
 #![allow(unsafe_code)]
 
@@ -26,7 +26,7 @@ use crate::parameters::N;
 /// Unpacks `N` `d`-bit values from bytes, least-significant bit first: the
 /// AVX2 dispatch of [`generic::unpack`].
 ///
-/// Widths without a kernel (`d = 1`) take the scalar path. Short inputs
+/// Widths without a per-arch backend, (`d = 1`) take the scalar path. Short inputs
 /// need no dispatch: the windowed loads zero-pad past the end, matching the
 /// scalar form.
 pub(in crate::encoding) fn unpack(bytes: &[u8], d: usize) -> [u16; N] {

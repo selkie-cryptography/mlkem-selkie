@@ -5,7 +5,7 @@
 //! iteration gathers the two (or, at `d = 11`, four) bytes containing every
 //! output value with `tbl`, shifts each lane down to its bit offset, and
 //! masks to `d` bits. Only fixed-index shuffles and public-length branches
-//! touch the data, so the kernels are constant-time; `ByteDecode_12` runs
+//! touch the data, so the impls are constant-time; `ByteDecode_12` runs
 //! over secret decryption-key bytes when parsing a decapsulation key.
 #![allow(unsafe_code)]
 

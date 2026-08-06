@@ -104,7 +104,7 @@ fn unpack_zero_pads_short_input() {
 /// The active backend's `unpack` matches the scalar reference at every
 /// supported width, over bytes that exercise all bit positions, on
 /// full-length and short zero-padded inputs (the latter pins the
-/// scalar-fallback dispatch: the SIMD kernels do not zero-pad at every
+/// scalar-fallback dispatch: the SIMD impls do not zero-pad at every
 /// width).
 // On the portable backend the dispatched and reference paths are the same
 // function, so the comparison only means something under a SIMD backend.

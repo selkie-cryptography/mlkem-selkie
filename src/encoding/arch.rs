@@ -1,4 +1,4 @@
-//! Architecture-dispatched bit-unpacking kernels.
+//! Architecture-dispatched bit-unpacking impls
 //!
 //! Every backend exposes [`unpack`], the bit recomposition of `ByteDecode_d`
 //! ([Algorithm 6]) shared by the key and ciphertext decode paths. The active
