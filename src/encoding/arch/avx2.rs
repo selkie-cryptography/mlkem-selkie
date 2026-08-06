@@ -26,13 +26,10 @@ use crate::parameters::N;
 /// Unpacks `N` `d`-bit values from bytes, least-significant bit first: the
 /// AVX2 dispatch of [`generic::unpack`].
 ///
-/// Widths without a kernel (`d = 1`) and the zero-padded short inputs take
-/// the scalar path.
+/// Widths without a kernel (`d = 1`) take the scalar path. Short inputs
+/// need no dispatch: the windowed loads zero-pad past the end, matching the
+/// scalar form.
 pub(in crate::encoding) fn unpack(bytes: &[u8], d: usize) -> [u16; N] {
-    if bytes.len() != N * d / 8 {
-        return generic::unpack(bytes, d);
-    }
-
     match d {
         4 => unpack_gathered::<4>(bytes),
         5 => unpack_gathered::<5>(bytes),
