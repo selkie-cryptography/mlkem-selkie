@@ -19,7 +19,7 @@
 //! per-core as schedules accumulate.
 //!
 //! NEON is baseline on aarch64, so each `unsafe` intrinsic call is sound, as
-//! the per-block `SAFETY` notes record.
+//! the per-block `SAFETY` notes pinky-promise.
 #![allow(unsafe_code)]
 
 use core::arch::aarch64::{
