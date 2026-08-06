@@ -63,10 +63,10 @@ jobs:
           # on aarch64. Full-tree runs cover both arches.
           if [ "${{ matrix.arch }}" = "x86_64" ]; then
             RUNNER="mold -run"
-            EXCLUDE=(":(exclude)src/algebraic/poly/arch/neon.rs" ":(exclude)src/sampling/arch/neon.rs")
+            EXCLUDE=(":(exclude)src/algebraic/poly/arch/neon.rs" ":(exclude)src/sampling/arch/neon.rs" ":(exclude)src/encoding/arch/neon.rs")
           else
             RUNNER=""
-            EXCLUDE=(":(exclude)src/algebraic/poly/arch/avx2.rs" ":(exclude)src/sampling/arch/avx2.rs")
+            EXCLUDE=(":(exclude)src/algebraic/poly/arch/avx2.rs" ":(exclude)src/sampling/arch/avx2.rs" ":(exclude)src/encoding/arch/avx2.rs")
           fi
           git diff "origin/${{ github.base_ref }}" -- . "${EXCLUDE[@]}" > pr.diff
           # Exit 3 is "timeouts occurred": spin mutants in the unbounded

@@ -51,4 +51,10 @@ exclude_re = [
     # value early shifts the same word to the same bit positions, so every
     # output (zero-padded tails included) is unchanged.
     "replace < with <= in unpack",
+    # The SIMD dispatch in `encoding/arch`: mutating the size arithmetic of
+    # the guard `bytes.len() != N * d / 8`, or deleting a width's match arm,
+    # sends those inputs down the scalar fallback, which returns the same
+    # values (slower, not wrong) — equivalent mutants.
+    "encoding/arch/(neon|avx2)\\.rs.*: replace (\\*|/) with . in unpack",
+    "encoding/arch/(neon|avx2)\\.rs.*: delete match arm .* in unpack",
 ]

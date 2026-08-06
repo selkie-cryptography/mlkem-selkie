@@ -102,7 +102,10 @@ fn unpack_zero_pads_short_input() {
 }
 
 /// The active backend's `unpack` matches the scalar reference at every
-/// supported width, over bytes that exercise all bit positions.
+/// supported width, over bytes that exercise all bit positions, on
+/// full-length and short zero-padded inputs (the latter pins the
+/// scalar-fallback dispatch: the SIMD kernels do not zero-pad at every
+/// width).
 // On the portable backend the dispatched and reference paths are the same
 // function, so the comparison only means something under a SIMD backend.
 #[cfg(any(mlkem_selkie_arch = "neon", mlkem_selkie_arch = "avx2"))]
@@ -115,6 +118,13 @@ fn unpack_matches_scalar_reference() {
             unpack(&bytes, d),
             arch::generic::unpack(&bytes, d),
             "d = {d}"
+        );
+
+        let (short, _) = bytes.split_at(bytes.len() - 7);
+        assert_eq!(
+            unpack(short, d),
+            arch::generic::unpack(short, d),
+            "short d = {d}"
         );
     }
 }
