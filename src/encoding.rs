@@ -1,4 +1,5 @@
-//! Byte serialization and compression of polynomial ring elements for [FIPS 203].
+//! Byte serialization and compression of polynomial ring elements for [FIPS
+//! 203].
 //!
 //! Extends the algebraic types of [`crate::algebraic`] with the
 //! [section 4.2.1] serialization layer:
