@@ -2,8 +2,8 @@
 //!
 //! Three tiers on aarch64:
 //!
-//! - `mlkem_selkie_arch = "neon"` — any aarch64 (NEON is baseline on the
-//!   architecture): the vectorized intrinsics backend.
+//! - `mlkem_selkie_arch = "neon"` — any little-endian aarch64 (NEON is baseline
+//!   on the architecture): the vectorized intrinsics backend.
 //! - `mlkem_selkie_neon_asm` — Apple cores: additionally enables the
 //!   software-pipelined `asm!` kernels, which are scheduled for Apple's wide
 //!   NEON pipes and regress on narrower cores (measured on Graviton-class CI
@@ -93,6 +93,7 @@ fn main() {
     println!("cargo::rustc-check-cfg=cfg(mlkem_selkie_neon_asm)");
     println!("cargo::rustc-check-cfg=cfg(mlkem_selkie_neon_tune, values(any()))");
     println!("cargo::rerun-if-env-changed=CARGO_CFG_TARGET_ARCH");
+    println!("cargo::rerun-if-env-changed=CARGO_CFG_TARGET_ENDIAN");
     println!("cargo::rerun-if-env-changed=CARGO_CFG_TARGET_FEATURE");
     println!("cargo::rerun-if-env-changed=CARGO_CFG_TARGET_VENDOR");
     println!("cargo::rerun-if-env-changed=CARGO_ENCODED_RUSTFLAGS");
@@ -103,8 +104,14 @@ fn main() {
     let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
     let has_feature = |name: &str| target_features.split(',').any(|feature| feature == name);
 
+    // The NEON kernels reinterpret vectors between lane widths, which assumes
+    // little-endian lane layout; on `aarch64_be` they would silently
+    // miscompute, so big-endian targets keep the scalar backend. x86_64 has
+    // no big-endian variant.
+    let little_endian = env::var("CARGO_CFG_TARGET_ENDIAN").as_deref() == Ok("little");
+
     match target_arch.as_str() {
-        "aarch64" if has_feature("neon") => {
+        "aarch64" if has_feature("neon") && little_endian => {
             println!("cargo::rustc-cfg=mlkem_selkie_arch=\"neon\"");
 
             if let Some(tune) = neon_tune(&target_vendor) {
