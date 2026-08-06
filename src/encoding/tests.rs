@@ -106,8 +106,8 @@ fn unpack_zero_pads_short_input() {
 /// full-length and short zero-padded inputs (the latter pins the
 /// scalar-fallback dispatch: the SIMD impls do not zero-pad at every
 /// width).
-// On the portable backend the dispatched and reference paths are the same
-// function, so the comparison only means something under a SIMD backend.
+// On the portable backend, the dispatched and reference paths are the same
+// function, so the comparison is only salient under a SIMD backend.
 #[cfg(any(mlkem_selkie_arch = "neon", mlkem_selkie_arch = "avx2"))]
 #[test]
 fn unpack_matches_scalar_reference() {
