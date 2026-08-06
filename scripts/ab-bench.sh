@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# A/B benchmark driver, per BENCHMARKING.md: builds two bench binaries up
-# front, runs them alternated in a mirrored order, discards the warmup round,
-# and compares per-op medians.
+# A/B benchmark driver: builds two bench binaries up front, runs them
+# alternated in a mirrored order, discards the warmup round, and compares
+# per-benchmark medians.
 #
 # The baseline builds in a temporary detached worktree, so uncommitted
 # changes in the working tree never leak into it.
