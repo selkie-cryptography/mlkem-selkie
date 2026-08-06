@@ -126,7 +126,8 @@ alternatives below). Native alternatives when samply does not fit:
 
 ## CI benchmarks
 
-CI runs divan wall-time, gungraun instruction counts, and rdtsc megacycles
-per backend on every PR, with a PR comment for deltas against the base.
+As of 2026-08-05, CI runs divan wall-time, gungraun instruction counts, and
+rdtsc megacycles per backend on every PR, with a PR comment for deltas
+against the base.
 Instruction counts are stable across runners; wall-time on shared runners is
 indicative only. A local A/B on quiet hardware outranks both.
