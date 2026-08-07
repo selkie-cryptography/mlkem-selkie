@@ -15,10 +15,10 @@
 
 use core::{
     array,
-    ops::{Add, AddAssign, Index, Mul, Sub},
+    ops::{Add, AddAssign, Deref, DerefMut, Index, Mul, Sub, SubAssign},
 };
 
-use zeroize::DefaultIsZeroes;
+use zeroize::{DefaultIsZeroes, Zeroize};
 
 use self::arch::ProductAccumulator;
 use crate::{algebraic::field::FieldElement, parameters};
@@ -33,7 +33,7 @@ mod tests;
 /// Both rings have n = 256 coefficients over Zq, so the standard-domain
 /// [`RqElement`] and the NTT-domain [`TqElement`] share this trait for their
 /// shared structure while remaining distinct types.
-pub trait PolynomialRingElement: Copy + Index<usize, Output = FieldElement> {
+pub trait PolynomialRingElement: Clone + Index<usize, Output = FieldElement> {
     /// The polynomial all of whose coefficients are zero.
     const ZERO: Self;
 
@@ -48,23 +48,59 @@ pub trait PolynomialRingElement: Copy + Index<usize, Output = FieldElement> {
     fn coefficients(&self) -> [FieldElement; parameters::N];
 }
 
-/// Elements of the polynomial ring Rq over Zq.
+/// The coefficient storage of a ring element.
 ///
-/// This is the standard domain of ML-KEM values, as opposed to the NTT
-/// representation [`TqElement`]. `Copy` is load-bearing for the NTT/poly
-/// arithmetic, so no `ZeroizeOnDrop` (mutually exclusive); secret bare-element
-/// locals live inside a `ZeroizeOnDrop` `RqVector`.
+/// `Copy` and `DefaultIsZeroes` so zeroizing is a single volatile store of
+/// the whole array; the ring-element types wrapping it stay non-`Copy`, so
+/// an implicit 512-byte copy is a compile error rather than a silent
+/// `memcpy`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RqElement([FieldElement; parameters::N]);
+struct Coefficients([FieldElement; parameters::N]);
 
-impl Default for RqElement {
+impl Default for Coefficients {
     fn default() -> Self {
         Self([FieldElement::ZERO; parameters::N])
     }
 }
 
+impl DefaultIsZeroes for Coefficients {}
+
+impl Deref for Coefficients {
+    type Target = [FieldElement; parameters::N];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Coefficients {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+/// Elements of the polynomial ring Rq over Zq.
+///
+/// This is the standard domain of ML-KEM values, as opposed to the NTT
+/// representation [`TqElement`]. Deliberately not `Copy`: an implicit
+/// 512-byte copy is a compile error, so element traffic is explicit. No
+/// `ZeroizeOnDrop`; secret bare-element locals live inside a `ZeroizeOnDrop`
+/// `RqVector`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RqElement(Coefficients);
+
+impl Default for RqElement {
+    fn default() -> Self {
+        Self(Coefficients([FieldElement::ZERO; parameters::N]))
+    }
+}
+
 // All-zeros is a valid `RqElement`, so it can be scrubbed as one bulk write.
-impl DefaultIsZeroes for RqElement {}
+impl Zeroize for RqElement {
+    fn zeroize(&mut self) {
+        self.0.zeroize();
+    }
+}
 
 impl RqElement {
     /// Transforms a polynomial `f` in Rq into its NTT representation `f_hat` in
@@ -74,10 +110,11 @@ impl RqElement {
     /// Implements [Algorithm 9, `NTT(f)`] from FIPS 203.
     ///
     /// [Algorithm 9, `NTT(f)`]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.9
-    pub fn ntt(mut self) -> TqElement {
-        arch::ntt(&mut self.0);
+    pub fn ntt(&self) -> TqElement {
+        let mut coefficients = self.0;
+        arch::ntt(&mut coefficients);
 
-        TqElement::new(self.0)
+        TqElement::new(*coefficients)
     }
 
     /// `Compress_d` of every coefficient, via the architecture backend.
@@ -92,19 +129,19 @@ impl RqElement {
     /// Constructs a polynomial by `Decompress_d` of every `d`-bit value, via
     /// the architecture backend.
     pub(crate) fn decompress(values: &[u16; parameters::N], d: usize) -> Self {
-        Self(arch::decompress(values, d))
+        Self(Coefficients(arch::decompress(values, d)))
     }
 }
 
 impl PolynomialRingElement for RqElement {
-    const ZERO: Self = Self([FieldElement::ZERO; parameters::N]);
+    const ZERO: Self = Self(Coefficients([FieldElement::ZERO; parameters::N]));
 
     fn new(coefficients: [FieldElement; parameters::N]) -> Self {
-        Self(coefficients)
+        Self(Coefficients(coefficients))
     }
 
     fn coefficients(&self) -> [FieldElement; parameters::N] {
-        self.0
+        *self.0
     }
 }
 
@@ -122,28 +159,36 @@ impl Index<usize> for RqElement {
 impl Add for RqElement {
     type Output = Self;
 
-    fn add(self, rhs: Self) -> Self {
-        let mut result = self.0;
+    fn add(mut self, rhs: Self) -> Self {
+        self += &rhs;
 
-        for (r, b) in result.iter_mut().zip(rhs.0) {
-            *r = *r + b;
+        self
+    }
+}
+
+impl AddAssign<&RqElement> for RqElement {
+    fn add_assign(&mut self, rhs: &Self) {
+        for (a, b) in self.0.iter_mut().zip(rhs.0.iter()) {
+            *a = *a + *b;
         }
-
-        Self(result)
     }
 }
 
 impl Sub for RqElement {
     type Output = Self;
 
-    fn sub(self, rhs: Self) -> Self {
-        let mut result = self.0;
+    fn sub(mut self, rhs: Self) -> Self {
+        self -= &rhs;
 
-        for (r, b) in result.iter_mut().zip(rhs.0) {
-            *r = *r - b;
+        self
+    }
+}
+
+impl SubAssign<&RqElement> for RqElement {
+    fn sub_assign(&mut self, rhs: &Self) {
+        for (a, b) in self.0.iter_mut().zip(rhs.0.iter()) {
+            *a = *a - *b;
         }
-
-        Self(result)
     }
 }
 
@@ -169,17 +214,21 @@ impl From<TqElement> for RqElement {
 ///
 /// [section 4.3]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.3
 /// [Kyber AVX2 reference implementation]: https://github.com/pq-crystals/kyber/tree/main/avx2
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TqElement([FieldElement; parameters::N]);
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TqElement(Coefficients);
 
 impl Default for TqElement {
     fn default() -> Self {
-        Self([FieldElement::ZERO; parameters::N])
+        Self(Coefficients([FieldElement::ZERO; parameters::N]))
     }
 }
 
 // As [`RqElement`].
-impl DefaultIsZeroes for TqElement {}
+impl Zeroize for TqElement {
+    fn zeroize(&mut self) {
+        self.0.zeroize();
+    }
+}
 
 impl TqElement {
     /// Transforms a polynomial `f_hat` in Tq from its NTT representation back
@@ -197,7 +246,7 @@ impl TqElement {
     /// accumulated basemul products reach.
     ///
     /// [Algorithm 10, `NTT⁻¹(f_hat)`]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.10
-    pub fn ntt_inverse(self) -> RqElement {
+    pub fn ntt_inverse(&self) -> RqElement {
         let mut coefficients = arch::unpack(&self.0);
         arch::ntt_inverse(&mut coefficients);
 
@@ -207,8 +256,8 @@ impl TqElement {
     /// Scales every coefficient by `R`, undoing the `R^-1` left by base
     /// multiplication so an NTT-domain product can be added to true NTT values
     /// (`K-PKE.KeyGen`'s `t_hat = A . s_hat + e_hat`).
-    pub fn to_montgomery(self) -> Self {
-        Self(self.0.map(FieldElement::to_montgomery))
+    pub fn to_montgomery(&self) -> Self {
+        Self(Coefficients(self.0.map(FieldElement::to_montgomery)))
     }
 
     /// Precomputes this polynomial's asymmetric base-multiplication cache.
@@ -241,7 +290,7 @@ impl TqElement {
             acc.accumulate(&f_j.0, &g_j.0, &cache.0);
         }
 
-        Self(acc.reduce())
+        Self(Coefficients(acc.reduce()))
     }
 
     /// The canonical `[0, q)` representative of every coefficient, via the
@@ -253,11 +302,11 @@ impl TqElement {
 }
 
 impl PolynomialRingElement for TqElement {
-    const ZERO: Self = Self([FieldElement::ZERO; parameters::N]);
+    const ZERO: Self = Self(Coefficients([FieldElement::ZERO; parameters::N]));
 
     // Splits the natural-order input into the evens-then-odds storage.
     fn new(coefficients: [FieldElement; parameters::N]) -> Self {
-        Self(arch::pack(&coefficients))
+        Self(Coefficients(arch::pack(&coefficients)))
     }
 
     // Re-interleaves the storage back to natural coefficient order.
@@ -282,20 +331,24 @@ impl Index<usize> for TqElement {
 impl Add for TqElement {
     type Output = Self;
 
-    fn add(self, rhs: Self) -> Self {
-        let mut result = self.0;
+    fn add(mut self, rhs: Self) -> Self {
+        self += &rhs;
 
-        for (r, b) in result.iter_mut().zip(rhs.0) {
-            *r = *r + b;
+        self
+    }
+}
+
+impl AddAssign<&TqElement> for TqElement {
+    fn add_assign(&mut self, rhs: &Self) {
+        for (a, b) in self.0.iter_mut().zip(rhs.0.iter()) {
+            *a = *a + *b;
         }
-
-        Self(result)
     }
 }
 
 impl AddAssign for TqElement {
     fn add_assign(&mut self, rhs: Self) {
-        *self = *self + rhs;
+        *self += &rhs;
     }
 }
 
@@ -312,7 +365,17 @@ impl Mul for TqElement {
     ///
     /// [Algorithm 11, `MultiplyNTTs(f_hat, g_hat)`]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#algorithm.11
     fn mul(self, rhs: Self) -> Self {
-        Self(arch::multiply(&self.0, &rhs.0))
+        &self * &rhs
+    }
+}
+
+impl Mul for &TqElement {
+    type Output = TqElement;
+
+    /// The borrowing form of `TqElement`'s `Mul`, for operands that stay in
+    /// place.
+    fn mul(self, rhs: &TqElement) -> TqElement {
+        TqElement(Coefficients(arch::multiply(&self.0, &rhs.0)))
     }
 }
 

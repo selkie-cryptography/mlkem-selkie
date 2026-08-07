@@ -388,7 +388,7 @@ impl<P: ParameterSet> TqMatrix<P> {
                 next += 4;
             }
 
-            let element = batch.get(taken).copied();
+            let element = batch.get(taken).cloned();
             taken += 1;
 
             element

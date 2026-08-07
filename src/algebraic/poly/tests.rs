@@ -89,14 +89,14 @@ fn accumulated_dot_matches_componentwise_sum() {
             FieldElement::new((11 * i as u16 + 13 * j as u16 + 5) % parameters::Q)
         }))
     });
-    let caches = g.map(|g_j| g_j.mul_cache());
+    let caches = array::from_fn::<_, 4, _>(|j| g[j].mul_cache());
 
     for k in 1..=4 {
         let accumulated = TqElement::accumulated_dot(&f[..k], &g[..k], &caches[..k]);
 
         let mut componentwise = TqElement::ZERO;
         for j in 0..k {
-            componentwise += f[j] * g[j];
+            componentwise += &f[j] * &g[j];
         }
 
         assert_eq!(accumulated, componentwise, "dot length {k}");

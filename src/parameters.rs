@@ -122,7 +122,7 @@ pub trait ParameterSet: Copy + Send + Sync + Debug + PartialEq + Eq {
     /// Concrete in each parameter set (`[T; 2]`, `[T; 3]`, `[T; 4]`), which
     /// sidesteps the unstable `generic_const_exprs` that a generic `[T;
     /// Self::K]` would otherwise require.
-    type KArray<T>: AsRef<[T]> + Clone + Debug + PartialEq + Eq + Send + Sync + Zeroize
+    type KArray<T>: AsRef<[T]> + AsMut<[T]> + Clone + Debug + PartialEq + Eq + Send + Sync + Zeroize
     where
         T: KElement;
 
