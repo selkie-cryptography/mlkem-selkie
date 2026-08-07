@@ -26,7 +26,7 @@ fn sample_poly() -> RqElement {
 fn ntt(bencher: Bencher<'_, '_>) {
     let f = sample_poly();
 
-    bencher.bench(|| black_box(f).ntt());
+    bencher.bench(|| black_box(&f).ntt());
 }
 
 /// `NTT⁻¹`: NTT domain back to standard domain.
@@ -34,7 +34,7 @@ fn ntt(bencher: Bencher<'_, '_>) {
 fn ntt_inverse(bencher: Bencher<'_, '_>) {
     let f = sample_poly().ntt();
 
-    bencher.bench(|| black_box(f).ntt_inverse());
+    bencher.bench(|| black_box(&f).ntt_inverse());
 }
 
 /// `MultiplyNTTs`: pointwise product of two NTT-domain polynomials.
@@ -43,7 +43,7 @@ fn multiply(bencher: Bencher<'_, '_>) {
     let a = sample_poly().ntt();
     let b = sample_poly().ntt();
 
-    bencher.bench(|| black_box(a) * black_box(b));
+    bencher.bench(|| black_box(&a) * black_box(&b));
 }
 
 /// Asymmetric base-multiplication cache of one NTT-domain polynomial.
@@ -83,7 +83,7 @@ fn sample_ntt(bencher: Bencher<'_, '_>) {
 fn byte_encode(bencher: Bencher<'_, '_>) {
     let f = sample_poly().ntt();
 
-    bencher.bench(|| black_box(f).byte_encode());
+    bencher.bench(|| black_box(&f).byte_encode());
 }
 
 /// `ByteDecode_12` back into an NTT-domain polynomial.

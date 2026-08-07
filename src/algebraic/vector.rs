@@ -3,7 +3,7 @@
 //! Backed by the parameter set's [`ParameterSet::KArray`] (`[_; K]`), so a
 //! vector lives entirely on the stack with no heap allocation.
 
-use core::ops::{Add, Index, Mul};
+use core::ops::{Add, AddAssign, Index, Mul};
 
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -55,8 +55,18 @@ impl<P: ParameterSet> Index<usize> for RqVector<P> {
 impl<P: ParameterSet> Add for RqVector<P> {
     type Output = Self;
 
-    fn add(self, rhs: Self) -> Self {
-        Self::from_fn(|i| self[i] + rhs[i])
+    fn add(mut self, rhs: Self) -> Self {
+        self += &rhs;
+
+        self
+    }
+}
+
+impl<P: ParameterSet> AddAssign<&RqVector<P>> for RqVector<P> {
+    fn add_assign(&mut self, rhs: &Self) {
+        for (a, b) in self.polys.as_mut().iter_mut().zip(rhs.as_slice()) {
+            *a += b;
+        }
     }
 }
 
@@ -98,8 +108,18 @@ impl<P: ParameterSet> TqVector<P> {
 impl<P: ParameterSet> Add for TqVector<P> {
     type Output = Self;
 
-    fn add(self, rhs: Self) -> Self {
-        Self::from_fn(|i| self[i] + rhs[i])
+    fn add(mut self, rhs: Self) -> Self {
+        self += &rhs;
+
+        self
+    }
+}
+
+impl<P: ParameterSet> AddAssign<&TqVector<P>> for TqVector<P> {
+    fn add_assign(&mut self, rhs: &Self) {
+        for (a, b) in self.polys.as_mut().iter_mut().zip(rhs.as_slice()) {
+            *a += b;
+        }
     }
 }
 
@@ -112,7 +132,7 @@ impl<P: ParameterSet> Mul for &TqVector<P> {
         let mut result = TqElement::ZERO;
 
         for (a, b) in self.polys.as_ref().iter().zip(rhs.polys.as_ref()) {
-            result += *a * *b;
+            result += a * b;
         }
 
         result

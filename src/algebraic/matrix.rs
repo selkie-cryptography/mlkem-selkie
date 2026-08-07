@@ -35,7 +35,7 @@ impl<P: ParameterSet> TqMatrix<P> {
     /// `K-PKE.Encrypt` multiplies by `A^T` while reusing the same `A` that
     /// `K-PKE.KeyGen` built.
     pub fn transpose(&self) -> Self {
-        Self::from_fn(|j| TqVector::from_fn(|i| self[i][j]))
+        Self::from_fn(|j| TqVector::from_fn(|i| self[i][j].clone()))
     }
 }
 
