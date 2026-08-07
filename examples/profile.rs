@@ -40,27 +40,37 @@ fn main() {
         args.get(2).and_then(|s| s.parse().ok()).unwrap_or(1000)
     };
 
-    for _ in 0..iters {
-        match mode {
-            "keygen" => {
+    // Inputs an operation does not itself produce are hoisted out of the
+    // loops, so each mode profiles only its own operation.
+    match mode {
+        "keygen" => {
+            for _ in 0..iters {
                 black_box(DecapsulationKey::<MLKEM768>::generate_derand(black_box(
                     &SEED,
                 )));
             }
-            "encaps" => {
-                let keypair = DecapsulationKey::<MLKEM768>::generate_derand(&SEED);
+        }
+        "encaps" => {
+            let keypair = DecapsulationKey::<MLKEM768>::generate_derand(&SEED);
+
+            for _ in 0..iters {
                 black_box(
                     keypair
                         .encapsulation_key()
                         .encapsulate_derand(black_box(&MESSAGE)),
                 );
             }
-            "decaps" => {
-                let keypair = DecapsulationKey::<MLKEM768>::generate_derand(&SEED);
-                let (_, ciphertext) = keypair.encapsulation_key().encapsulate_derand(&MESSAGE);
+        }
+        "decaps" => {
+            let keypair = DecapsulationKey::<MLKEM768>::generate_derand(&SEED);
+            let (_, ciphertext) = keypair.encapsulation_key().encapsulate_derand(&MESSAGE);
+
+            for _ in 0..iters {
                 black_box(keypair.decapsulate(black_box(&ciphertext)));
             }
-            _ => {
+        }
+        _ => {
+            for _ in 0..iters {
                 let keypair = DecapsulationKey::<MLKEM768>::generate_derand(black_box(&SEED));
                 let (_, ciphertext) = keypair
                     .encapsulation_key()
