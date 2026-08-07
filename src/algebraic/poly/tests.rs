@@ -148,3 +148,36 @@ fn tq_split_storage_preserves_natural_order_semantics() {
         assert_eq!(tq[i], expected, "index {i}");
     }
 }
+
+/// `zeroize` clears every coefficient in both domains, and `Default` is the
+/// zero polynomial.
+#[test]
+fn zeroize_and_default_are_zero() {
+    let mut f = RqElement::new(array::from_fn(|i| FieldElement::new(i as u16 + 1)));
+    f.zeroize();
+    assert_eq!(f, RqElement::default());
+    assert_eq!(
+        RqElement::default().coefficients(),
+        [FieldElement::ZERO; parameters::N]
+    );
+
+    let mut g = TqElement::new(array::from_fn(|i| FieldElement::new(i as u16 + 1)));
+    g.zeroize();
+    assert_eq!(g, TqElement::default());
+    assert_eq!(
+        TqElement::default().coefficients(),
+        [FieldElement::ZERO; parameters::N]
+    );
+}
+
+/// The value `Add` forms delegate to the in-place assign ops.
+#[test]
+fn value_add_matches_assign() {
+    let f = TqElement::new(array::from_fn(|i| FieldElement::new(i as u16)));
+    let g = TqElement::new(array::from_fn(|i| FieldElement::new(2 * i as u16 + 1)));
+
+    let mut assigned = f.clone();
+    assigned += &g;
+
+    assert_eq!(f + g, assigned);
+}

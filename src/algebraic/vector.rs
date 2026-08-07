@@ -13,6 +13,9 @@ use crate::{
     parameters::ParameterSet,
 };
 
+#[cfg(test)]
+mod tests;
+
 /// A vector of `K` polynomial ring elements in Rq.
 ///
 /// `ZeroizeOnDrop` covers the CBD-sampled secrets `s`/`e`/`y`/`e_1` and any
