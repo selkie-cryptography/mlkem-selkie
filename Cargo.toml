@@ -1,20 +1,21 @@
 [package]
 name = "mlkem-selkie"
-version = "0.1.0"
+version = "0.0.0"
 edition = "2021"
+# Floor set by sha3-selkie, where the AVX-512 intrinsics stabilized.
+rust-version = "1.89"
 authors = ["Deirdre Connolly <durumcrustulum@gmail.com>"]
-description = "Rust ML-KEM (FIPS 203) implementation for beautiful, secure code."
+description = "Rust ML-KEM (FIPS 203) implementation for beautiful, secure code; pretty fast."
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/selkie-cryptography/mlkem-selkie"
 homepage = "https://selkiecryptography.com"
 documentation = "https://docs.rs/mlkem-selkie"
-# crates.io caps keywords at five.
 keywords = ["cryptography", "post-quantum", "ml-kem", "kyber", "fips203"]
 categories = ["cryptography"]
 # Dev-only trees: the llvm-mca driver and the BoringSSL cross-test oracle.
 # Not needed to build or use the crate, so keep them out of the published
-# `.crate`.
-exclude = ["scripts/", "tools/"]
+# `.crate`. CI config isn't needed either.
+exclude = ["scripts/", "tools/", ".github"]
 
 [features]
 default = ["mlkem512", "mlkem768", "mlkem1024"]
@@ -23,27 +24,16 @@ mlkem768 = []
 mlkem1024 = []
 # Re-expose internal modules as `pub` for white-box tests, fuzzing, benchmarks.
 expose-internals = []
-# Enables `tests/ctgrind.rs` only under the dedicated Constant-time workflow.
 ctgrind = ["expose-internals"]
 dhat-heap = []
 
 [dependencies]
 getrandom = "0.2"
-rand_core = "0.6"
-# Constant-time Keccak, in-house; replaces libcrux-sha3. Git-sourced until
-# sha3-selkie publishes to crates.io; the version requirement keeps the
-# eventual registry switch a source-only change. `rev` pins it in the manifest,
-# not just Cargo.lock: cargo-semver-checks builds the baseline commit from its
-# manifest alone and would otherwise resolve the dep to whatever HEAD is now.
-sha3-selkie = { version = "0.1.0", git = "https://github.com/selkie-cryptography/sha3-selkie", rev = "6da935805dc87364f159240f41ccdf6f3f5ca3e4" }
+sha3-selkie = "0.0.0"
 subtle = "2"
 zeroize = { version = "1.7.0", features = ["derive"] }
 
 [dev-dependencies]
-# Self dev-dep so `expose-internals` is active for tests/benches/examples
-# without leaking into the default public build. Path-only, no `version`:
-# cargo strips it from the published manifest (a versioned self dev-dep
-# can't resolve during a first-of-its-version publish).
 mlkem-selkie = { path = ".", features = ["expose-internals"] }
 hex = "0.4"
 libcrux-ml-kem = { version = "0.0.10", default-features = false, features = [
@@ -52,6 +42,9 @@ libcrux-ml-kem = { version = "0.0.10", default-features = false, features = [
     "mlkem1024",
 ] }
 rand = "0.8"
+# The cross-test oracles seed their RNG through these traits; the library
+# itself takes entropy from `getrandom`.
+rand_core = "0.6"
 # Deterministic PRNG for the randomized interop tests.
 rand_chacha = "0.3"
 serde = { version = "1", features = ["derive"] }
@@ -69,7 +62,7 @@ criterion = "0.8"
 criterion-cycles-per-byte = "0.8"
 
 # Linux-only: crabgrind needs <valgrind/valgrind.h>. Used by the ctgrind test
-# and, in-crate, to declassify `rho` under memcheck.
+# and to declassify `rho` under memcheck.
 [target.'cfg(target_os = "linux")'.dependencies]
 crabgrind = { version = "0.2", optional = true }
 
@@ -85,9 +78,11 @@ required-features = ["ctgrind"]
 name = "mlkem"
 harness = false
 
+# Internal hot paths, not the shipped API: `cargo bench --bench algebraic`.
 [[bench]]
 name = "algebraic"
 harness = false
+bench = false
 required-features = ["expose-internals"]
 
 [[bench]]
@@ -95,9 +90,12 @@ name = "tacet"
 harness = false
 required-features = ["expose-internals"]
 
+# Needs valgrind/callgrind under gungraun, so not part of a default run:
+# `cargo bench --bench instructions`.
 [[bench]]
 name = "instructions"
 harness = false
+bench = false
 required-features = ["expose-internals"]
 
 # x86_64-only at runtime; skip stub elsewhere.
@@ -110,7 +108,8 @@ harness = false
 inherits = "release"
 debug = true
 
-# Release optimization with overflow-checks + debug-assertions retained, for CI.
+# Release optimization with overflow-checks and debug-assertions retained,
+# for use in CI.
 [profile.release-checked]
 inherits = "release"
 debug-assertions = true
@@ -119,14 +118,14 @@ overflow-checks = true
 # cargo-mutants: cut per-mutant rustc time with `opt-level = 1` and
 # `incremental = true`. Mutation signal is opt-invariant; `debug-assertions`
 # and `overflow-checks` from `release-checked` are what catch arithmetic
-# mutants. `incremental` is off by default here (inherited from `release`), but
-# a mutation run is thousands of single-function edits to the same crate reverted
-# back to baseline each time — the best case for incremental, so each mutant
-# recompiles only the changed codegen unit instead of the whole lib (~2x faster
-# per mutant, measured). Cranelift is layered on top via
+# mutants. `incremental` is off by default here (inherited from `release`),
+# but a mutation run is thousands of single-function edits to the same crate
+# reverted back to baseline each time — the best case for incremental, so
+# each mutant recompiles only the changed codegen unit instead of the whole
+# lib (~2x faster per mutant, measured). Cranelift is layered on top via
 # `CARGO_PROFILE_MUTANTS_CODEGEN_BACKEND=cranelift` in the mutants workflow —
-# keeping it out of the manifest so stable Cargo never sees the unstable profile
-# key. Pairs with `.cargo/mutants.toml`.
+# keeping it out of the manifest so stable Cargo never sees the unstable
+# profile key. Pairs with `.cargo/mutants.toml`.
 [profile.mutants]
 inherits = "release-checked"
 debug = "none"
