@@ -162,12 +162,16 @@ fn zeroize_and_default_are_zero() {
     );
 
     let mut g = TqElement::new(array::from_fn(|i| FieldElement::new(i as u16 + 1)));
+    let mut cache = g.mul_cache();
     g.zeroize();
     assert_eq!(g, TqElement::default());
     assert_eq!(
         TqElement::default().coefficients(),
         [FieldElement::ZERO; parameters::N]
     );
+
+    cache.zeroize();
+    assert_eq!(cache, TqMulCache::default());
 }
 
 /// The value `Add` forms delegate to the in-place assign ops.

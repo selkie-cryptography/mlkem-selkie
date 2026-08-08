@@ -48,32 +48,34 @@ pub trait PolynomialRingElement: Clone + Index<usize, Output = FieldElement> {
     fn coefficients(&self) -> [FieldElement; parameters::N];
 }
 
-/// The coefficient storage of a ring element.
+/// The private guts of a ring element or its multiplication cache: a
+/// `FieldElement` array split off so `Copy` and zeroize speed stop
+/// conflicting.
 ///
-/// `Copy` and `DefaultIsZeroes` so zeroizing is a single volatile store of
-/// the whole array; the ring-element types wrapping it stay non-`Copy`, so
-/// an implicit 512-byte copy is a compile error rather than a silent
-/// `memcpy`.
+/// One-shot volatile zeroizing needs `DefaultIsZeroes`, which needs `Copy`
+/// (the per-coefficient fallback is much slower especially in decaps) — but
+/// `Copy` on the wrappers would let these large values duplicate silently.
+/// `Copy` here and not there gives both.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Coefficients([FieldElement; parameters::N]);
+struct Inner<const LEN: usize = { parameters::N }>([FieldElement; LEN]);
 
-impl Default for Coefficients {
+impl<const LEN: usize> Default for Inner<LEN> {
     fn default() -> Self {
-        Self([FieldElement::ZERO; parameters::N])
+        Self([FieldElement::ZERO; LEN])
     }
 }
 
-impl DefaultIsZeroes for Coefficients {}
+impl<const LEN: usize> DefaultIsZeroes for Inner<LEN> {}
 
-impl Deref for Coefficients {
-    type Target = [FieldElement; parameters::N];
+impl<const LEN: usize> Deref for Inner<LEN> {
+    type Target = [FieldElement; LEN];
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl DerefMut for Coefficients {
+impl<const LEN: usize> DerefMut for Inner<LEN> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -87,11 +89,11 @@ impl DerefMut for Coefficients {
 /// `ZeroizeOnDrop`; secret bare-element locals live inside a `ZeroizeOnDrop`
 /// `RqVector`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RqElement(Coefficients);
+pub struct RqElement(Inner);
 
 impl Default for RqElement {
     fn default() -> Self {
-        Self(Coefficients([FieldElement::ZERO; parameters::N]))
+        Self(Inner([FieldElement::ZERO; parameters::N]))
     }
 }
 
@@ -129,15 +131,15 @@ impl RqElement {
     /// Constructs a polynomial by `Decompress_d` of every `d`-bit value, via
     /// the architecture backend.
     pub(crate) fn decompress(values: &[u16; parameters::N], d: usize) -> Self {
-        Self(Coefficients(arch::decompress(values, d)))
+        Self(Inner(arch::decompress(values, d)))
     }
 }
 
 impl PolynomialRingElement for RqElement {
-    const ZERO: Self = Self(Coefficients([FieldElement::ZERO; parameters::N]));
+    const ZERO: Self = Self(Inner([FieldElement::ZERO; parameters::N]));
 
     fn new(coefficients: [FieldElement; parameters::N]) -> Self {
-        Self(Coefficients(coefficients))
+        Self(Inner(coefficients))
     }
 
     fn coefficients(&self) -> [FieldElement; parameters::N] {
@@ -215,11 +217,11 @@ impl From<TqElement> for RqElement {
 /// [section 4.3]: https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.203.pdf#subsection.4.3
 /// [Kyber AVX2 reference implementation]: https://github.com/pq-crystals/kyber/tree/main/avx2
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TqElement(Coefficients);
+pub struct TqElement(Inner);
 
 impl Default for TqElement {
     fn default() -> Self {
-        Self(Coefficients([FieldElement::ZERO; parameters::N]))
+        Self(Inner([FieldElement::ZERO; parameters::N]))
     }
 }
 
@@ -257,7 +259,7 @@ impl TqElement {
     /// multiplication so an NTT-domain product can be added to true NTT values
     /// (`K-PKE.KeyGen`'s `t_hat = A . s_hat + e_hat`).
     pub fn to_montgomery(&self) -> Self {
-        Self(Coefficients(self.0.map(FieldElement::to_montgomery)))
+        Self(Inner(self.0.map(FieldElement::to_montgomery)))
     }
 
     /// Precomputes this polynomial's asymmetric base-multiplication cache.
@@ -266,9 +268,9 @@ impl TqElement {
         // reason: indices 128 + i and i are provably in bounds for i in
         // 0..128; the second (odd) half holds the degree-1 coefficients.
         #[allow(clippy::indexing_slicing)]
-        TqMulCache(array::from_fn(|i| {
+        TqMulCache(Inner(array::from_fn(|i| {
             self.0[parameters::N / 2 + i] * arch::GAMMA_MONT[i]
-        }))
+        })))
     }
 
     /// Computes the accumulated dot product `sum_j f_j * g_j` of two
@@ -290,7 +292,7 @@ impl TqElement {
             acc.accumulate(&f_j.0, &g_j.0, &cache.0);
         }
 
-        Self(Coefficients(acc.reduce()))
+        Self(Inner(acc.reduce()))
     }
 
     /// The canonical `[0, q)` representative of every coefficient, via the
@@ -302,11 +304,11 @@ impl TqElement {
 }
 
 impl PolynomialRingElement for TqElement {
-    const ZERO: Self = Self(Coefficients([FieldElement::ZERO; parameters::N]));
+    const ZERO: Self = Self(Inner([FieldElement::ZERO; parameters::N]));
 
     // Splits the natural-order input into the evens-then-odds storage.
     fn new(coefficients: [FieldElement; parameters::N]) -> Self {
-        Self(Coefficients(arch::pack(&coefficients)))
+        Self(Inner(arch::pack(&coefficients)))
     }
 
     // Re-interleaves the storage back to natural coefficient order.
@@ -375,7 +377,7 @@ impl Mul for &TqElement {
     /// The borrowing form of `TqElement`'s `Mul`, for operands that stay in
     /// place.
     fn mul(self, rhs: &TqElement) -> TqElement {
-        TqElement(Coefficients(arch::multiply(&self.0, &rhs.0)))
+        TqElement(Inner(arch::multiply(&self.0, &rhs.0)))
     }
 }
 
@@ -388,15 +390,21 @@ impl Mul for &TqElement {
 /// Montgomery multiplications once instead of once per product.
 /// `crate::algebraic::vector::CachedTqVector` bundles caches with their
 /// polynomials so the two cannot be cross-wired.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TqMulCache([FieldElement; parameters::N / 2]);
+// Deliberately not `Copy`, as the ring elements: an implicit 256-byte copy
+// is a compile error.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TqMulCache(Inner<{ parameters::N / 2 }>);
 
 impl Default for TqMulCache {
     fn default() -> Self {
-        Self([FieldElement::ZERO; parameters::N / 2])
+        Self(Inner([FieldElement::ZERO; parameters::N / 2]))
     }
 }
 
 // Secret-derived caches (of `s_hat`, of encryption randomness `y_hat`) scrub
 // as one bulk write, as the polynomial types do.
-impl DefaultIsZeroes for TqMulCache {}
+impl Zeroize for TqMulCache {
+    fn zeroize(&mut self) {
+        self.0.zeroize();
+    }
+}
