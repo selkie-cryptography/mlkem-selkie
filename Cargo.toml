@@ -14,8 +14,10 @@ keywords = ["cryptography", "post-quantum", "ml-kem", "kyber", "fips203"]
 categories = ["cryptography"]
 # Dev-only trees: the llvm-mca driver and the BoringSSL cross-test oracle.
 # Not needed to build or use the crate, so keep them out of the published
-# `.crate`. CI config isn't needed either.
-exclude = ["scripts/", "tools/", ".github"]
+# `.crate`. CI config isn't needed either, nor `tests/`: the ~9 MiB of
+# ACVP/KAT vector JSON dominates the package, and `kats.rs` / `wycheproof.rs`
+# `include_str!` it, so shipping those without the vectors would not compile.
+exclude = ["scripts/", "tools/", ".github", "tests/"]
 
 [features]
 default = ["mlkem512", "mlkem768", "mlkem1024"]
