@@ -1,0 +1,195 @@
+name: Release
+
+# Publishes to crates.io via trusted publishing (OIDC) on a v* tag, behind a
+# required-reviewer gate. No standing credential: crates.io mints the token for
+# this job from a GitHub-signed JWT, and it is revoked when the job ends.
+#
+# Versioning: pre-1.0 SemVer — 0.x minor may break API, patches don't.
+#
+# One-time setup (before 0.1.0):
+#   [ ] repo public; secret scanning + push protection + Dependabot on
+#   [ ] Actions default token read-only
+#   [ ] ruleset v* tags: restricted creation, immutable, signed
+#   [ ] ruleset main: required checks (CI, Audit)
+#   [ ] `Publish` environment: required reviewer, deployment refs limited to
+#       v* tags. The name must match `environment:` below exactly — a missing
+#       one is created unprotected on first use, silently skipping the gate.
+#   [ ] configure crates.io trusted publishing: this repo + release.yml +
+#       the `Publish` environment
+#
+# 0.0.0 was published by hand to claim the name, since trusted publishing
+# cannot create a crate. Each release after that: bump the version in a
+# reviewed PR, `git tag -s vX.Y.Z` on the merge commit, push, and approve
+# `Publish`. The Release is the changelog, generated from merged PRs. Edit in
+# anything a consumer must act on.
+
+on:
+  push:
+    tags: ["v*"]
+  # Verify-only, for a tag published by hand: the 0.0.0 bootstrap, or a re-check.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Already-published tag to verify (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  # The release gates run on this pinned toolchain; bump it deliberately in
+  # its own PR.
+  RELEASE_TOOLCHAIN: "1.97.1"
+
+jobs:
+  # Refuses tags that do not point at a green, reviewed main commit, so a
+  # pushed tag alone can never ship unreviewed code.
+  preflight:
+    name: Tag provenance
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Tag commit is on main
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - name: Tag matches Cargo.toml version
+        run: |
+          manifest=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          [ "${GITHUB_REF_NAME#v}" = "$manifest" ]
+      # Asks GitHub whether the tag is signed, rather than `git verify-tag`:
+      # the runner has no keyring, GitHub holds the account's public keys.
+      - name: Tag is annotated and signed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          read -r type object < <(
+            gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" \
+              --jq '.object.type + " " + .object.sha')
+          [ "$type" = "tag" ]
+          gh api "repos/$GITHUB_REPOSITORY/git/tags/$object" \
+            --jq '.verification.verified' | grep -qx true
+      - name: CI and Audit concluded green on this commit
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const required = ['CI', 'Audit'];
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRunsForRepo,
+              { owner: context.repo.owner, repo: context.repo.repo,
+                head_sha: context.sha, per_page: 100 });
+            for (const name of required) {
+              const run = runs.find((r) => r.name === name);
+              if (!run || run.conclusion !== 'success') {
+                core.setFailed(`${name}: ${run ? run.conclusion ?? run.status : 'no run'} for ${context.sha}`);
+              }
+            }
+
+  # Full re-run of the merge gates on the exact tagged tree, `--locked` so the
+  # committed Cargo.lock is what gets built.
+  gates:
+    name: Release gates
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: ${{ env.RELEASE_TOOLCHAIN }}
+      - uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2
+        with:
+          # Pinned so a release gate can't change under a tag. Audit installs
+          # unpinned; bump these together.
+          tool: nextest,cargo-deny@0.20.2
+      # `tests/` is excluded from the package but present in the repo, so this
+      # covers the KAT and cross-test suites too.
+      - name: Test (locked)
+        run: |
+          cargo nextest run --locked
+          cargo test --doc --locked
+      - name: cargo-deny
+        run: cargo deny check
+      - name: Docs build clean
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --locked
+      - name: Package builds
+        run: cargo package --locked
+
+  publish:
+    name: Publish to crates.io
+    needs: [preflight, gates]
+    runs-on: ubuntu-latest
+    # Required-reviewer approval gate; crates.io trusted publishing is bound to
+    # this repo + workflow + environment.
+    environment: Publish
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: ${{ env.RELEASE_TOOLCHAIN }}
+      - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+        id: auth
+      - run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  # Three-way check: a fresh package of the tagged tree == the CDN artifact ==
+  # the sparse-index checksum cargo verifies on every download. Rebuilding here
+  # rather than trusting the upload is what makes this a witness. The hash goes
+  # in the GitHub Release as a public record.
+  #
+  # Runs after `publish`, or on a manual dispatch naming a tag.
+  verify:
+    name: Verify published artifact
+    needs: [publish]
+    if: always() && (needs.publish.result == 'success' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # creates the GitHub Release
+    env:
+      # Via env, not inline `${{ }}`, so the input can't reach the shell as code.
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.tag || github.ref_name }}
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master
+        with:
+          toolchain: ${{ env.RELEASE_TOOLCHAIN }}
+      - name: Repackage the tagged tree
+        run: cargo package --locked --no-verify
+      - name: Fetch the registry artifact (retry while the CDN catches up)
+        run: |
+          version="${TAG#v}"
+          for _ in $(seq 1 30); do
+            curl -fsSL -o registry.crate \
+              "https://static.crates.io/crates/mlkem-selkie/mlkem-selkie-${version}.crate" && exit 0
+            sleep 10
+          done
+          exit 1
+      - name: Registry artifact and index checksum match our build
+        run: |
+          version="${TAG#v}"
+          sha=$(sha256sum "target/package/mlkem-selkie-${version}.crate" | cut -d' ' -f1)
+          echo "$sha  registry.crate" | sha256sum -c -
+          cksum=$(curl -fsSL https://index.crates.io/ml/ke/mlkem-selkie \
+            | jq -r --arg v "$version" 'select(.vers == $v).cksum')
+          [ "$sha" = "$cksum" ]
+          echo "CRATE_SHA256=$sha" >> "$GITHUB_ENV"
+      - name: Create GitHub Release recording hash and toolchain
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" --verify-tag --generate-notes \
+            --title "mlkem-selkie ${TAG}" \
+            --notes "\`.crate\` SHA-256: \`${CRATE_SHA256}\` (built and verified with Rust ${RELEASE_TOOLCHAIN})."
