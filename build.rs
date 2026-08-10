@@ -107,8 +107,8 @@ fn main() {
     };
 }
 
-/// Autodetects the target arch and sets the appopriate config flags. If `expect_simd` is
-/// set, then some sort of SIMD backend must be chosen, otherwise it panics
+/// Reads the target arch info and sets the appropriate config flags. If `expect_simd` is
+/// set, then some sort of SIMD backend must be chosen, otherwise it panics.
 fn select_backend(expect_simd: bool) {
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let target_vendor = env::var("CARGO_CFG_TARGET_VENDOR").unwrap_or_default();
@@ -139,7 +139,7 @@ fn select_backend(expect_simd: bool) {
                     "`mlkem_selkies_backend=\"simd\"` used on an arch with no supported SIMD backend"
                 )
             } else {
-                // Nothing. We just use serial
+                // Nothing. We just use scalar
             }
         }
     }
