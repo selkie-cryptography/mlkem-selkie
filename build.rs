@@ -100,7 +100,7 @@ fn main() {
     println!("cargo::rerun-if-env-changed=MLKEM_SELKIE_NEON_TUNE");
 
     match std::env::var("CARGO_CFG_MLKEM_SELKIE_BACKEND").as_deref() {
-        Ok("serial") => {} // Set no flags
+        Ok("scalar") => {} // Set no flags
         Ok("simd") => select_backend(true),
         Ok(e) => panic!("Unknown `mlkem_selkie_backend` value `{e}`"),
         _ => select_backend(false),
