@@ -67,17 +67,17 @@ later), opt in with `RUSTFLAGS="-C target-feature=+sha3"`.
 ### Backend Overrides
 
 If you want to use the scalar backend even if your hardware supports SIMD, you can add to your `RUSTFLAGS` environment variable
-```
+```ignore
 --cfg mlkem_selkie_backend="scalar"
 ```
 If you want prevent _all_ SIMD code from running, then you also must disable SIMD in the SHA3 dependency:
-```
+```ignore
 --cfg sha3_selkie_backend="scalar"
 ```
 
 
 Similarly, if you want to ensure the use of a SIMD backend (i.e., any of the above that is not `scalar`), then add to your `RUSTFLAGS` environment variable
-```
+```ignore
 --cfg mlkem_selkie_backend="simd"
 ```
 This will make the compile fail if no compatible SIMD backend can be chosen.
