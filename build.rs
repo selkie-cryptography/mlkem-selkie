@@ -99,6 +99,17 @@ fn main() {
     println!("cargo::rerun-if-env-changed=CARGO_ENCODED_RUSTFLAGS");
     println!("cargo::rerun-if-env-changed=MLKEM_SELKIE_NEON_TUNE");
 
+    match std::env::var("CARGO_CFG_MLKEM_SELKIE_BACKEND").as_deref() {
+        Ok("serial") => {} // Set no flags
+        Ok("simd") => select_backend(true),
+        Ok(e) => panic!("Unknown `mlkem_selkie_backend` value `{e}`"),
+        _ => select_backend(false),
+    };
+}
+
+/// Autodetects the target arch and sets the appopriate config flags. If `expect_simd` is
+/// set, then some sort of SIMD backend must be chosen, otherwise it panics
+fn select_backend(expect_simd: bool) {
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let target_vendor = env::var("CARGO_CFG_TARGET_VENDOR").unwrap_or_default();
     let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
@@ -122,6 +133,14 @@ fn main() {
         "x86_64" if has_feature("avx2") => {
             println!("cargo::rustc-cfg=mlkem_selkie_arch=\"avx2\"");
         }
-        _ => {}
+        _ => {
+            if expect_simd {
+                panic!(
+                    "`mlkem_selkies_backend=\"simd\"` used on an arch with no supported SIMD backend"
+                )
+            } else {
+                // Nothing. We just use serial
+            }
+        }
     }
 }
