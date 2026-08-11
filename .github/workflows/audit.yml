@@ -19,15 +19,17 @@ jobs:
     name: cargo-deny (advisories, bans, licenses, sources)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           persist-credentials: false
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25  # v2
         with:
           command: check
       - name: Install cargo-deny for the dashboard report
         if: github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        uses: taiki-e/install-action@cargo-deny
+        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b  # v2.83.4
+        with:
+          tool: cargo-deny
       - name: Build dashboard JSON
         if: github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: |
@@ -40,3 +42,23 @@ jobs:
           kind: deny
           payload: deny.json
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}
+
+  # Weekly alarm when release.yml's RELEASE_TOOLCHAIN lags current stable
+  # by two or more minors.
+  toolchain-staleness:
+    name: release toolchain vs stable
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
+        with:
+          toolchain: stable
+      - name: Pin is current against the stable channel
+        run: |
+          rustc -O --edition 2021 .github/scripts/toolchain-drift.rs -o /tmp/toolchain-drift
+          /tmp/toolchain-drift consistency
+          curl -fsSL https://static.rust-lang.org/dist/channel-rust-stable.toml \
+            | /tmp/toolchain-drift staleness
