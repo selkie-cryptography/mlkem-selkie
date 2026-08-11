@@ -1,27 +1,8 @@
 name: Release
 
-# Publishes to crates.io via trusted publishing (OIDC) on a v* tag, behind a
-# required-reviewer gate. No standing credential: crates.io mints the token for
-# this job from a GitHub-signed JWT, and it is revoked when the job ends.
-#
-# Versioning: pre-1.0 SemVer — 0.x minor may break API, patches don't.
-#
-# One-time setup (before 0.1.0):
-#   [ ] repo public; secret scanning + push protection + Dependabot on
-#   [ ] Actions default token read-only
-#   [ ] ruleset v* tags: restricted creation, immutable, signed
-#   [ ] ruleset main: required checks (CI, Audit)
-#   [ ] `Publish` environment: required reviewer, deployment refs limited to
-#       v* tags. The name must match `environment:` below exactly — a missing
-#       one is created unprotected on first use, silently skipping the gate.
-#   [ ] configure crates.io trusted publishing: this repo + release.yml +
-#       the `Publish` environment
-#
-# 0.0.0 was published by hand to claim the name, since trusted publishing
-# cannot create a crate. Each release after that: bump the version in a
-# reviewed PR, `git tag -s vX.Y.Z` on the merge commit, push, and approve
-# `Publish`. The Release is the changelog, generated from merged PRs. Edit in
-# anything a consumer must act on.
+# To release: bump the version in a reviewed PR, `git tag -s vX.Y.Z` on the
+# release commit, push, approve `Publish`. Notes come from the merged PRs;
+# edit in anything a consumer must act on.
 
 on:
   push:
