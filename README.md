@@ -64,6 +64,26 @@ there), AVX2 on x86_64, and a batched scalar/NEON hybrid kernel on
 other aarch64. On non-Apple aarch64 with `FEAT_SHA3` (Graviton3 and
 later), opt in with `RUSTFLAGS="-C target-feature=+sha3"`.
 
+### Backend override
+
+`MLKEM_SELKIE_BACKEND` overrides the automatic selection, for A/B
+benchmarking and testing the portable backend on SIMD hardware:
+
+```sh
+# force the portable scalar backend
+MLKEM_SELKIE_BACKEND=scalar cargo bench
+
+# also keep the Keccak in sha3-selkie scalar
+MLKEM_SELKIE_BACKEND=scalar SHA3_SELKIE_BACKEND=scalar cargo bench
+
+# fail the build unless a SIMD backend is selected, guarding bench
+# scripts against silently measuring the scalar backend
+MLKEM_SELKIE_BACKEND=simd cargo bench
+```
+
+Unset (or empty) selects automatically. Changing the variable triggers
+a rebuild.
+
 ### About
 
 <img width="27%" align="right" src="https://user-images.githubusercontent.com/552961/197638905-f5144be3-a2f2-48c2-9ecb-26e4e34d8d8a.svg#gh-light-mode-only"/>
