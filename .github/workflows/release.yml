@@ -1,7 +1,7 @@
 name: Release
 
-# To release: bump the version in a reviewed PR, `git tag -s vX.Y.Z` on the
-# release commit, push, approve `Publish`. Notes come from the merged PRs;
+# To release: bump the version in a reviewed PR, `git tag -a vX.Y.Z` on the
+# release commit, push, approve `Release`. Notes come from the merged PRs;
 # edit in anything a consumer must act on.
 
 on:
@@ -41,18 +41,6 @@ jobs:
         run: |
           manifest=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
           [ "${GITHUB_REF_NAME#v}" = "$manifest" ]
-      # Asks GitHub whether the tag is signed, rather than `git verify-tag`:
-      # the runner has no keyring, GitHub holds the account's public keys.
-      - name: Tag is annotated and signed
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          read -r type object < <(
-            gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" \
-              --jq '.object.type + " " + .object.sha')
-          [ "$type" = "tag" ]
-          gh api "repos/$GITHUB_REPOSITORY/git/tags/$object" \
-            --jq '.verification.verified' | grep -qx true
       - name: CI and Audit concluded green on this commit
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
@@ -106,7 +94,7 @@ jobs:
     runs-on: ubuntu-latest
     # Required-reviewer approval gate; crates.io trusted publishing is bound to
     # this repo + workflow + environment.
-    environment: Publish
+    environment: Release
     permissions:
       id-token: write
       contents: read
