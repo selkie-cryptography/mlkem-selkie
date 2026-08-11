@@ -145,12 +145,15 @@ jobs:
         # shards so wall time tracks the average, not the tail — trading
         # per-shard reproducibility (which CI doesn't need) for load balance.
         # Linker: x86_64 via mold; aarch64 via bundled lld (ld64.lld).
+        # `--exclude` drops the other arch's backend files, which are cfg'd
+        # out of the compile graph here and would report every mutant as
+        # missed (the incremental job's diff pathspec does the same).
         run: |
           if [ "${{ matrix.arch }}" = "x86_64" ]; then
-            mold -run cargo mutants -j 2 --shard ${{ matrix.shard }}/16 || true
+            mold -run cargo mutants -j 2 --shard ${{ matrix.shard }}/16 --exclude '**/arch/neon.rs' || true
           else
             export CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS="-Clink-arg=--ld-path=$(rustc --print sysroot)/lib/rustlib/aarch64-apple-darwin/bin/gcc-ld/ld64.lld"
-            cargo mutants -j 3 --shard ${{ matrix.shard }}/8 || true
+            cargo mutants -j 3 --shard ${{ matrix.shard }}/8 --exclude '**/arch/avx2.rs' || true
           fi
       - uses: actions/upload-artifact@v4
         if: always()
