@@ -22,6 +22,10 @@
 //! `.cargo/config.toml`). Absent any arch cfg, the portable scalar backend in
 //! `src/algebraic/poly/arch/generic.rs` is used.
 //!
+//! `MLKEM_SELKIE_BACKEND` overrides the selection: `scalar` keeps the
+//! portable backend everywhere, `simd` fails the build unless a SIMD backend
+//! is selected.
+//!
 //! The cfgs are reserved selectors: they are registered and emitted here,
 //! while the dispatch in `src/algebraic/poly/arch.rs` (and the stage
 //! selection in `src/algebraic/poly/arch/neon.rs`) switches the active
@@ -97,8 +101,32 @@ fn main() {
     println!("cargo::rerun-if-env-changed=CARGO_CFG_TARGET_FEATURE");
     println!("cargo::rerun-if-env-changed=CARGO_CFG_TARGET_VENDOR");
     println!("cargo::rerun-if-env-changed=CARGO_ENCODED_RUSTFLAGS");
+    println!("cargo::rerun-if-env-changed=MLKEM_SELKIE_BACKEND");
     println!("cargo::rerun-if-env-changed=MLKEM_SELKIE_NEON_TUNE");
 
+    // Non-empty means set, as with MLKEM_SELKIE_NEON_TUNE: CI matrices pass
+    // "" for unset legs.
+    let backend = env::var("MLKEM_SELKIE_BACKEND").unwrap_or_default();
+    match backend.as_str() {
+        "" => {
+            select_backend();
+        }
+        "scalar" => {}
+        "simd" => {
+            if !select_backend() {
+                panic!(
+                    "MLKEM_SELKIE_BACKEND=simd, but this target selects the scalar backend \
+                     (a SIMD backend needs little-endian aarch64, or x86_64 `avx2`)"
+                );
+            }
+        }
+        other => panic!("MLKEM_SELKIE_BACKEND must be `scalar` or `simd`, got `{other}`"),
+    }
+}
+
+/// Emits the backend cfgs for the target; returns whether a SIMD backend was
+/// selected.
+fn select_backend() -> bool {
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let target_vendor = env::var("CARGO_CFG_TARGET_VENDOR").unwrap_or_default();
     let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
@@ -118,10 +146,14 @@ fn main() {
                 println!("cargo::rustc-cfg=mlkem_selkie_neon_asm");
                 println!("cargo::rustc-cfg=mlkem_selkie_neon_tune=\"{tune}\"");
             }
+
+            true
         }
         "x86_64" if has_feature("avx2") => {
             println!("cargo::rustc-cfg=mlkem_selkie_arch=\"avx2\"");
+
+            true
         }
-        _ => {}
+        _ => false,
     }
 }
