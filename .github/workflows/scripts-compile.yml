@@ -22,10 +22,12 @@ jobs:
     name: rustc -O scripts/*.rs
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
+        with:
+          toolchain: stable
       - name: Compile standalone scripts
         run: |
           for script in scripts/*.rs .github/scripts/*.rs; do
@@ -36,3 +38,7 @@ jobs:
         run: |
           rustc --test -O --edition 2021 .github/scripts/kat-report.rs -o /tmp/kat-report-test
           /tmp/kat-report-test
+      - name: Run toolchain-drift self-test
+        run: |
+          rustc --test -O --edition 2021 .github/scripts/toolchain-drift.rs -o /tmp/toolchain-drift-test
+          /tmp/toolchain-drift-test
