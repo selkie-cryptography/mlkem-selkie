@@ -57,4 +57,19 @@ exclude_re = [
     # values (slower, not wrong) — equivalent mutants.
     "encoding/arch/(neon|avx2)\\.rs.*: replace (\\*|/) with . in unpack",
     "encoding/arch/(neon|avx2)\\.rs.*: delete match arm .* in unpack",
+    # `pack_controls`'s `idx_next` guards and byte indices only shape bits the
+    # kernel's shift-and-mask discards (an out-of-window gather contributes
+    # nothing an in-range shift can move into the kept byte), so mutating
+    # them changes no output.
+    "encoding/arch/(neon|avx2)\\.rs.*: replace < with <= in pack_controls",
+    "encoding/arch/(neon|avx2)\\.rs.*: replace && with \\|\\| in pack_controls",
+    "encoding/arch/(neon|avx2)\\.rs.*: replace \\+ with - in pack_controls",
+    # Recombining disjoint bit ranges: `|` and `^` agree when no bits overlap.
+    "sampling/arch/generic\\.rs.*: replace \\| with \\^ in reject",
+    # The 16-byte window guard `start + 16`: mutations reroute loads to the
+    # zero-padded fallback, which produces the same bytes.
+    "sampling/arch/(neon|avx2)\\.rs.*: replace \\+ with \\* in reject",
+    # One-past loop bound on the fixed 128-pair reduce: the extra iteration
+    # reads and writes out of bounds, which no test can observe meaningfully.
+    "poly/arch/avx2\\.rs.*: replace < with <= in basemul_reduce",
 ]

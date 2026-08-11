@@ -1,7 +1,10 @@
 //! Differential tests: the NEON kernels must agree with the portable scalar
 //! backend on random inputs, across the full `i16` representative range.
 
-use core::array;
+use core::{
+    arch::aarch64::{vld1q_s16, vst1q_s16},
+    array,
+};
 
 use proptest::prelude::*;
 
@@ -399,5 +402,38 @@ fn zeta_barrett_matches_reference() {
             bar, reference,
             "ZETA_BARRETT[{i}] mismatch: got {bar}, expected {reference} (zeta={zeta})",
         );
+    }
+}
+
+/// `barrett_reduce` lands in `(-q/2, q/2]` over the whole lazy inverse-NTT
+/// magnitude range `|a| <= 16383`.
+///
+/// The differential tests only push already-small representatives through
+/// it, where even a perturbed multiplier reduces correctly; `BARRETT_V - 1`
+/// first breaks the range bound at `|a| = 11652`.
+#[test]
+fn barrett_reduce_covers_lazy_range() {
+    let q = i32::from(parameters::Q as i16);
+
+    let mut a = -16383i16;
+    while a <= 16383 - 7 {
+        let inputs: [i16; 8] = array::from_fn(|i| a + i as i16);
+        let mut outputs = [0i16; 8];
+
+        // SAFETY: NEON is baseline on aarch64; the pointers cover 8 lanes.
+        unsafe {
+            vst1q_s16(
+                outputs.as_mut_ptr(),
+                super::barrett_reduce(vld1q_s16(inputs.as_ptr())),
+            );
+        }
+
+        for (&input, &output) in inputs.iter().zip(&outputs) {
+            let (input, output) = (i32::from(input), i32::from(output));
+            assert!(output.abs() <= q / 2, "range: {input} -> {output}");
+            assert_eq!((input - output).rem_euclid(q), 0, "congruence: {input}");
+        }
+
+        a += 8;
     }
 }
