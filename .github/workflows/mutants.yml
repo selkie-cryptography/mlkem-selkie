@@ -153,6 +153,11 @@ jobs:
             mold -run cargo mutants -j 2 --shard ${{ matrix.shard }}/16 --exclude '**/arch/neon.rs' || true
           else
             export CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS="-Clink-arg=--ld-path=$(rustc --print sysroot)/lib/rustlib/aarch64-apple-darwin/bin/gcc-ld/ld64.lld"
+            # The Apple-tuned asm tier would cfg the NEON intrinsics stages
+            # out of the compile graph on these runners, reporting their
+            # mutants as missed; the generic tune compiles and tests them
+            # (the asm strings themselves are not mutable).
+            export MLKEM_SELKIE_NEON_TUNE=generic
             cargo mutants -j 3 --shard ${{ matrix.shard }}/8 --exclude '**/arch/avx2.rs' || true
           fi
       - uses: actions/upload-artifact@v4
