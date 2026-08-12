@@ -66,7 +66,7 @@ criterion-cycles-per-byte = "0.8"
 # Linux-only: crabgrind needs <valgrind/valgrind.h>. Used by the ctgrind test
 # and to declassify `rho` under memcheck.
 [target.'cfg(target_os = "linux")'.dependencies]
-crabgrind = { version = "0.2", optional = true }
+crabgrind = { version = "0.3", optional = true }
 
 [[test]]
 name = "algebraic_properties"
