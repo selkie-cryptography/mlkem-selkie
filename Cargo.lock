@@ -305,6 +305,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "crabgrind"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "035c801dc4b418e1d857a6536dc88b4d1929c7a1fd163389766e18d322d34a84"
+dependencies = [
+ "bindgen",
+ "cc",
+ "pkg-config",
+ "rustversion",
+]
+
+[[package]]
 name = "criterion"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -919,7 +931,7 @@ version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "79054fc9037cb70d6a546cf094cea7d7df06af5e49d230ba24103d27ccc886f1"
 dependencies = [
- "crabgrind",
+ "crabgrind 0.2.6",
  "hax-lib",
 ]
 
@@ -1041,7 +1053,7 @@ checksum = "c505b3e17ed6b70a7ed2e67fbb2c560ee327353556120d6e72f5232b6880d536"
 name = "mlkem-selkie"
 version = "0.0.0"
 dependencies = [
- "crabgrind",
+ "crabgrind 0.3.1",
  "criterion",
  "criterion-cycles-per-byte",
  "dhat",
