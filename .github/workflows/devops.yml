@@ -18,7 +18,7 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-      - uses: reviewdog/action-actionlint@b0a6aebe1d2191decc9b4f022cdfc248b702477d  # v1.42.0
+      - uses: reviewdog/action-actionlint@d63ba7532e0942965320cd8d73cbae4c7b3c5283  # v1.73.1
         with:
           level: warning
           fail_on_error: false
