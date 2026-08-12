@@ -43,7 +43,7 @@ libcrux-ml-kem = { version = "0.0.10", default-features = false, features = [
     "mlkem768",
     "mlkem1024",
 ] }
-rand = "0.8"
+rand = "0.10"
 # The cross-test oracles seed their RNG through these traits; the library
 # itself takes entropy from `getrandom`.
 rand_core = "0.6"
