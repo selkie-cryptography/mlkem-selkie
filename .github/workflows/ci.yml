@@ -58,7 +58,7 @@ jobs:
         with:
           toolchain: beta
           components: clippy
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@a45951ff880207c249adf57334cf2e9bd81d6e1e  # v2
       - name: Clippy (default features)
         run: cargo clippy --all-targets
       - name: Clippy (all features)
@@ -86,7 +86,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@a45951ff880207c249adf57334cf2e9bd81d6e1e  # v2
       - run: cargo doc --no-deps --document-private-items --all-features
       - name: Publish rustdoc to dashboard
         # One leg is plenty — rustdoc is backend-independent prose.
@@ -113,7 +113,7 @@ jobs:
       - uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b  # v2.83.4
         with:
           tool: nextest
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@a45951ff880207c249adf57334cf2e9bd81d6e1e  # v2
       - name: Test (default features)
         run: cargo nextest run --cargo-profile release-checked
       - name: Test (expose-internals)
@@ -138,7 +138,7 @@ jobs:
       - uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b  # v2.83.4
         with:
           tool: nextest
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@a45951ff880207c249adf57334cf2e9bd81d6e1e  # v2
       - name: Test (default features)
         run: cargo nextest run --cargo-profile release-checked
       - name: Test (NEON backend, expose-internals)
@@ -165,7 +165,7 @@ jobs:
       - uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b  # v2.83.4
         with:
           tool: nextest
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@a45951ff880207c249adf57334cf2e9bd81d6e1e  # v2
       - name: Test (AVX2 backend, expose-internals)
         run: cargo nextest run --cargo-profile release-checked --features expose-internals
 
@@ -186,7 +186,7 @@ jobs:
       - uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b  # v2.83.4
         with:
           tool: nextest
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@a45951ff880207c249adf57334cf2e9bd81d6e1e  # v2
       - name: Test (release gates invocation)
         run: |
           cargo nextest run --cargo-profile release-checked --locked
@@ -205,7 +205,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@a45951ff880207c249adf57334cf2e9bd81d6e1e  # v2
       - run: cargo package --locked
 
   feature-combinations:
@@ -218,7 +218,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@a45951ff880207c249adf57334cf2e9bd81d6e1e  # v2
       - name: No parameter sets is a compile error
         run: (cargo build --no-default-features 2>&1 || true) | grep -q "at least one ML-KEM parameter set"
       - name: Build each parameter set alone
@@ -239,7 +239,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@a45951ff880207c249adf57334cf2e9bd81d6e1e  # v2
       - run: cargo bench --no-run --features expose-internals
 
   # Re-runs the vector + interop suites under nextest for the JUnit XML the
@@ -259,7 +259,7 @@ jobs:
       - uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b  # v2.83.4
         with:
           tool: nextest
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@a45951ff880207c249adf57334cf2e9bd81d6e1e  # v2
       - name: Run vector + interop suites (JUnit)
         run: |
           cargo nextest run --profile vectors --cargo-profile release-checked \

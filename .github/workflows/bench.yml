@@ -54,7 +54,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@a45951ff880207c249adf57334cf2e9bd81d6e1e  # v2
       - name: Public API (keygen / encaps / decaps)
         run: |
           set -o pipefail
@@ -144,7 +144,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@a45951ff880207c249adf57334cf2e9bd81d6e1e  # v2
       - name: Install Valgrind + gungraun-runner
         run: |
           sudo apt-get update
@@ -199,7 +199,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@a45951ff880207c249adf57334cf2e9bd81d6e1e  # v2
       - name: Run cycle counts
         run: |
           set -o pipefail

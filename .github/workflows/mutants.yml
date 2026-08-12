@@ -52,7 +52,7 @@ jobs:
       - if: matrix.arch == 'x86_64'
         run: sudo apt-get update && sudo apt-get install -y mold
       - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696  # v0.0.10
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@a45951ff880207c249adf57334cf2e9bd81d6e1e  # v2
       - name: Mutate only the PR diff
         # `-j` matches each runner's actual vCPU count on the free plan
         # (ubuntu-latest = 2, macos-latest M1 = 3). mold is x86_64 only.
@@ -137,7 +137,7 @@ jobs:
       - if: matrix.arch == 'x86_64'
         run: sudo apt-get update && sudo apt-get install -y mold
       - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696  # v0.0.10
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@a45951ff880207c249adf57334cf2e9bd81d6e1e  # v2
       - name: Run one mutation shard
         # `--shard i/N` splits the mutant set into N groups by index (N is
         # per-arch, see the matrix comment above); each shard's outputs are
