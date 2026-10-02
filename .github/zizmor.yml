@@ -1,0 +1,18 @@
+# zizmor config, read by devops.yml's zizmor job and local runs.
+rules:
+  # Version comments name the release line (`# v4`) or branch (`# master`),
+  # which move upstream; the SHA is the pin. Dependabot bumps SHAs, and
+  # impostor-commit checks they belong to the named repo.
+  ref-version-mismatch:
+    disable: true
+  # actionlint 1.7.12 rejects the `uses: $/...` syntax this audit wants.
+  # These workflows run cargo before a `./.github/actions` upload step that
+  # gets FLY_API_TOKEN; uploading from a separate job is the real fix.
+  self-repository:
+    ignore:
+      - audit.yml
+      - bench.yml
+      - ci.yml
+      - coverage.yml
+      - ct.yml
+      - mutants.yml

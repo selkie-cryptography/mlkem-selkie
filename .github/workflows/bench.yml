@@ -291,10 +291,12 @@ jobs:
         with:
           toolchain: stable
       - name: Build markdown diff
+        env:
+          BASELINE_SHA: ${{ steps.baseline-run.outputs.sha }}
         run: |
           rustc -O --edition 2021 .github/scripts/bench-diff.rs -o /tmp/bench-diff
           mkdir -p baseline  # in case the download step was skipped
-          /tmp/bench-diff baseline head "${{ steps.baseline-run.outputs.sha }}" > bench-diff.md
+          /tmp/bench-diff baseline head "$BASELINE_SHA" > bench-diff.md
           cat bench-diff.md
       - name: Post sticky PR comment
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b  # v7

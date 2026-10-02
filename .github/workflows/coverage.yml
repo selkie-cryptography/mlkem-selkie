@@ -46,10 +46,12 @@ jobs:
             --fail-under-regions 96
       - name: Gate on diff coverage (PRs only)
         if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           python3 -m pip install --quiet diff-cover
           diff-cover lcov.info \
-            --compare-branch=origin/${{ github.base_ref }} \
+            --compare-branch="origin/$BASE_REF" \
             --fail-under=95 \
             --show-uncovered
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4

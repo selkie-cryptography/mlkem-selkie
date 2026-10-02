@@ -43,14 +43,21 @@ runs:
     - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1  # master
     - name: Upload to CI site
       shell: bash
+      # Inputs reach the shell as env vars, never as interpolated code.
       env:
         FLY_API_TOKEN: ${{ inputs.fly-api-token }}
+        ASSETS: ${{ inputs.assets }}
+        REMOTE_SUBDIR: ${{ inputs.remote-subdir }}
+        PR_ONLY: ${{ inputs.pr-only }}
+        KIND: ${{ inputs.kind }}
+        PAYLOAD: ${{ inputs.payload }}
+        SHA: ${{ inputs.sha }}
       run: |
         rustc -O --edition 2021 .github/scripts/ci-upload.rs -o /tmp/ci-upload
-        if [ -n "${{ inputs.assets }}" ]; then
-          /tmp/ci-upload --assets "${{ inputs.assets }}" "${{ inputs.remote-subdir }}"
+        if [ -n "$ASSETS" ]; then
+          /tmp/ci-upload --assets "$ASSETS" "$REMOTE_SUBDIR"
         else
           args=()
-          [ "${{ inputs.pr-only }}" = "true" ] && args+=(--pr-only)
-          /tmp/ci-upload "${args[@]}" "${{ inputs.kind }}" "${{ inputs.payload }}" "${{ inputs.sha }}"
+          [ "$PR_ONLY" = "true" ] && args+=(--pr-only)
+          /tmp/ci-upload "${args[@]}" "$KIND" "$PAYLOAD" "$SHA"
         fi
