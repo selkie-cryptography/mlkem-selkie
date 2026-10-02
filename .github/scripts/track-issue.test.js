@@ -143,13 +143,13 @@ test('readResult truncates large output', () => {
 test('legsFromNeeds maps job results to leg states', () => {
   const needs = {
     'cargo-deny': { result: 'failure', outputs: {} },
-    'toolchain-staleness': { result: 'success', outputs: {} },
+    passed: { result: 'success', outputs: {} },
     other: { result: 'cancelled', outputs: {} },
     skipped: { result: 'skipped', outputs: {} },
   };
   assert.deepEqual(
     legsFromNeeds(needs).map((leg) => `${leg.name}=${leg.status}`),
-    ['cargo-deny=fail', 'toolchain-staleness=pass', 'other=missing', 'skipped=missing'],
+    ['cargo-deny=fail', 'passed=pass', 'other=missing', 'skipped=missing'],
   );
 });
 

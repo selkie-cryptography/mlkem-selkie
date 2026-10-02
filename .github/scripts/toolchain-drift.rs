@@ -9,7 +9,7 @@
 //! - `curl -s .../channel-rust-stable.toml | toolchain-drift staleness` — reads
 //!   the channel manifest on stdin and fails when the release pin lags stable
 //!   by two or more minor releases, or a dated gate pin predates the current
-//!   stable release. Run on the weekly cron (audit.yml).
+//!   stable release. Run weekly (toolchain-canary.yml).
 
 use std::{fmt, fs, io::Read, process::ExitCode, str::FromStr};
 
@@ -290,7 +290,7 @@ fn staleness() -> Result<(), String> {
     for (key, pin) in &gate_pins {
         if pin.date.as_str() < released {
             return Err(format!(
-                "{key} {pin} predates stable {stable} ({released}); bump it once toolchain-canary.yml passes"
+                "{key} {pin} predates stable {stable} ({released}); bump it once the fmt and clippy canaries pass"
             ));
         }
         println!("ok: {key} {pin} is not older than stable {stable} ({released})");

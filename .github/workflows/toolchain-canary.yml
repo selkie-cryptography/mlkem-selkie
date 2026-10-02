@@ -1,7 +1,8 @@
 name: Toolchain canary
 
 # Runs the fmt and clippy gates on floating nightly and beta. ci.yml pins
-# both; an open `toolchain-canary` issue means a pin bump needs work first.
+# both; an open fmt or clippy issue means a pin bump needs work first.
+# Also checks every toolchain pin against current stable.
 on:
   schedule:
     - cron: "0 7 * * 1"
@@ -84,11 +85,45 @@ jobs:
           path: ${{ runner.temp }}/canary
           retention-days: 30
 
+  # Fails when release.yml's RELEASE_TOOLCHAIN lags current stable by two or
+  # more minors, or ci.yml's dated fmt or clippy pin predates it.
+  pins:
+    name: pins (current stable)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
+        with:
+          toolchain: stable
+      - run: rustc -O --edition 2021 .github/scripts/toolchain-drift.rs -o /tmp/toolchain-drift
+      # Network errors fail here, not in the captured output.
+      - run: |
+          curl -fsSL https://static.rust-lang.org/dist/channel-rust-stable.toml \
+            -o "$RUNNER_TEMP/channel-rust-stable.toml"
+      - name: toolchain-drift
+        run: |
+          out="$RUNNER_TEMP/canary/pins"
+          mkdir -p "$out"
+          rustc +stable -V > "$out/version.txt" 2>&1 || true
+          status=pass
+          /tmp/toolchain-drift consistency > "$out/output.txt" 2>&1 || status=fail
+          /tmp/toolchain-drift staleness < "$RUNNER_TEMP/channel-rust-stable.toml" >> "$out/output.txt" 2>&1 || status=fail
+          echo "$status" > "$out/status"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: ${{ !cancelled() }}
+        with:
+          name: canary-pins
+          path: ${{ runner.temp }}/canary
+          retention-days: 30
+
   # The only job with a write token. It runs no cargo and treats the
   # artifacts as text.
   report:
     name: Track canary issues
-    needs: [fmt, clippy]
+    needs: [fmt, clippy, pins]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -133,6 +168,14 @@ jobs:
                 title: 'Toolchain canary: clippy fails on floating beta',
                 intro: '`cargo clippy --all-targets` (default and all features) fails on floating beta. Fix the lints, then bump `CLIPPY_TOOLCHAIN` in ci.yml.',
                 legs: ['portable', 'neon', 'avx2'].map((b) => leg(b, `clippy-${b}`)),
+                runUrl,
+              },
+              {
+                key: 'toolchain-canary/pins',
+                label: 'toolchain-canary',
+                title: 'Toolchain canary: toolchain pins are stale',
+                intro: 'A toolchain pin lags current stable; the output names it. Bump `RELEASE_TOOLCHAIN` in release.yml and the release-toolchain leg in ci.yml together. Bump `FMT_TOOLCHAIN` and `CLIPPY_TOOLCHAIN` in ci.yml and `MUTANTS_TOOLCHAIN` in mutants.yml once the fmt and clippy canaries pass.',
+                legs: [leg('pins', 'pins')],
                 runUrl,
               },
             ]);
