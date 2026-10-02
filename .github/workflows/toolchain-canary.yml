@@ -1,0 +1,138 @@
+name: Toolchain canary
+
+# Runs the fmt and clippy gates on floating nightly and beta. ci.yml pins
+# both; an open `toolchain-canary` issue means a pin bump needs work first.
+on:
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Each canary records pass/fail and output instead of failing; `report`
+  # turns that into an issue. A setup failure skips the capture, and the
+  # reporter fails on the missing result. Mirrors ci.yml's fmt job.
+  fmt:
+    name: fmt (floating nightly)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
+        with:
+          toolchain: nightly
+          components: rustfmt
+      - name: cargo fmt --check
+        run: |
+          out="$RUNNER_TEMP/canary/fmt"
+          mkdir -p "$out"
+          rustc +nightly -V > "$out/version.txt" 2>&1 || true
+          status=pass
+          cargo +nightly fmt --all --check > "$out/output.txt" 2>&1 || status=fail
+          echo "$status" > "$out/status"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: ${{ !cancelled() }}
+        with:
+          name: canary-fmt
+          path: ${{ runner.temp }}/canary
+          retention-days: 30
+
+  # Mirrors ci.yml's clippy job.
+  clippy:
+    name: clippy (floating beta, ${{ matrix.backend }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { backend: portable, os: ubuntu-latest, rustflags: "" }
+          - { backend: neon, os: macos-latest, rustflags: "" }
+          - { backend: avx2, os: ubuntu-latest, rustflags: "-C target-cpu=x86-64-v3" }
+    env:
+      RUSTFLAGS: ${{ matrix.rustflags }}
+      LEG: clippy-${{ matrix.backend }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
+        with:
+          toolchain: beta
+          components: clippy
+      # Network errors fail here, not in the captured output.
+      - run: cargo +beta fetch
+      # `--keep-going` lints every target after an error, so the output (and
+      # its hash) doesn't depend on build order.
+      - name: cargo clippy
+        run: |
+          out="$RUNNER_TEMP/canary/$LEG"
+          mkdir -p "$out"
+          rustc +beta -V > "$out/version.txt" 2>&1 || true
+          status=pass
+          cargo +beta clippy --keep-going --all-targets > "$out/output.txt" 2>&1 || status=fail
+          cargo +beta clippy --keep-going --all-targets --all-features >> "$out/output.txt" 2>&1 || status=fail
+          echo "$status" > "$out/status"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        if: ${{ !cancelled() }}
+        with:
+          name: canary-${{ env.LEG }}
+          path: ${{ runner.temp }}/canary
+          retention-days: 30
+
+  # The only job with a write token. It runs no cargo and treats the
+  # artifacts as text.
+  report:
+    name: Track canary issues
+    needs: [fmt, clippy]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # One reporter at a time, so two runs can't open duplicate issues.
+    concurrency:
+      group: ${{ github.workflow }}-report
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      issues: write  # open, comment on, and close canary issues
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      # Outside the workspace, so an artifact can't replace the reporter
+      # script. Each artifact holds one leg-named directory.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          pattern: canary-*
+          path: ${{ runner.temp }}/canary
+          merge-multiple: true
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        env:
+          RESULTS: ${{ runner.temp }}/canary
+        with:
+          script: |
+            const { trackAll, readResult } = require('./.github/scripts/track-issue.js');
+            const leg = (name, dir) => ({ name, ...readResult(`${process.env.RESULTS}/${dir}`) });
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await trackAll({ github, context, core }, [
+              {
+                key: 'toolchain-canary/fmt',
+                label: 'toolchain-canary',
+                title: 'Toolchain canary: cargo fmt fails on floating nightly',
+                intro: '`cargo fmt --all --check` fails on floating nightly. Fix the drift, then bump `FMT_TOOLCHAIN` in ci.yml and `MUTANTS_TOOLCHAIN` in mutants.yml.',
+                legs: [leg('fmt', 'fmt')],
+                runUrl,
+              },
+              {
+                key: 'toolchain-canary/clippy',
+                label: 'toolchain-canary',
+                title: 'Toolchain canary: clippy fails on floating beta',
+                intro: '`cargo clippy --all-targets` (default and all features) fails on floating beta. Fix the lints, then bump `CLIPPY_TOOLCHAIN` in ci.yml.',
+                legs: ['portable', 'neon', 'avx2'].map((b) => leg(b, `clippy-${b}`)),
+                runUrl,
+              },
+            ]);
