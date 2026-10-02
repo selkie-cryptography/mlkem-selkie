@@ -66,9 +66,9 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
       - name: Clippy (default features)
-        run: cargo +"$CLIPPY_TOOLCHAIN" clippy --all-targets
+        run: cargo +"$CLIPPY_TOOLCHAIN" clippy --locked --all-targets
       - name: Clippy (all features)
-        run: cargo +"$CLIPPY_TOOLCHAIN" clippy --all-targets --all-features
+        run: cargo +"$CLIPPY_TOOLCHAIN" clippy --locked --all-targets --all-features
 
   doc:
     name: doc (${{ matrix.backend }})
@@ -93,7 +93,7 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
-      - run: cargo doc --no-deps --document-private-items --all-features
+      - run: cargo doc --locked --no-deps --document-private-items --all-features
       - name: Publish rustdoc to dashboard
         # One leg is plenty — rustdoc is backend-independent prose.
         if: matrix.backend == 'portable' && github.event_name == 'push'
@@ -121,12 +121,12 @@ jobs:
           tool: nextest
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
       - name: Test (default features)
-        run: cargo nextest run --cargo-profile release-checked
+        run: cargo nextest run --locked --cargo-profile release-checked
       - name: Test (expose-internals)
-        run: cargo nextest run --cargo-profile release-checked --features expose-internals
+        run: cargo nextest run --locked --cargo-profile release-checked --features expose-internals
       # Doc tests: nextest does not run them; fall back to the built-in harness.
       - name: Doctests
-        run: cargo test --doc
+        run: cargo test --locked --doc
 
   test-neon:
     name: test (neon)
@@ -146,11 +146,11 @@ jobs:
           tool: nextest
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
       - name: Test (default features)
-        run: cargo nextest run --cargo-profile release-checked
+        run: cargo nextest run --locked --cargo-profile release-checked
       - name: Test (NEON backend, expose-internals)
-        run: cargo nextest run --cargo-profile release-checked --features expose-internals
+        run: cargo nextest run --locked --cargo-profile release-checked --features expose-internals
       - name: Doctests
-        run: cargo test --doc
+        run: cargo test --locked --doc
 
   test-avx2:
     name: test (avx2)
@@ -173,7 +173,7 @@ jobs:
           tool: nextest
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
       - name: Test (AVX2 backend, expose-internals)
-        run: cargo nextest run --cargo-profile release-checked --features expose-internals
+        run: cargo nextest run --locked --cargo-profile release-checked --features expose-internals
 
   # Mirrors the release gates (release.yml) on their pinned toolchain so
   # main is always green on the compiler a release will use. The version
@@ -226,14 +226,14 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
       - name: No parameter sets is a compile error
-        run: (cargo build --no-default-features 2>&1 || true) | grep -q "at least one ML-KEM parameter set"
+        run: (cargo build --locked --no-default-features 2>&1 || true) | grep -q "at least one ML-KEM parameter set"
       - name: Build each parameter set alone
         run: |
           for set in mlkem512 mlkem768 mlkem1024; do
-            cargo build --no-default-features --features "$set"
+            cargo build --locked --no-default-features --features "$set"
           done
       - name: Build with internals exposed
-        run: cargo build --no-default-features --features mlkem768,expose-internals
+        run: cargo build --locked --no-default-features --features mlkem768,expose-internals
 
   benches-compile:
     name: Benchmarks compile
@@ -246,7 +246,7 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
-      - run: cargo bench --no-run --features expose-internals
+      - run: cargo bench --locked --no-run --features expose-internals
 
   # Re-runs the vector + interop suites under nextest for the JUnit XML the
   # dashboard's Conformance panel is built from. Main pushes only — the
@@ -268,7 +268,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
       - name: Run vector + interop suites (JUnit)
         run: |
-          cargo nextest run --profile vectors --cargo-profile release-checked \
+          cargo nextest run --locked --profile vectors --cargo-profile release-checked \
             --test wycheproof --test kats --test libcrux_xtest --test boringssl_xtest
       - name: Build dashboard JSON
         run: |

@@ -65,7 +65,7 @@ jobs:
           toolchain: beta
           components: clippy
       # Network errors fail here, not in the captured output.
-      - run: cargo +beta fetch
+      - run: cargo +beta fetch --locked
       # `--keep-going` lints every target after an error, so the output (and
       # its hash) doesn't depend on build order.
       - name: cargo clippy
@@ -74,8 +74,8 @@ jobs:
           mkdir -p "$out"
           rustc +beta -V > "$out/version.txt" 2>&1 || true
           status=pass
-          cargo +beta clippy --keep-going --all-targets > "$out/output.txt" 2>&1 || status=fail
-          cargo +beta clippy --keep-going --all-targets --all-features >> "$out/output.txt" 2>&1 || status=fail
+          cargo +beta clippy --locked --keep-going --all-targets > "$out/output.txt" 2>&1 || status=fail
+          cargo +beta clippy --locked --keep-going --all-targets --all-features >> "$out/output.txt" 2>&1 || status=fail
           echo "$status" > "$out/status"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         if: ${{ !cancelled() }}

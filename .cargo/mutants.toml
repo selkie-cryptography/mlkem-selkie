@@ -13,6 +13,9 @@
 # nextest as the default test tool. CI assumes this.
 test_tool = "nextest"
 
+# Build and test against the committed Cargo.lock.
+additional_cargo_args = ["--locked"]
+
 # Build profile for cargo-mutants's internal cargo invocations. Pairs with
 # `[profile.mutants]` in Cargo.toml, which inherits release-checked but drops
 # debuginfo — build time dominates per-mutant cost.

@@ -33,6 +33,7 @@ fn main() -> io::Result<()> {
     let status = Command::new("cargo")
         .args([
             "test",
+            "--locked",
             "--test",
             "ctgrind",
             "--features",

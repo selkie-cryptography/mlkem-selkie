@@ -36,7 +36,7 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
       - name: Build tacet bench
-        run: cargo bench --bench tacet --features expose-internals --no-run
+        run: cargo bench --locked --bench tacet --features expose-internals --no-run
       - name: tacet attacker-model analysis
         run: |
           set -o pipefail
