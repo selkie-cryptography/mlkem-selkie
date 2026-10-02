@@ -1,8 +1,9 @@
 name: Toolchain canary
 
 # Runs the fmt and clippy gates on floating nightly and beta. ci.yml pins
-# both; an open fmt or clippy issue means a pin bump needs work first.
-# Also checks every toolchain pin against current stable.
+# both. Bump a pin once its canary passes; an open fmt or clippy issue means
+# the bump needs work first.
+# Also checks the release toolchain pin against current stable.
 on:
   schedule:
     - cron: "0 7 * * 1"
@@ -86,7 +87,7 @@ jobs:
           retention-days: 30
 
   # Fails when release.yml's RELEASE_TOOLCHAIN lags current stable by two or
-  # more minors, or ci.yml's dated fmt or clippy pin predates it.
+  # more minors.
   pins:
     name: pins (current stable)
     runs-on: ubuntu-latest
@@ -174,7 +175,7 @@ jobs:
                 key: 'toolchain-canary/pins',
                 label: 'toolchain-canary',
                 title: 'Toolchain canary: toolchain pins are stale',
-                intro: 'A toolchain pin lags current stable; the output names it. Bump `RELEASE_TOOLCHAIN` in release.yml and the release-toolchain leg in ci.yml together. Bump `FMT_TOOLCHAIN` and `CLIPPY_TOOLCHAIN` in ci.yml once the fmt and clippy canaries pass.',
+                intro: 'The release toolchain lags current stable. Bump `RELEASE_TOOLCHAIN` in release.yml and the release-toolchain leg in ci.yml together.',
                 legs: [leg('pins', 'pins')],
                 runUrl,
               },
