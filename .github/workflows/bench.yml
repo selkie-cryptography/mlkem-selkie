@@ -59,11 +59,11 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p bench
-          cargo bench --bench mlkem | tee bench/mlkem.txt
+          cargo bench --locked --bench mlkem | tee bench/mlkem.txt
       - name: Internal hot paths (NTT / sampling / encoding)
         run: |
           set -o pipefail
-          cargo bench --bench algebraic --features expose-internals | tee bench/algebraic.txt
+          cargo bench --locked --bench algebraic --features expose-internals | tee bench/algebraic.txt
       - name: Build dashboard JSON
         run: |
           rustc -O --edition 2021 .github/scripts/divan-to-json.rs -o /tmp/divan-to-json
@@ -155,7 +155,7 @@ jobs:
         # target/gungraun, which instructions-report parses for the dashboard.
         run: |
           set -o pipefail
-          cargo bench --bench instructions --features expose-internals -- --save-summary=json | tee instructions.txt
+          cargo bench --locked --bench instructions --features expose-internals -- --save-summary=json | tee instructions.txt
       - name: Build dashboard JSON
         run: |
           rustc -O --edition 2021 .github/scripts/instructions-report.rs -o /tmp/instructions-report
@@ -203,7 +203,7 @@ jobs:
       - name: Run cycle counts
         run: |
           set -o pipefail
-          cargo bench --bench cycles --features expose-internals | tee cycles.txt
+          cargo bench --locked --bench cycles --features expose-internals | tee cycles.txt
       - name: Build dashboard JSON
         run: |
           rustc -O --edition 2021 .github/scripts/cycles-to-json.rs -o /tmp/cycles-to-json

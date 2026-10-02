@@ -37,7 +37,7 @@ jobs:
           tool: cargo-llvm-cov
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
       - name: Collect coverage (lib + integration tests, internals exposed)
-        run: cargo llvm-cov --features expose-internals --lcov --output-path lcov.info
+        run: cargo llvm-cov --locked --features expose-internals --lcov --output-path lcov.info
       - name: Gate on coverage floor
         run: |
           cargo llvm-cov report \
