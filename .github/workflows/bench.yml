@@ -54,7 +54,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16  # v2
       - name: Public API (keygen / encaps / decaps)
         run: |
           set -o pipefail
@@ -112,7 +112,7 @@ jobs:
         # Same file both ways; the name distinguishes the role. `perf-baseline-*`
         # from main-push is what future PR aggregators download; `perf-payload-*`
         # from the current PR run is what its own aggregator diffs against.
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: ${{ github.event_name == 'push' && 'perf-baseline' || 'perf-payload' }}-bench-${{ matrix.backend }}
           path: payload/bench-${{ matrix.backend }}.json
@@ -144,7 +144,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16  # v2
       - name: Install Valgrind + gungraun-runner
         run: |
           sudo apt-get update
@@ -167,7 +167,7 @@ jobs:
           mkdir -p payload
           cp instructions.json payload/instructions-${{ matrix.backend }}.json
       - name: Upload payload artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: ${{ github.event_name == 'push' && 'perf-baseline' || 'perf-payload' }}-instructions-${{ matrix.backend }}
           path: payload/instructions-${{ matrix.backend }}.json
@@ -199,7 +199,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16  # v2
       - name: Run cycle counts
         run: |
           set -o pipefail
@@ -215,7 +215,7 @@ jobs:
           mkdir -p payload
           cp cycles.json payload/cycles-${{ matrix.backend }}.json
       - name: Upload payload artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: ${{ github.event_name == 'push' && 'perf-baseline' || 'perf-payload' }}-cycles-${{ matrix.backend }}
           path: payload/cycles-${{ matrix.backend }}.json
