@@ -152,7 +152,8 @@ impl<P: ParameterSet> TryFrom<&[u8]> for Ciphertext<P> {
     fn try_from(bytes: &[u8]) -> Result<Self, Error> {
         // Ciphertext type check (FIPS 203 section 7.3, decapsulation input
         // check 1): c must be 32 * (D_U * K + D_V) bytes, else
-        // `InvalidCiphertextLength`. Run on every decapsulation, per section 7.3.
+        // `InvalidCiphertextLength`. Run on every decapsulation, per section
+        // 7.3.
         if bytes.len() != P::CIPHERTEXT_SIZE {
             return Err(Error::InvalidCiphertextLength);
         }
@@ -282,7 +283,8 @@ impl<P: ParameterSet> EncapsulationKey<P> {
     #[doc(hidden)]
     #[must_use]
     pub fn encapsulate_derand(&self, m: &[u8; 32]) -> (SharedSecret, Ciphertext<P>) {
-        // (K, r) <- G(m || H(ek)); preimage assembled in a 64-byte stack buffer.
+        // (K, r) <- G(m || H(ek)); preimage assembled in a 64-byte stack
+        // buffer.
         let mut g_input = [0u8; 64];
         let (m_part, h_part) = g_input.split_at_mut(32);
         m_part.copy_from_slice(m);

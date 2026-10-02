@@ -140,7 +140,8 @@ impl<P: ParameterSet> EncryptionKey<P> {
         // base-multiplication terms once.
         let y_hat = CachedTqVector::from(y.ntt());
 
-        // u = NTT⁻¹(A^T . y_hat) + e1, using the `A^T` cached at key construction.
+        // u = NTT⁻¹(A^T . y_hat) + e1, using the `A^T` cached at key
+        // construction.
         let u = (&self.a_hat_transpose * &y_hat).ntt_inverse() + e1;
 
         // mu = Decompress_1(ByteDecode_1(m))
@@ -336,9 +337,9 @@ impl<P: ParameterSet> KeyPair<P> {
         let s_hat = CachedTqVector::from(s.ntt());
         let e_hat = e.ntt();
 
-        // t_hat = A . s_hat + e_hat. The matrix-vector base multiplication leaves
-        // the product scaled by R^-1; `to_montgomery` restores the standard
-        // domain before adding the true NTT noise e_hat.
+        // t_hat = A . s_hat + e_hat. The matrix-vector base multiplication
+        // leaves the product scaled by R^-1; `to_montgomery` restores
+        // the standard domain before adding the true NTT noise e_hat.
         let t_hat = (&a_hat * &s_hat).to_montgomery() + e_hat;
 
         // `A` is now spent by `t_hat`; transpose it once for the cached encrypt
@@ -368,9 +369,10 @@ impl<P: ParameterSet> TqMatrix<P> {
         let k = P::K;
 
         // `A_hat`'s `K*K` entries in row-major order — `A_hat[i][j] =
-        // SampleNTT(rho ‖ j ‖ i)` — sampled four lanes at a time across the flat
-        // entry list (not per row), so `K=2` fills one batch exactly with no
-        // wasted lanes; the final partial batch (`K=3`) over-samples and discards.
+        // SampleNTT(rho ‖ j ‖ i)` — sampled four lanes at a time across the
+        // flat entry list (not per row), so `K=2` fills one batch
+        // exactly with no wasted lanes; the final partial batch (`K=3`)
+        // over-samples and discards.
         let mut next = 0usize;
         let mut batch = [TqElement::ZERO; 4];
         let mut taken = 4usize;

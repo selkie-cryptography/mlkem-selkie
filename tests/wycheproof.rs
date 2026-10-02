@@ -230,8 +230,9 @@ fn run_decaps_from_seed<P: ParameterSet>(json: &str, expected_set: &str) {
                 }
                 "invalid" => {
                     // An invalid vector is rejected either because its seed is
-                    // truncated (cannot form a key) or because its ciphertext is
-                    // the wrong length (cannot be parsed).
+                    // truncated (cannot form a key) or because its ciphertext
+                    // is the wrong length (cannot be
+                    // parsed).
                     let seed = hex::decode(&test.seed).expect("seed hex");
                     let c_bytes = hex::decode(&test.c).expect("c hex");
 
