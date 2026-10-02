@@ -7,8 +7,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Daily, so a new advisory surfaces within a day.
   schedule:
-    - cron: "0 6 * * 1"
+    - cron: "0 6 * * *"
   workflow_dispatch:
 
 permissions:
@@ -43,7 +44,7 @@ jobs:
           payload: deny.json
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}
 
-  # Weekly alarm when release.yml's RELEASE_TOOLCHAIN lags current stable
+  # Scheduled alarm when release.yml's RELEASE_TOOLCHAIN lags current stable
   # by two or more minors, or ci.yml's dated fmt/clippy pins predate it.
   toolchain-staleness:
     name: release toolchain vs stable
@@ -62,3 +63,39 @@ jobs:
           /tmp/toolchain-drift consistency
           curl -fsSL https://static.rust-lang.org/dist/channel-rust-stable.toml \
             | /tmp/toolchain-drift staleness
+
+  # Keeps one open issue while scheduled runs fail; closes it on the next
+  # green scheduled run. The only job with a write token; it runs no cargo.
+  report:
+    name: Track audit issue
+    needs: [cargo-deny, toolchain-staleness]
+    if: ${{ always() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: ${{ github.workflow }}-report
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      issues: write  # open, comment on, and close the audit issue
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        with:
+          script: |
+            const { trackAll, legsFromNeeds } = require('./.github/scripts/track-issue.js');
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            await trackAll({ github, context, core }, [
+              {
+                key: 'audit/scheduled',
+                label: 'scheduled-failure',
+                title: 'Audit fails on the scheduled run',
+                intro: 'The scheduled Audit run fails on the default branch. The run log has the details.',
+                legs: legsFromNeeds(JSON.parse(process.env.NEEDS)),
+                runUrl,
+              },
+            ]);

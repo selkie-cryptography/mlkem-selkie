@@ -8,7 +8,18 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { trackIssue, trackAll, readResult, normalize, fingerprint, excerpt, fence, code, render } = require('./track-issue.js');
+const {
+  trackIssue,
+  trackAll,
+  readResult,
+  legsFromNeeds,
+  normalize,
+  fingerprint,
+  excerpt,
+  fence,
+  code,
+  render,
+} = require('./track-issue.js');
 
 const BOT = 'github-actions[bot]';
 const RUN = 'https://github.com/o/r/actions/runs/1';
@@ -127,6 +138,26 @@ test('readResult truncates large output', () => {
   const { output } = readResult(dir);
   assert.ok(output.length < (1 << 20) + 100);
   assert.match(output, /truncated at 1048576 bytes$/);
+});
+
+test('legsFromNeeds maps job results to leg states', () => {
+  const needs = {
+    'cargo-deny': { result: 'failure', outputs: {} },
+    'toolchain-staleness': { result: 'success', outputs: {} },
+    other: { result: 'cancelled', outputs: {} },
+    skipped: { result: 'skipped', outputs: {} },
+  };
+  assert.deepEqual(
+    legsFromNeeds(needs).map((leg) => `${leg.name}=${leg.status}`),
+    ['cargo-deny=fail', 'toolchain-staleness=pass', 'other=missing', 'skipped=missing'],
+  );
+});
+
+test('render omits empty version and output columns', () => {
+  const legs = legsFromNeeds({ a: { result: 'failure' }, b: { result: 'success' } });
+  const text = render({ intro: 'Fails.', legs, runUrl: RUN });
+  assert.match(text, /^\| Leg \| Status \|$/m);
+  assert.doesNotMatch(text, /Version|<details>/);
 });
 
 test('readResult reports a missing directory as missing', () => {

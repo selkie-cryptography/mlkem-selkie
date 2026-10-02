@@ -7,6 +7,7 @@
 //   output.txt   captured output
 // Producers upload the parent of that directory; the reporter downloads all
 // of them with `merge-multiple: true`, so leg names must be unique.
+// `legsFromNeeds` builds legs from job results alone, with no artifacts.
 //
 // On failure: opens an issue, or comments on the open one when the output
 // hash changed. On pass: closes the open issue. A missing result leaves the
@@ -98,6 +99,21 @@ function readResult(dir) {
   };
 }
 
+/**
+ * Legs from a `needs` context (`toJSON(needs)`): a successful job passes, a
+ * failed one fails, and a cancelled or skipped one is missing.
+ */
+function legsFromNeeds(needs) {
+  const status = { success: 'pass', failure: 'fail' };
+
+  return Object.entries(needs).map(([name, job]) => ({
+    name,
+    status: status[job.result] || 'missing',
+    version: '',
+    output: '',
+  }));
+}
+
 /** Backticks for a fence longer than any backtick run in `text`. */
 function fenceTicks(text) {
   let longest = 0;
@@ -152,12 +168,22 @@ function code(text) {
   return `\`${line}\``;
 }
 
-/** Markdown for the failing state: intro, per-leg status, output, run link. */
+/**
+ * Markdown for the failing state: intro, per-leg status, output, run link.
+ * Drops the version column and output blocks when the legs have none.
+ */
 function render({ intro, legs, runUrl }) {
-  const failing = legs.filter((leg) => leg.status === 'fail');
+  const failing = legs.filter((leg) => leg.status === 'fail' && leg.output);
   const budget = Math.floor(EXCERPT_BUDGET / Math.max(1, failing.length));
-  const parts = [intro, '', '| Leg | Status | Version |', '| --- | --- | --- |'];
-  for (const leg of legs) parts.push(`| ${leg.name} | ${leg.status} | ${code(leg.version)} |`);
+  const versioned = legs.some((leg) => leg.version);
+  const parts = [intro, ''];
+  if (versioned) {
+    parts.push('| Leg | Status | Version |', '| --- | --- | --- |');
+    for (const leg of legs) parts.push(`| ${leg.name} | ${leg.status} | ${code(leg.version)} |`);
+  } else {
+    parts.push('| Leg | Status |', '| --- | --- |');
+    for (const leg of legs) parts.push(`| ${leg.name} | ${leg.status} |`);
+  }
   for (const leg of failing) {
     parts.push('', `<details><summary>${leg.name} output</summary>`, '', quote(leg.output, budget), '', '</details>');
   }
@@ -248,12 +274,13 @@ async function trackIssue({ github, context, core }, opts) {
 
   if (!failed) {
     if (!issue) return 'pass';
-    const versions = [...new Set(legs.map((leg) => code(leg.version)))].join(', ');
+    const versions = [...new Set(legs.filter((leg) => leg.version).map((leg) => code(leg.version)))];
+    const on = versions.length ? ` on ${versions.join(', ')}` : '';
     await github.rest.issues.createComment({
       owner,
       repo,
       issue_number: issue.number,
-      body: `Passes on ${versions}. Closing.\n\nRun: ${runUrl}`,
+      body: `Passes${on}. Closing.\n\nRun: ${runUrl}`,
     });
     await github.rest.issues.update({
       owner,
@@ -328,4 +355,15 @@ async function trackAll(ctx, trackers) {
   }
 }
 
-module.exports = { trackIssue, trackAll, readResult, normalize, fingerprint, excerpt, fence, code, render };
+module.exports = {
+  trackIssue,
+  trackAll,
+  readResult,
+  legsFromNeeds,
+  normalize,
+  fingerprint,
+  excerpt,
+  fence,
+  code,
+  render,
+};
