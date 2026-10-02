@@ -17,6 +17,12 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Dated pins for the fmt and clippy gates, so a new nightly or beta can't
+  # fail a PR with no code change. toolchain-canary.yml runs the floating
+  # channels weekly; bump these once it passes. audit.yml fails once they
+  # predate current stable.
+  FMT_TOOLCHAIN: nightly-2026-10-01
+  CLIPPY_TOOLCHAIN: beta-2026-10-02
 
 jobs:
   fmt:
@@ -28,9 +34,9 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
-          toolchain: nightly
+          toolchain: ${{ env.FMT_TOOLCHAIN }}
           components: rustfmt
-      - run: cargo +nightly fmt --all --check
+      - run: cargo +"$FMT_TOOLCHAIN" fmt --all --check
 
   clippy:
     name: clippy (${{ matrix.backend }})
@@ -53,16 +59,16 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           persist-credentials: false
-      # Beta clippy: the lint set stable enforces next.
+      # Dated beta clippy: the lint set stable enforces next.
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
-          toolchain: beta
+          toolchain: ${{ env.CLIPPY_TOOLCHAIN }}
           components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
       - name: Clippy (default features)
-        run: cargo clippy --all-targets
+        run: cargo +"$CLIPPY_TOOLCHAIN" clippy --all-targets
       - name: Clippy (all features)
-        run: cargo clippy --all-targets --all-features
+        run: cargo +"$CLIPPY_TOOLCHAIN" clippy --all-targets --all-features
 
   doc:
     name: doc (${{ matrix.backend }})
