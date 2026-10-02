@@ -1,7 +1,7 @@
 //! Guards the release-toolchain pin invariant chain: `rust-version`
 //! (Cargo.toml, once declared) <= `RELEASE_TOOLCHAIN` (release.yml)
 //! == every pinned `toolchain: "X.Y.Z"` leg in ci.yml <= current stable.
-//! Also guards the dated fmt and clippy gate pins in ci.yml and mutants.yml.
+//! Also guards the dated fmt and clippy gate pins in ci.yml.
 //!
 //! Modes:
 //! - `toolchain-drift consistency` — offline; checks the checked-out tree. Run
@@ -18,8 +18,6 @@ const RELEASE_YML: &str = ".github/workflows/release.yml";
 /// Path to the CI workflow holding the pinned test-matrix leg and the dated
 /// fmt and clippy pins.
 const CI_YML: &str = ".github/workflows/ci.yml";
-/// Path to the mutants workflow, whose nightly pin must equal ci.yml's.
-const MUTANTS_YML: &str = ".github/workflows/mutants.yml";
 /// Path to the crate manifest holding `rust-version` (the MSRV).
 const CARGO_TOML: &str = "Cargo.toml";
 
@@ -208,24 +206,11 @@ fn read_gate_pins(ci_text: &str) -> Result<[(&'static str, DatedChannel); 2], St
     ])
 }
 
-/// Offline invariants: release pin == every ci.yml pin, MSRV <= pin, and
-/// mutants.yml's nightly == ci.yml's fmt nightly.
+/// Offline invariants: release pin == every ci.yml pin, and MSRV <= pin.
 fn consistency() -> Result<(), String> {
     let release = read_release_pin()?;
     let ci_text = fs::read_to_string(CI_YML).map_err(|e| format!("{CI_YML}: {e}"))?;
-    let mutants_text =
-        fs::read_to_string(MUTANTS_YML).map_err(|e| format!("{MUTANTS_YML}: {e}"))?;
     let cargo_text = fs::read_to_string(CARGO_TOML).map_err(|e| format!("{CARGO_TOML}: {e}"))?;
-
-    let [(_, fmt_pin), _] = read_gate_pins(&ci_text)?;
-    let mutants_pin = DatedChannel::env_pin(&mutants_text, "MUTANTS_TOOLCHAIN", "nightly")
-        .map_err(|e| format!("{MUTANTS_YML}: {e}"))?;
-    if mutants_pin != fmt_pin {
-        return Err(format!(
-            "{MUTANTS_YML} pins {mutants_pin} but {CI_YML} pins {fmt_pin}; bump both in one PR"
-        ));
-    }
-    println!("ok: mutants nightly {mutants_pin} matches the fmt pin");
 
     let ci_pins = Version::workflow_pins(&ci_text);
     if ci_pins.is_empty() {
@@ -378,7 +363,6 @@ mod tests {
         assert_eq!(clippy.to_string(), "beta-2026-10-02");
 
         assert!(DatedChannel::env_pin(ci, "CLIPPY_TOOLCHAIN", "nightly").is_err());
-        assert!(DatedChannel::env_pin(ci, "MUTANTS_TOOLCHAIN", "nightly").is_err());
         let floating = "  FMT_TOOLCHAIN: nightly\n";
         assert!(DatedChannel::env_pin(floating, "FMT_TOOLCHAIN", "nightly").is_err());
     }
