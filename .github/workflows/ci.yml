@@ -19,8 +19,7 @@ env:
   CARGO_TERM_COLOR: always
   # Dated pins for the fmt and clippy gates, so a new nightly or beta can't
   # fail a PR with no code change. toolchain-canary.yml runs the floating
-  # channels weekly; bump these once its fmt and clippy checks pass. Its pins
-  # check opens an issue once these predate current stable.
+  # channels weekly; bump these once its fmt and clippy checks pass.
   FMT_TOOLCHAIN: nightly-2026-10-01
   CLIPPY_TOOLCHAIN: beta-2026-10-02
 
