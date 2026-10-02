@@ -76,8 +76,8 @@ impl FieldElement {
     pub const fn value(self) -> u16 {
         let r = Self::barrett(self.0);
 
-        // Branch-free conditional add of q when r is negative: r >> 15 is all-1s
-        // (i.e. -1) for r < 0 and 0 otherwise.
+        // Branch-free conditional add of q when r is negative: r >> 15 is
+        // all-1s (i.e. -1) for r < 0 and 0 otherwise.
         (r + ((r >> 15) & Q)) as u16
     }
 

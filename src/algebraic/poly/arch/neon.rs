@@ -874,7 +874,8 @@ pub(crate) fn ntt_inverse(coefficients: &mut [FieldElement; parameters::N]) {
             for j in start..start + len {
                 let t = coefficients[j];
                 let sum = t + coefficients[j + len];
-                // Lazy reduction: len-2 only (len-16 reduces in the vector loop).
+                // Lazy reduction: len-2 only (len-16 reduces in the vector
+                // loop).
                 coefficients[j] = if len == 2 { sum.reduce() } else { sum };
                 coefficients[j + len] =
                     (coefficients[j + len] - t).barrett_const_mul(zeta, zeta_bar);
