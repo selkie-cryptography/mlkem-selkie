@@ -10,23 +10,43 @@ updates:
     schedule:
       interval: weekly
     # Skip releases younger than a week; security updates ignore this.
+    # Actions supports only default-days.
     cooldown:
       default-days: 7
+    # One PR for most action bumps. Actions that run in release.yml get one
+    # PR each.
+    groups:
+      actions:
+        patterns: ["*"]
+        exclude-patterns:
+          - "actions/checkout"
+          - "actions/github-script"
+          - "dtolnay/rust-toolchain"
+          - "rust-lang/crates-io-auth-action"
+          - "taiki-e/install-action"
 
-  # Compatible (minor/patch) crate bumps arrive grouped in one weekly PR.
-  # libcrux-sha3 is excluded from the group: it is exact-pinned on the
-  # crypto-critical path and every bump gets its own PR for an audit pass.
-  # Major bumps also get individual PRs.
   - package-ecosystem: cargo
     directory: "/"
     schedule:
       interval: weekly
+    # The default limit of 5 filled with open PRs and blocked new ones.
+    open-pull-requests-limit: 10
     cooldown:
       default-days: 7
+      semver-major-days: 14
+    # A crate matching several groups joins the first.
     groups:
+      # The dev-only rand crates move together, majors included.
+      rand:
+        patterns: ["rand", "rand_core", "rand_chacha"]
+      # Compatible bumps in one PR. The library crates that handle secrets
+      # get one PR each for review.
       cargo-compatible:
         update-types:
           - "minor"
           - "patch"
         exclude-patterns:
-          - "libcrux-sha3"
+          - "getrandom"
+          - "subtle"
+          - "zeroize"
+          - "sha3-selkie"
