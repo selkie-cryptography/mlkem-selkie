@@ -42,3 +42,5 @@ jobs:
         run: |
           rustc --test -O --edition 2021 .github/scripts/toolchain-drift.rs -o /tmp/toolchain-drift-test
           /tmp/toolchain-drift-test
+      - name: Run track-issue tests
+        run: node --test .github/scripts/track-issue.test.js
