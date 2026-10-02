@@ -26,8 +26,7 @@ jobs:
           fail_on_error: false
 
   # Fails when release.yml's RELEASE_TOOLCHAIN and ci.yml's pinned test leg
-  # disagree, Cargo.toml's rust-version exceeds the pin, or mutants.yml's
-  # nightly differs from ci.yml's FMT_TOOLCHAIN.
+  # disagree, or Cargo.toml's rust-version exceeds the pin.
   toolchain-drift:
     runs-on: ubuntu-latest
     steps:

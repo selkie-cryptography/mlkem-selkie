@@ -19,10 +19,7 @@ env:
   # crashes on `_mm256_mulhrs_epi16` (the AVX2 Barrett multiply-high-rounding
   # intrinsic our NTT butterflies use) — rustc_codegen_cranelift issue #171.
   # Reverted to LLVM everywhere; restore when upstream lands support.
-  # Dated nightly: nothing here needs nightly while Cranelift is off, and the
-  # pin keeps a new nightly from changing PR results. Must equal ci.yml's
-  # FMT_TOOLCHAIN (toolchain-drift.rs checks).
-  MUTANTS_TOOLCHAIN: nightly-2026-10-01
+  # The jobs run stable; restoring Cranelift needs nightly.
 
 jobs:
   # Per-arch incremental run: without both legs, PRs that only touch code
@@ -46,7 +43,7 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
-          toolchain: ${{ env.MUTANTS_TOOLCHAIN }}
+          toolchain: stable
       - uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b  # v2.83.4
         with:
           tool: cargo-mutants,cargo-nextest
@@ -135,7 +132,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
-          toolchain: ${{ env.MUTANTS_TOOLCHAIN }}
+          toolchain: stable
       - uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b  # v2.83.4
         with:
           tool: cargo-mutants,cargo-nextest
