@@ -35,4 +35,51 @@ confidence-threshold = 0.9
 
 [sources]
 unknown-registry = "deny"
-unknown-git = "allow" # the hax-lib-macros proof dependency is a git source.
+unknown-git = "deny"
+
+# Only these crates may run build scripts. A new one fails `cargo deny check`
+# until someone reviews its build.rs and adds it here.
+[bans.build]
+executables = "deny"
+allow-build-scripts = [
+    "alloca",
+    "bindgen",
+    "clang-sys",
+    "crabgrind",
+    "crossbeam-epoch",
+    "crossbeam-utils",
+    "crunchy",
+    "getrandom",
+    "gungraun",
+    "gungraun-macros",
+    "hax-lib",
+    "kperf-sys",
+    "libc",
+    "libcrux-intrinsics",
+    "libcrux-ml-kem",
+    "libcrux-sha3",
+    "libm",
+    "matrixmultiply",
+    "memoffset",
+    "num-traits",
+    "object",
+    "parking_lot_core",
+    "paste",
+    "prettyplease",
+    "proc-macro2",
+    "rayon-core",
+    "rustix",
+    "rustversion",
+    "serde",
+    "serde_core",
+    "serde_json",
+    "sha3-selkie",
+    "wasm-bindgen",
+    "wasm-bindgen-shared",
+    "winapi",
+    "winapi-i686-pc-windows-gnu",
+    "winapi-x86_64-pc-windows-gnu",
+    "wit-bindgen",
+    "zerocopy",
+    "zmij",
+]
