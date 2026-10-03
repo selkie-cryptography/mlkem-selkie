@@ -68,10 +68,10 @@ runs:
         else
           cp -a "$SRC" "$stage/"
         fi
-        # Nginx serves this via `autoindex off`, so the dashboard's card must
-        # point at a real file when no `index.html` was uploaded — otherwise
-        # the bare `/$DEST/` URL 403s. `LANDING` gives each publish job that
-        # choice; empty means the payload has its own `index.html`.
+        # Nginx serves this with `autoindex off`, so the bare `/$DEST/` URL
+        # 403s unless the payload has an `index.html`. `LANDING` names the
+        # file the dashboard's card points at instead; empty means the
+        # payload has its own `index.html`.
         url="/$DEST/"
         if [ -n "$LANDING" ]; then
           url="/$DEST/$LANDING"

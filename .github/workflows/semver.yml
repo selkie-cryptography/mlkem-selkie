@@ -36,8 +36,8 @@ jobs:
         with:
           tool: cargo-semver-checks@0.49.0
       # Default features only: `expose-internals` (and the harnesses layered
-      # on it) re-expose internal modules for white-box tests and benches —
-      # explicitly not a stable API surface, so internal refactors there are
+      # on it) re-expose internal modules for white-box tests and benches.
+      # They are not a stable API surface, so internal refactors there are
       # not semver breaks.
       # Pre-release: breaking changes are expected, so assume a major release.
       # Drop `--release-type` at the first crates.io publish.
