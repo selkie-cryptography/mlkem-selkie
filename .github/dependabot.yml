@@ -1,52 +1,24 @@
-# SHA-pinned actions go stale without automation; bumps arrive as PRs
-# showing the new SHA next to the version comment.
+# Monthly, one PR per ecosystem; security updates skip the schedule.
 version: 2
 updates:
   - package-ecosystem: github-actions
-    directories:
-      - "/"
-      - "/.github/actions/ci-upload"
-      - "/.github/actions/ci-publish"
+    directories: ["/", "/.github/actions/ci-upload", "/.github/actions/ci-publish"]
     schedule:
-      interval: weekly
-    # Skip releases younger than a week; security updates ignore this.
-    # Actions supports only default-days.
+      interval: monthly
     cooldown:
       default-days: 7
-    # One PR for most action bumps. Actions that run in release.yml get one
-    # PR each.
     groups:
       actions:
         patterns: ["*"]
-        exclude-patterns:
-          - "actions/checkout"
-          - "actions/github-script"
-          - "dtolnay/rust-toolchain"
-          - "rust-lang/crates-io-auth-action"
-          - "taiki-e/install-action"
 
   - package-ecosystem: cargo
     directory: "/"
     schedule:
-      interval: weekly
-    # The default limit of 5 filled with open PRs and blocked new ones.
-    open-pull-requests-limit: 10
+      interval: monthly
     cooldown:
       default-days: 7
       semver-major-days: 14
-    # A crate matching several groups joins the first.
     groups:
-      # The dev-only rand crates move together, majors included.
-      rand:
-        patterns: ["rand", "rand_core", "rand_chacha"]
-      # Compatible bumps in one PR. The library crates that handle secrets
-      # get one PR each for review.
-      cargo-compatible:
-        update-types:
-          - "minor"
-          - "patch"
-        exclude-patterns:
-          - "getrandom"
-          - "subtle"
-          - "zeroize"
-          - "sha3-selkie"
+      # Majors stay separate: they usually need code changes.
+      cargo:
+        update-types: ["minor", "patch"]
