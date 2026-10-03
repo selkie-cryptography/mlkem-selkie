@@ -111,6 +111,11 @@ jobs:
   test:
     name: test (portable)
     runs-on: ubuntu-latest
+    # An empty `RUSTFLAGS` drops .cargo/config.toml's x86-64-v3 baseline.
+    # `MLKEM_SELKIE_BACKEND=scalar` keeps build.rs on the portable backend.
+    env:
+      RUSTFLAGS: ""
+      MLKEM_SELKIE_BACKEND: scalar
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
@@ -135,7 +140,10 @@ jobs:
     # Apple Silicon runners are aarch64, where NEON is baseline, so build.rs
     # selects the NEON polynomial backend and its differential tests
     # (poly/arch/neon) run against the scalar backend here.
+    # `MLKEM_SELKIE_BACKEND=simd` fails the build if build.rs picks scalar.
     runs-on: macos-latest
+    env:
+      MLKEM_SELKIE_BACKEND: simd
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
@@ -161,8 +169,10 @@ jobs:
     # backend; the GitHub x86_64 runners support AVX2, so its differential tests
     # (poly/arch/avx2) run against the scalar backend here. `RUSTFLAGS` is set in
     # the job (it overrides .cargo/config.toml's target rustflags).
+    # `MLKEM_SELKIE_BACKEND=simd` fails the build if build.rs picks scalar.
     env:
       RUSTFLAGS: "-C target-cpu=x86-64-v3"
+      MLKEM_SELKIE_BACKEND: simd
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:

@@ -8,9 +8,9 @@ warnings = "deny"
 # detects AVX2 and selects the `avx2` polynomial backend. aarch64 has NEON in
 # its baseline and needs no flags here.
 #
-# Note: an explicit `RUSTFLAGS` env var overrides these target rustflags
-# entirely. CI jobs that want the portable backend pass `RUSTFLAGS: ""`, and
-# the AVX2 CI job passes `-C target-cpu` in its own `RUSTFLAGS`.
+# A `RUSTFLAGS` env var, even an empty one, replaces these target rustflags.
+# CI's portable legs set `RUSTFLAGS: ""`. Its AVX2 legs set `-C target-cpu` in
+# their own `RUSTFLAGS`.
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-C", "target-cpu=x86-64-v3"]
 
