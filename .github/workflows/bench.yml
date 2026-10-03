@@ -239,7 +239,9 @@ jobs:
   # the combined diff. Independent of the dashboard-upload path.
   bench-diff-comment:
     name: Benchmarks (PR comment)
-    if: github.event_name == 'pull_request'
+    # Dependabot PRs can bump the actions this job runs, so skip them: the new
+    # code would get this job's write token before review.
+    if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
     needs: [benchmarks, instructions, cycles]
     runs-on: ubuntu-latest
     permissions:

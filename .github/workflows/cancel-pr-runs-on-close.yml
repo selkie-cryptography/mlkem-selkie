@@ -17,6 +17,9 @@ permissions:
 jobs:
   cancel:
     name: Cancel queued + in-progress runs for this PR's head_sha
+    # Dependabot PRs can bump the actions this job runs, so skip them: the new
+    # code would get `actions: write` before review.
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
