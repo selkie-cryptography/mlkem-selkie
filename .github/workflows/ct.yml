@@ -55,6 +55,9 @@ jobs:
         uses: ./.github/actions/ci-upload
         with:
           kind: tacet
+          # Branch runs write only the per-sha file (view with ?sha=<sha>), so
+          # main's panels don't change.
+          pr-only: ${{ github.ref != 'refs/heads/main' }}
           payload: tacet.json
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}
 
@@ -90,6 +93,9 @@ jobs:
         uses: ./.github/actions/ci-upload
         with:
           kind: ctgrind
+          # Branch runs write only the per-sha file (view with ?sha=<sha>), so
+          # main's panels don't change.
+          pr-only: ${{ github.ref != 'refs/heads/main' }}
           payload: ctgrind.json
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}
 

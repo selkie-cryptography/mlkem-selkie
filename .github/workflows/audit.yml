@@ -41,6 +41,9 @@ jobs:
         uses: ./.github/actions/ci-upload
         with:
           kind: deny
+          # Branch runs write only the per-sha file (view with ?sha=<sha>), so
+          # main's panels don't change.
+          pr-only: ${{ github.ref != 'refs/heads/main' }}
           payload: deny.json
           fly-api-token: ${{ secrets.FLY_API_TOKEN }}
 
