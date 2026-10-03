@@ -22,6 +22,9 @@ env:
   # channels weekly; bump these once its fmt and clippy checks pass.
   FMT_TOOLCHAIN: nightly-2026-10-01
   CLIPPY_TOOLCHAIN: beta-2026-10-02
+  # Stable pin for the other jobs, for the same reason. Bump it when
+  # toolchain-canary.yml's pins check reports a newer stable minor.
+  STABLE_TOOLCHAIN: "1.99.0"
 
 jobs:
   fmt:
@@ -90,7 +93,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
-          toolchain: stable
+          toolchain: ${{ env.STABLE_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16  # v2
       - run: cargo doc --locked --no-deps --document-private-items --all-features
       - name: Publish rustdoc to dashboard
@@ -114,7 +117,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
-          toolchain: stable
+          toolchain: ${{ env.STABLE_TOOLCHAIN }}
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172  # v2.87.20
         with:
           tool: nextest
@@ -139,7 +142,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
-          toolchain: stable
+          toolchain: ${{ env.STABLE_TOOLCHAIN }}
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172  # v2.87.20
         with:
           tool: nextest
@@ -166,7 +169,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
-          toolchain: stable
+          toolchain: ${{ env.STABLE_TOOLCHAIN }}
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172  # v2.87.20
         with:
           tool: nextest
@@ -197,9 +200,9 @@ jobs:
           cargo nextest run --cargo-profile release-checked --locked
           cargo test --doc --profile release-checked --locked
 
-  # Publishability canary on floating stable: cargo releases that change
-  # packaging, new crates.io manifest rules, or size-cap creep surface on
-  # the PR that causes them, not on release day.
+  # Publishability check, so packaging breaks fail a PR, not release day:
+  # size-cap creep on the PR that causes it, a new cargo's packaging rules
+  # on the STABLE_TOOLCHAIN bump.
   package:
     name: cargo package
     runs-on: ubuntu-latest
@@ -209,7 +212,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
-          toolchain: stable
+          toolchain: ${{ env.STABLE_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16  # v2
       - run: cargo package --locked
 
@@ -222,7 +225,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
-          toolchain: stable
+          toolchain: ${{ env.STABLE_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16  # v2
       - name: No parameter sets is a compile error
         run: (cargo build --locked --no-default-features 2>&1 || true) | grep -q "at least one ML-KEM parameter set"
@@ -243,7 +246,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
-          toolchain: stable
+          toolchain: ${{ env.STABLE_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16  # v2
       - run: cargo bench --locked --no-run --features expose-internals
 
@@ -260,7 +263,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
-          toolchain: stable
+          toolchain: ${{ env.STABLE_TOOLCHAIN }}
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172  # v2.87.20
         with:
           tool: nextest
@@ -294,7 +297,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
-          toolchain: stable
+          toolchain: ${{ env.STABLE_TOOLCHAIN }}
       - name: Build dashboard JSON
         run: |
           rustc -O --edition 2021 .github/scripts/unsafe-count.rs -o /tmp/unsafe-count
@@ -324,7 +327,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
         with:
-          toolchain: stable
+          toolchain: ${{ env.STABLE_TOOLCHAIN }}
       - name: Build dashboard JSON
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

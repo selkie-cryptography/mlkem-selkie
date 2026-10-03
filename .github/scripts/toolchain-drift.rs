@@ -1,19 +1,22 @@
 //! Guards the release-toolchain pin invariant chain: `rust-version`
 //! (Cargo.toml, once declared) <= `RELEASE_TOOLCHAIN` (release.yml)
 //! == every pinned `toolchain: "X.Y.Z"` leg in ci.yml <= current stable.
+//! Also flags ci.yml's `STABLE_TOOLCHAIN` once a newer stable minor ships.
 //!
 //! Modes:
 //! - `toolchain-drift consistency` — offline; checks the checked-out tree. Run
 //!   on pull requests (devops.yml).
 //! - `curl -s .../channel-rust-stable.toml | toolchain-drift staleness` — reads
-//!   the channel manifest on stdin and fails when the pin lags stable by two or
-//!   more minor releases. Run weekly (toolchain-canary.yml).
+//!   the channel manifest on stdin and fails when `RELEASE_TOOLCHAIN` lags
+//!   stable by two or more minor releases, or `STABLE_TOOLCHAIN` by one or
+//!   more. Run weekly (toolchain-canary.yml).
 
 use std::{fmt, fs, io::Read, process::ExitCode, str::FromStr};
 
 /// Path to the release workflow holding the `RELEASE_TOOLCHAIN` pin.
 const RELEASE_YML: &str = ".github/workflows/release.yml";
-/// Path to the CI workflow holding the pinned test-matrix leg.
+/// Path to the CI workflow holding the pinned test-matrix leg and
+/// `STABLE_TOOLCHAIN`.
 const CI_YML: &str = ".github/workflows/ci.yml";
 /// Path to the crate manifest holding `rust-version` (the MSRV).
 const CARGO_TOML: &str = "Cargo.toml";
@@ -27,11 +30,19 @@ struct Version {
 }
 
 impl Version {
-    /// Extracts the `RELEASE_TOOLCHAIN: "X.Y.Z"` pin from release.yml text.
-    fn release_pin(text: &str) -> Option<Version> {
-        let line = text.lines().find(|l| l.contains("RELEASE_TOOLCHAIN:"))?;
+    /// Extracts the `KEY: "X.Y.Z"` env pin from workflow text.
+    fn env_pin(text: &str, key: &str) -> Option<Version> {
+        let prefix = format!("{key}:");
+        let line = text.lines().find(|l| l.trim_start().starts_with(&prefix))?;
 
         quoted(line)?.parse().ok()
+    }
+
+    /// Reads the `KEY: "X.Y.Z"` env pin from the workflow at `path`.
+    fn read_env_pin(path: &str, key: &str) -> Result<Version, String> {
+        let text = fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+
+        Version::env_pin(&text, key).ok_or_else(|| format!("no {key} pin in {path}"))
     }
 
     /// Extracts every pinned (quoted, numeric) `toolchain: "X.Y.Z"` value
@@ -72,10 +83,10 @@ impl Version {
         quoted(line)?.split_whitespace().next()?.parse().ok()
     }
 
-    /// Whether `self` lags `stable` by two or more minor releases (or any
-    /// major release).
-    fn lags(&self, stable: &Version) -> bool {
-        stable.major > self.major || stable.minor >= self.minor + 2
+    /// Whether `self` lags `stable` by `minors` or more minor releases (or
+    /// any major release).
+    fn lags(&self, stable: &Version, minors: u32) -> bool {
+        stable.major > self.major || stable.minor >= self.minor + minors
     }
 }
 
@@ -113,16 +124,11 @@ fn quoted(line: &str) -> Option<&str> {
     line.get(start..end)
 }
 
-/// Reads the release pin, exiting with a diagnostic when absent.
-fn read_release_pin() -> Result<Version, String> {
-    let text = fs::read_to_string(RELEASE_YML).map_err(|e| format!("{RELEASE_YML}: {e}"))?;
-
-    Version::release_pin(&text).ok_or_else(|| format!("no RELEASE_TOOLCHAIN pin in {RELEASE_YML}"))
-}
-
-/// Offline invariants: release pin == every ci.yml pin, and MSRV <= pin.
+/// Offline invariants: release pin == every ci.yml pin, MSRV <= pin, and
+/// ci.yml's `STABLE_TOOLCHAIN` parses.
 fn consistency() -> Result<(), String> {
-    let release = read_release_pin()?;
+    let release = Version::read_env_pin(RELEASE_YML, "RELEASE_TOOLCHAIN")?;
+    let ci_stable = Version::read_env_pin(CI_YML, "STABLE_TOOLCHAIN")?;
     let ci_text = fs::read_to_string(CI_YML).map_err(|e| format!("{CI_YML}: {e}"))?;
     let cargo_text = fs::read_to_string(CARGO_TOML).map_err(|e| format!("{CARGO_TOML}: {e}"))?;
 
@@ -154,14 +160,14 @@ fn consistency() -> Result<(), String> {
         "ok: release toolchain {release} matches {} CI pin(s)",
         ci_pins.len()
     );
+    println!("ok: STABLE_TOOLCHAIN {ci_stable} parses");
     Ok(())
 }
 
-/// Staleness check: the release pin must not lag the stable channel
-/// manifest supplied on stdin by two or more minors.
+/// Staleness check against the stable channel manifest on stdin. Fails when
+/// `RELEASE_TOOLCHAIN` lags it by two or more minors, `STABLE_TOOLCHAIN` by
+/// one or more, or either pin is ahead of it.
 fn staleness() -> Result<(), String> {
-    let release = read_release_pin()?;
-
     let mut manifest = String::new();
     std::io::stdin()
         .read_to_string(&mut manifest)
@@ -169,19 +175,31 @@ fn staleness() -> Result<(), String> {
     let stable = Version::stable_channel(&manifest)
         .ok_or("no [pkg.rust] version in the channel manifest on stdin")?;
 
-    if release > stable {
-        return Err(format!(
-            "RELEASE_TOOLCHAIN {release} is ahead of stable {stable}; not a released toolchain"
-        ));
-    }
-    if release.lags(&stable) {
-        return Err(format!(
-            "RELEASE_TOOLCHAIN {release} lags stable {stable} by two or more minors; bump the pin"
-        ));
+    // Checks every pin, so one run names all the pins to bump.
+    let mut stale = Vec::new();
+    for (key, path, minors) in [
+        ("RELEASE_TOOLCHAIN", RELEASE_YML, 2),
+        ("STABLE_TOOLCHAIN", CI_YML, 1),
+    ] {
+        let pin = Version::read_env_pin(path, key)?;
+        if pin > stable {
+            stale.push(format!(
+                "{key} {pin} is ahead of stable {stable}; not a released toolchain"
+            ));
+        } else if pin.lags(&stable, minors) {
+            stale.push(format!(
+                "{key} {pin} lags stable {stable} by {minors} or more minors; bump {key} in {path}"
+            ));
+        } else {
+            println!("ok: {key} {pin} is current against stable {stable}");
+        }
     }
 
-    println!("ok: release toolchain {release} is current against stable {stable}");
-    Ok(())
+    if stale.is_empty() {
+        Ok(())
+    } else {
+        Err(stale.join("\n"))
+    }
 }
 
 fn main() -> ExitCode {
@@ -196,7 +214,9 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
-            eprintln!("toolchain-drift: {message}");
+            for line in message.lines() {
+                eprintln!("toolchain-drift: {line}");
+            }
             ExitCode::FAILURE
         }
     }
@@ -225,7 +245,10 @@ mod tests {
     #[test]
     fn extracts_pins_and_ignores_floating_channels() {
         let release = "env:\n  RELEASE_TOOLCHAIN: \"1.97.1\"\n";
-        assert_eq!(Version::release_pin(release), "1.97.1".parse().ok());
+        assert_eq!(
+            Version::env_pin(release, "RELEASE_TOOLCHAIN"),
+            "1.97.1".parse().ok()
+        );
 
         let ci = concat!(
             "          toolchain: stable\n",
@@ -270,9 +293,31 @@ mod tests {
         let two_minors: Version = "1.99.0".parse().unwrap();
         let next_major: Version = "2.0.0".parse().unwrap();
 
-        assert!(!pin.lags(&same));
-        assert!(!pin.lags(&one_minor));
-        assert!(pin.lags(&two_minors));
-        assert!(pin.lags(&next_major));
+        assert!(!pin.lags(&same, 2));
+        assert!(!pin.lags(&one_minor, 2));
+        assert!(pin.lags(&two_minors, 2));
+        assert!(pin.lags(&next_major, 2));
+
+        // STABLE_TOOLCHAIN's window: a newer minor lags, a newer patch doesn't.
+        assert!(!pin.lags(&same, 1));
+        assert!(pin.lags(&one_minor, 1));
+        assert!(pin.lags(&next_major, 1));
+    }
+
+    #[test]
+    fn extracts_stable_pin_and_skips_references() {
+        let ci = concat!(
+            "  # Bump STABLE_TOOLCHAIN: see toolchain-canary.yml.\n",
+            "  STABLE_TOOLCHAIN: \"1.99.0\"\n",
+            "          toolchain: ${{ env.STABLE_TOOLCHAIN }}\n",
+        );
+        assert_eq!(
+            Version::env_pin(ci, "STABLE_TOOLCHAIN"),
+            "1.99.0".parse().ok()
+        );
+        assert_eq!(Version::env_pin(ci, "RELEASE_TOOLCHAIN"), None);
+
+        let unquoted = "  STABLE_TOOLCHAIN: 1.99.0\n";
+        assert_eq!(Version::env_pin(unquoted, "STABLE_TOOLCHAIN"), None);
     }
 }

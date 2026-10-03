@@ -26,7 +26,8 @@ jobs:
           fail_on_error: false
 
   # Fails when release.yml's RELEASE_TOOLCHAIN and ci.yml's pinned test leg
-  # disagree, or Cargo.toml's rust-version exceeds the pin.
+  # disagree, Cargo.toml's rust-version exceeds the pin, or ci.yml has no
+  # STABLE_TOOLCHAIN pin.
   toolchain-drift:
     runs-on: ubuntu-latest
     steps:
