@@ -12,9 +12,11 @@ on:
       - ".github/workflows/bench.yml"
   workflow_dispatch:
 
+# A new PR push cancels the PR's older run. Other runs get their own group, so
+# no main run is cancelled, even while pending.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
