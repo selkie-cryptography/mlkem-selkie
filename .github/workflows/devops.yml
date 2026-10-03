@@ -13,17 +13,29 @@ permissions:
 
 jobs:
 
+  # Lints workflows and runs shellcheck on their `run:` scripts. Fails on any
+  # finding.
   actionlint:
+    name: actionlint
     runs-on: ubuntu-latest
-    continue-on-error: true
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           persist-credentials: false
-      - uses: reviewdog/action-actionlint@2085657ab2c7f48c58edcc767fba576f63bea76b  # v1.77.0
-        with:
-          level: warning
-          fail_on_error: false
+      # install-action has no actionlint. SHA256 pins the release tarball.
+      - name: Install actionlint
+        working-directory: ${{ runner.temp }}
+        env:
+          VERSION: 1.7.12
+          SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          curl -fsSL -o actionlint.tar.gz "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
+          echo "${SHA256}  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+      - name: actionlint
+        run: |
+          "$RUNNER_TEMP/actionlint"
 
   # Fails when release.yml's RELEASE_TOOLCHAIN and ci.yml's pinned test leg
   # disagree, Cargo.toml's rust-version exceeds the pin, or ci.yml has no
