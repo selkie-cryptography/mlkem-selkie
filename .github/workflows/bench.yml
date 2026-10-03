@@ -7,6 +7,8 @@ on:
     paths:
       - "src/**"
       - "benches/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
       - ".github/workflows/bench.yml"
   workflow_dispatch:
 
@@ -146,10 +148,12 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16  # v2
       - name: Install Valgrind + gungraun-runner
+        # gungraun-runner must match the gungraun version in Cargo.lock.
         run: |
           sudo apt-get update
           sudo apt-get install --yes valgrind
-          cargo install gungraun-runner --version 0.19.2 --locked
+          pkgid=$(cargo pkgid --locked --offline gungraun)
+          cargo install gungraun-runner --version "${pkgid##*@}" --locked
       - name: Run instruction counts
         # --save-summary writes per-bench summary.json trees under
         # target/gungraun, which instructions-report parses for the dashboard.
