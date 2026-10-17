@@ -38,7 +38,7 @@ zeroize = { version = "1.7.0", features = ["derive"] }
 [dev-dependencies]
 mlkem-selkie = { path = ".", features = ["expose-internals"] }
 hex = "0.4"
-libcrux-ml-kem = { version = "0.0.10", default-features = false, features = [
+libcrux-ml-kem = { version = "0.0.11", default-features = false, features = [
     "mlkem512",
     "mlkem768",
     "mlkem1024",
