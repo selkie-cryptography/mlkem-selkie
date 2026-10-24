@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           persist-credentials: false
-      - uses: reviewdog/action-actionlint@13465d022aa41c282f730be17574b5ce692d0186  # v1.78.1
+      - uses: reviewdog/action-actionlint@b76d06f8570118465db3190c9a08f1b29d341aa1  # v1.80.3
         with:
           level: warning
           fail_on_error: false
@@ -52,7 +52,7 @@ jobs:
       # Online audits (impostor commits, known-vulnerable actions) use the
       # read-only GITHUB_TOKEN. Annotations instead of SARIF, which needs
       # `security-events: write`.
-      - uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482  # v0.6.4
+      - uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e  # v0.7.1
         with:
           version: 1.30.1
           config: .github/zizmor.yml
