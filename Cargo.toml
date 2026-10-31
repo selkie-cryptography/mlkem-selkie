@@ -30,7 +30,7 @@ ctgrind = ["expose-internals"]
 dhat-heap = []
 
 [dependencies]
-getrandom = "0.2"
+getrandom = "0.4"
 sha3-selkie = "0.0.0"
 subtle = "2"
 zeroize = { version = "1.7.0", features = ["derive"] }
