@@ -35,7 +35,7 @@ jobs:
       - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91  # v2.87.31
         with:
           tool: cargo-llvm-cov
-      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16  # v2
+      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31  # v2
       - name: Collect coverage (lib + integration tests, internals exposed)
         run: cargo llvm-cov --locked --features expose-internals --lcov --output-path lcov.info
       - name: Gate on coverage floor
@@ -54,7 +54,7 @@ jobs:
             --compare-branch="origin/$BASE_REF" \
             --fail-under=95 \
             --show-uncovered
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: coverage-lcov
           path: lcov.info
