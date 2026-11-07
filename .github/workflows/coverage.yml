@@ -28,7 +28,7 @@ jobs:
         run: |
           rustc -O --edition 2021 .github/scripts/ci-signal.rs -o /tmp/ci-signal
           /tmp/ci-signal coverage running "${{ github.sha }}"
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c  # master
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f  # master
         with:
           toolchain: stable
           components: llvm-tools-preview
