@@ -1,0 +1,77 @@
+name: Dependabot auto-merge
+
+# Turns on GitHub auto-merge for Dependabot PRs whose dependency group is in
+# AUTO_MERGE_GROUPS and whose largest bump is patch or minor. This only flips
+# the switch: the merge itself waits on the main ruleset's required status
+# checks, so CI stays the gate.
+#
+# Everything else stays open for review: majors, ungrouped PRs (the
+# secret-handling crates and release-path actions that dependabot.yml splits
+# into PRs of their own), security updates, and any bump where the package's
+# maintainers changed.
+#
+# Runs on pull_request, not pull_request_target: Dependabot PRs get a token
+# with the permissions declared below, and no step checks out or runs PR code.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions: {}
+
+# Dependabot rebases push new commits; only the latest needs the switch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  enable:
+    name: Enable auto-merge
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write  # `gh pr merge --auto` merges into main
+      pull-requests: write  # and sets auto-merge on the PR
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98  # v3.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable auto-merge for compatible group bumps
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GROUP: ${{ steps.meta.outputs.dependency-group }}
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          MAINTAINER_CHANGES: ${{ steps.meta.outputs.maintainer-changes }}
+          # Group names from dependabot.yml.
+          AUTO_MERGE_GROUPS: cargo-compatible actions
+        run: |
+          set -euo pipefail
+          hold() { echo "::notice::Left for review: $1"; exit 0; }
+
+          [ -n "$GROUP" ] || hold "not a grouped update"
+          case " $AUTO_MERGE_GROUPS " in
+            *" $GROUP "*) ;;
+            *) hold "group '$GROUP' is not in AUTO_MERGE_GROUPS" ;;
+          esac
+          case "$UPDATE_TYPE" in
+            version-update:semver-patch | version-update:semver-minor) ;;
+            *) hold "update type '${UPDATE_TYPE:-unknown}'" ;;
+          esac
+          [ "$MAINTAINER_CHANGES" != "true" ] || hold "a package's maintainers changed"
+
+          # With no required checks on the base branch, --auto merges at once.
+          required=$(gh api "repos/$REPO/rules/branches/$BASE" \
+            --jq '[.[] | select(.type == "required_status_checks")] | length')
+          if [ "$required" -eq 0 ]; then
+            echo "::error::$BASE has no required status checks; not enabling auto-merge"
+            exit 1
+          fi
+
+          gh pr merge --auto --squash "$PR_URL"

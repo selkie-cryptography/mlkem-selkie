@@ -13,8 +13,9 @@ updates:
     # Actions supports only default-days.
     cooldown:
       default-days: 7
-    # One PR for most action bumps. Actions that run in release.yml get one
-    # PR each.
+    # One PR for most action bumps, auto-merged by dependabot-auto-merge.yml
+    # once CI passes. Actions that run in release.yml get one PR each, for
+    # review.
     groups:
       actions:
         patterns: ["*"]
@@ -39,8 +40,8 @@ updates:
       # The dev-only rand crates move together, majors included.
       rand:
         patterns: ["rand", "rand_core", "rand_chacha"]
-      # Compatible bumps in one PR. The library crates that handle secrets
-      # get one PR each for review.
+      # Compatible bumps in one PR, auto-merged once CI passes. The library
+      # crates that handle secrets get one PR each for review.
       cargo-compatible:
         update-types:
           - "minor"
